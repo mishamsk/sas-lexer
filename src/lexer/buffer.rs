@@ -158,6 +158,12 @@ impl TokenizedBuffer<'_> {
         let token_info = self.token_infos[tidx];
         let line_info = self.line_infos[token_info.line.0 as usize];
 
+        if cfg!(debug_assertions) {
+            println!(
+                "Token start: {}. Line start: {}.",
+                token_info.start, line_info.start
+            );
+        }
         token_info.start - line_info.start
     }
 
