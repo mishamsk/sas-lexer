@@ -87,14 +87,36 @@ impl TokenizedBuffer<'_> {
         start: u32,
         line: LineIdx,
     ) -> TokenIdx {
+        // Check that the token start is within the source string
         debug_assert!(
             start as usize <= self.source.len(),
             "Token start out of bounds"
         );
+
+        // Check that the token start is more or equal to the start of the previous token
+        if cfg!(debug_assertions) {
+            if let Some(last_token) = self.token_infos.last() {
+                debug_assert!(
+                    start >= last_token.start,
+                    "Token start before previous token start"
+                );
+            } else {
+                debug_assert!(start == 0, "First token start not at 0");
+            }
+        }
+
+        // Check that the line index is within the line_infos vector
         debug_assert!(
             line.0 as usize <= self.line_infos.len(),
             "Line index out of bounds"
         );
+
+        // Check that the token start is greater or equal than the line start
+        debug_assert!(
+            start >= self.line_infos[line.0 as usize].start,
+            "Token start before line start"
+        );
+
         self.token_infos.push(TokenInfo {
             channel,
             token_type,
@@ -145,7 +167,11 @@ impl TokenizedBuffer<'_> {
         // the number of newlines in the token text
         let tok_text = self.get_token_text(token);
 
-        let line_count = tok_text.unwrap_or("").matches('\n').count() as u32;
+        let line_count = if let Some(text) = tok_text {
+            text.matches('\n').count() as u32
+        } else {
+            0
+        };
 
         self.token_infos[tidx].line.0 + 1 + line_count
     }

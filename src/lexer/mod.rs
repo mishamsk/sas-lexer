@@ -17,21 +17,19 @@ pub fn lex(source: &str) -> buffer::TokenizedBuffer {
     let token_type = token_type::TokenType::BaseCode;
 
     while !cursor.is_eof() {
-        let mut start = chars_total - cursor.text_len();
+        let start = chars_total - cursor.text_len();
 
         // FIXME: newline handling is not correct
         match cursor.peek() {
             '\n' => {
+                buffer.add_token(channel, token_type, start, line);
                 line = buffer.add_line(start + 1);
-                // skip over newline for now
-                cursor.advance();
-                start = start + 1;
             }
-            _ => {}
+            _ => {
+                buffer.add_token(channel, token_type, start, line);
+            }
         }
         cursor.advance();
-
-        buffer.add_token(channel, token_type, start, line);
     }
 
     buffer

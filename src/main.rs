@@ -26,8 +26,8 @@ fn main() -> io::Result<()> {
             let tokens: Vec<TokenIdx> = (0..tok_buffer.token_count() - 1)
                 .map(|idx| TokenIdx(idx))
                 .collect();
-            print_tokens(tokens, &tok_buffer);
-            println!("Done!");
+            // print_tokens(tokens, &tok_buffer);
+            println!("Done! Found {} tokens", tokens.len());
         } else {
             eprintln!("Failed to read file: {}", file_path);
         }
