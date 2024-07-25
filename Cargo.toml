@@ -5,6 +5,8 @@ edition = "2021"
 
 [dependencies]
 clap = "4.5.10"
+signal-hook = "0.3.17"
+strum = { version = "0.26.3", features = ["derive", "strum_macros"] }
 
 [dev-dependencies]
 clippy = "0.0.302"
