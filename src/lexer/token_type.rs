@@ -2,19 +2,25 @@ use strum::{Display, EnumIter};
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, EnumIter, Display)]
 pub(crate) enum TokenType {
+    ERROR,
     EOF,
+    WS,
+    TermQuote, // *'; and *" ";
     AMP,
     PERCENT,
     BaseCode,
 }
 
-impl From<TokenType> for u8 {
+impl From<TokenType> for i16 {
     fn from(variant: TokenType) -> Self {
         match variant {
+            TokenType::ERROR => -1,
             TokenType::EOF => 0,
-            TokenType::AMP => 1,
-            TokenType::PERCENT => 2,
-            TokenType::BaseCode => 3,
+            TokenType::WS => 1,
+            TokenType::TermQuote => 2,
+            TokenType::AMP => 10,
+            TokenType::PERCENT => 11,
+            TokenType::BaseCode => 12,
         }
     }
 }
@@ -27,7 +33,7 @@ mod tests {
     #[test]
     fn token_type_values_are_unique() {
         let variants = TokenType::iter();
-        let mut values = variants.map(u8::from).collect::<Vec<_>>();
+        let mut values = variants.map(i16::from).collect::<Vec<_>>();
         values.sort_unstable();
         values.dedup();
 

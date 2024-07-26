@@ -24,7 +24,7 @@ fn main() -> io::Result<()> {
             println!("Lexing file: {}", file_path);
             let tok_buffer = lexer::lex(contents.as_str());
             let tokens: Vec<TokenIdx> = (0..tok_buffer.token_count() - 1)
-                .map(|idx| TokenIdx(idx))
+                .map(TokenIdx::from)
                 .collect();
             // print_tokens(tokens, &tok_buffer);
             println!("Done! Found {} tokens", tokens.len());
@@ -41,7 +41,7 @@ fn main() -> io::Result<()> {
                     println!("Lexing from stdin...");
                     let tok_buffer = lexer::lex(buffer.as_str());
                     let tokens: Vec<TokenIdx> = (0..tok_buffer.token_count() - 1)
-                        .map(|idx| TokenIdx(idx))
+                        .map(TokenIdx::from)
                         .collect();
                     print_tokens(tokens, &tok_buffer);
                     println!("Done!");

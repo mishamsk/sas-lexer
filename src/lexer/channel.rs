@@ -7,7 +7,7 @@ pub(crate) enum TokenChannel {
     #[strum(serialize = "<C>")]
     COMMENT,
     #[strum(serialize = "<H>")]
-    HIDDEN, // whitespace
+    HIDDEN, // whitespace and other things to skip
 }
 
 impl Default for TokenChannel {

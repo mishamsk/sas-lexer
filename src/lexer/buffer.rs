@@ -5,7 +5,13 @@ use crate::lexer::token_type;
 
 /// A token index, used get actual token data via the tokenized buffer.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub struct TokenIdx(pub u32);
+pub struct TokenIdx(u32);
+
+impl From<u32> for TokenIdx {
+    fn from(val: u32) -> Self {
+        TokenIdx(val)
+    }
+}
 
 impl fmt::Display for TokenIdx {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -16,6 +22,19 @@ impl fmt::Display for TokenIdx {
 /// A line index in the tokenized buffer.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub(crate) struct LineIdx(u32);
+
+impl From<u32> for LineIdx {
+    fn from(val: u32) -> Self {
+        LineIdx(val)
+    }
+}
+
+/// Enum representing varios types of extra data associated with a token.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub(crate) enum Payload {
+    ErrorIdx(u32),
+    None,
+}
 
 /// A struct to hold information about the lines in the tokenized buffer.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -36,6 +55,9 @@ struct TokenInfo {
     // Starting line of the token, zero-based
     // Also an index of the LineInfo in the TokenizedBuffer line_infos vector
     line: LineIdx,
+
+    // Extra data associated with the token
+    payload: Payload,
 }
 
 const MIN_CAPACITY: usize = 4;
@@ -47,11 +69,19 @@ pub(crate) struct TokenizedBuffer<'a> {
     source: &'a str,
     line_infos: Vec<LineInfo>,
     token_infos: Vec<TokenInfo>,
+    /// Store error strings to which error tokens can point
+    error_strings: Vec<String>,
 }
 
 impl TokenizedBuffer<'_> {
     pub(crate) fn new(source: &str, char_len: Option<usize>) -> TokenizedBuffer {
         match char_len {
+            Some(0) | None => TokenizedBuffer {
+                source,
+                line_infos: Vec::new(),
+                token_infos: Vec::new(),
+                error_strings: Vec::new(),
+            },
             Some(len) => TokenizedBuffer {
                 source,
                 line_infos: Vec::with_capacity(std::cmp::max(
@@ -62,11 +92,7 @@ impl TokenizedBuffer<'_> {
                     len / TOKEN_INFO_DIVISOR,
                     MIN_CAPACITY,
                 )),
-            },
-            None => TokenizedBuffer {
-                source,
-                line_infos: Vec::new(),
-                token_infos: Vec::new(),
+                error_strings: Vec::new(),
             },
         }
     }
@@ -86,6 +112,7 @@ impl TokenizedBuffer<'_> {
         token_type: token_type::TokenType,
         start: u32,
         line: LineIdx,
+        payload: Payload,
     ) -> TokenIdx {
         // Check that the token start is within the source string
         debug_assert!(
@@ -122,6 +149,7 @@ impl TokenizedBuffer<'_> {
             token_type,
             start,
             line,
+            payload,
         });
         TokenIdx(self.token_infos.len() as u32 - 1)
     }
@@ -184,12 +212,12 @@ impl TokenizedBuffer<'_> {
         let token_info = self.token_infos[tidx];
         let line_info = self.line_infos[token_info.line.0 as usize];
 
-        if cfg!(debug_assertions) {
-            println!(
-                "Token start: {}. Line start: {}.",
-                token_info.start, line_info.start
-            );
-        }
+        // if cfg!(debug_assertions) {
+        //     println!(
+        //         "Token start: {}. Line start: {}.",
+        //         token_info.start, line_info.start
+        //     );
+        // }
         token_info.start - line_info.start
     }
 
@@ -262,6 +290,7 @@ mod tests {
             token_type::TokenType::BaseCode,
             0,
             line1,
+            Payload::None,
         );
         let line2 = buffer.add_line(14);
         let token2 = buffer.add_token(
@@ -269,6 +298,7 @@ mod tests {
             token_type::TokenType::BaseCode,
             15,
             line2,
+            Payload::None,
         );
 
         (buffer, token1, token2)
@@ -333,6 +363,7 @@ mod tests {
             token_type::TokenType::BaseCode,
             0,
             line,
+            Payload::None,
         );
 
         assert_eq!(
@@ -352,6 +383,7 @@ mod tests {
             token_type::TokenType::BaseCode,
             0,
             line,
+            Payload::None,
         );
 
         assert_eq!(
