@@ -5,8 +5,14 @@ pub enum TokenType {
     ERROR,
     EOF,
     WS,
-    TermQuote,          // *'; and *" ";
-    SingleQuotedString, // 'string'
+    TermQuote,                     // *'; and *" ";
+    SingleQuotedString,            // 'string'
+    SingleQuotedBitTestingLiteral, // 'stuff'b
+    SingleQuotedDateLiteral,       // 'stuff'd
+    SingleQuotedDateTimeLiteral,   // 'stuff'dt
+    SingleQuotedNameLiteral,       // 'stuff'n
+    SingleQuotedTimeLiteral,       // 'stuff't
+    SingleQuotedHexStringLiteral,  // 'stuff'x
     AMP,
     PERCENT,
     BaseCode,
@@ -20,6 +26,12 @@ impl From<TokenType> for i16 {
             TokenType::WS => 1,
             TokenType::TermQuote => 2,
             TokenType::SingleQuotedString => 3,
+            TokenType::SingleQuotedBitTestingLiteral => 4,
+            TokenType::SingleQuotedDateLiteral => 5,
+            TokenType::SingleQuotedDateTimeLiteral => 6,
+            TokenType::SingleQuotedNameLiteral => 7,
+            TokenType::SingleQuotedTimeLiteral => 8,
+            TokenType::SingleQuotedHexStringLiteral => 9,
             TokenType::AMP => 10,
             TokenType::PERCENT => 11,
             TokenType::BaseCode => 12,

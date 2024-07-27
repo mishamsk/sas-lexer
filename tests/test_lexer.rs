@@ -138,3 +138,14 @@ fn test_single_quoted_string(#[case] contents: &str) {
         Payload::None,
     );
 }
+
+#[rstest]
+#[case::bit_testing("'1'b", TokenType::SingleQuotedBitTestingLiteral)]
+#[case::bit_testing("'4may2022'd", TokenType::SingleQuotedDateLiteral)]
+#[case::bit_testing("'01may2021:12:30'dt", TokenType::SingleQuotedDateTimeLiteral)]
+#[case::bit_testing("'unicode 🙏 col'n", TokenType::SingleQuotedNameLiteral)]
+#[case::bit_testing("'00:42't", TokenType::SingleQuotedTimeLiteral)]
+#[case::bit_testing("'FF'x", TokenType::SingleQuotedHexStringLiteral)]
+fn test_single_quoted_literals(#[case] contents: &str, #[case] token_type: TokenType) {
+    check_single_lexeme(contents, token_type, TokenChannel::DEFAULT, Payload::None);
+}

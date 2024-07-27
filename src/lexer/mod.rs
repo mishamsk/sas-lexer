@@ -173,7 +173,30 @@ impl<'src> Lexer<'src> {
             }
         }
 
-        self.add_token(TokenChannel::DEFAULT, TokenType::SingleQuotedString);
+        // Now check if this is a single quoted string or one of the literals
+        let tok_type = match self.cursor.peek() {
+            'b' => TokenType::SingleQuotedBitTestingLiteral,
+            'd' => {
+                if self.cursor.peek_next() == 't' {
+                    self.cursor.advance();
+
+                    TokenType::SingleQuotedDateTimeLiteral
+                } else {
+                    TokenType::SingleQuotedDateLiteral
+                }
+            }
+            'n' => TokenType::SingleQuotedNameLiteral,
+            't' => TokenType::SingleQuotedTimeLiteral,
+            'x' => TokenType::SingleQuotedHexStringLiteral,
+            _ => TokenType::SingleQuotedString,
+        };
+
+        // If we found a literal, advance the cursor
+        if tok_type != TokenType::SingleQuotedString {
+            self.cursor.advance();
+        }
+
+        self.add_token(TokenChannel::DEFAULT, tok_type)
     }
 }
 
