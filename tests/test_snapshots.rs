@@ -3,7 +3,7 @@ mod util;
 
 use insta::assert_yaml_snapshot;
 use rstest::rstest;
-use sas_lexer::{lex, MaterializedToken};
+use sas_lexer::{lex, print::print_token};
 use std::{fs, path::PathBuf};
 
 #[rstest]
@@ -21,9 +21,9 @@ fn test_files(#[files("tests/samples/**/*.sas")] path: PathBuf) {
 
     let contents = fs::read_to_string(&path).unwrap();
     let tok_buffer = lex(contents.as_str());
-    let tokens: Vec<MaterializedToken> = tok_buffer
+    let tokens: Vec<String> = tok_buffer
         .into_iter()
-        .map(|tidx| tok_buffer.materialize_token(tidx))
+        .map(|tidx| print_token(tidx, &tok_buffer))
         .collect();
 
     assert_yaml_snapshot!(tokens);

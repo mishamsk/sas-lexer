@@ -11,20 +11,13 @@ pub fn print_token(token: TokenIdx, buffer: &TokenizedBuffer) -> String {
     let token_text = buffer.get_token_text(token).unwrap_or("<no text>");
     let token_type = buffer.get_token_type(token);
     let token_channel = buffer.get_token_channel(token);
+    let payload = buffer.get_token_payload(token);
 
     // Constructing the string representation of the token
     let token_repr = format!(
-        "[@{},{}:{}={:?},<{}>,L{}:C{}-L{}:C{},chl={}]",
-        token,
-        token_start,
-        token_end,
-        token_text,
-        token_type,
-        start_line,
-        start_column,
-        end_line,
-        end_column,
-        token_channel
+        "[@{token},{token_start}:{token_end}={token_text:?},<{token_type}>,\
+        L{start_line}:C{start_column}-L{end_line}:C{end_column},chl={token_channel},\
+        pl={payload:?}]"
     );
 
     token_repr

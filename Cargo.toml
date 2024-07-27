@@ -6,9 +6,9 @@ edition = "2021"
 [dependencies]
 clap = "4.5.10"
 strum = { version = "0.26.3", features = ["derive", "strum_macros"] }
-serde = { version = "1.0.204", features = ["derive"] }
 
 [dev-dependencies]
 clippy = "0.0.302"
 insta = { version = "1.39.0", features = ["yaml"] }
 rstest = "0.21.0"
+serde = { version = "1.0.204", features = ["derive"] }

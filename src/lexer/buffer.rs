@@ -1,33 +1,16 @@
 use std::fmt;
 
-use serde::Serialize;
-
 use crate::lexer::channel;
 use crate::lexer::token_type;
 
 /// A token index, used get actual token data via the tokenized buffer.
-#[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct TokenIdx(u32);
 
 impl From<u32> for TokenIdx {
     fn from(val: u32) -> Self {
         TokenIdx(val)
     }
-}
-
-#[derive(Debug, Serialize)]
-pub struct MaterializedToken {
-    token_idx: TokenIdx,
-    token_start: u32,
-    token_end: u32,
-    token_type: token_type::TokenType,
-    start_line: u32,
-    start_column: u32,
-    end_line: u32,
-    end_column: u32,
-    token_channel: channel::TokenChannel,
-    token_text: String,
-    payload: Payload,
 }
 
 impl fmt::Display for TokenIdx {
@@ -47,7 +30,7 @@ impl From<u32> for LineIdx {
 }
 
 /// Enum representing varios types of extra data associated with a token.
-#[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub(crate) enum Payload {
     None,
 }
@@ -276,33 +259,6 @@ impl TokenizedBuffer<'_> {
 
         debug_assert!(tidx < self.token_infos.len(), "Token index out of bounds");
         self.token_infos[tidx].payload
-    }
-
-    pub fn materialize_token(&self, token: TokenIdx) -> MaterializedToken {
-        let token_start = self.get_token_start(token);
-        let token_end = self.get_token_end(token);
-        let start_line = self.get_token_start_line(token);
-        let end_line = self.get_token_end_line(token);
-        let start_column = self.get_token_start_column(token);
-        let end_column = self.get_token_end_column(token);
-        let token_type = self.get_token_type(token);
-        let token_channel = self.get_token_channel(token);
-        let token_text = self.get_token_text(token).unwrap_or_default();
-        let payload = self.get_token_payload(token);
-
-        MaterializedToken {
-            token_idx: token,
-            token_start,
-            token_end,
-            token_type,
-            start_line,
-            start_column,
-            end_line,
-            end_column,
-            token_channel,
-            token_text: token_text.to_string(),
-            payload: payload,
-        }
     }
 }
 
