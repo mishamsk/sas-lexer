@@ -1,5 +1,5 @@
 ---
-source: tests/test_snapshots.rs
+source: tests/test_sample_files.rs
 expression: tokens
 ---
 - "[@0,0:1=\"&\",<BaseCode>,L1:C0-L1:C1,chl=<D>,pl=None]"
