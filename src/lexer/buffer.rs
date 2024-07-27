@@ -31,7 +31,7 @@ impl From<u32> for LineIdx {
 
 /// Enum representing varios types of extra data associated with a token.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub(crate) enum Payload {
+pub enum Payload {
     None,
 }
 
@@ -71,7 +71,7 @@ pub struct TokenizedBuffer<'a> {
 }
 
 impl TokenizedBuffer<'_> {
-    pub(crate) fn new(source: &str, char_len: Option<usize>) -> TokenizedBuffer {
+    pub(super) fn new(source: &str, char_len: Option<usize>) -> TokenizedBuffer {
         match char_len {
             Some(0) | None => TokenizedBuffer {
                 source,
@@ -92,7 +92,7 @@ impl TokenizedBuffer<'_> {
         }
     }
 
-    pub(crate) fn add_line(&mut self, start: u32) -> LineIdx {
+    pub(super) fn add_line(&mut self, start: u32) -> LineIdx {
         debug_assert!(
             (start as usize) <= self.source.len(),
             "Line start out of bounds"
@@ -101,7 +101,7 @@ impl TokenizedBuffer<'_> {
         LineIdx(self.line_infos.len() as u32 - 1)
     }
 
-    pub(crate) fn add_token(
+    pub(super) fn add_token(
         &mut self,
         channel: channel::TokenChannel,
         token_type: token_type::TokenType,
@@ -149,18 +149,26 @@ impl TokenizedBuffer<'_> {
         TokenIdx(self.token_infos.len() as u32 - 1)
     }
 
-    pub(crate) fn token_count(&self) -> u32 {
+    pub fn line_count(&self) -> u32 {
+        self.line_infos.len() as u32
+    }
+
+    pub fn token_count(&self) -> u32 {
         self.token_infos.len() as u32
     }
 
-    pub(crate) fn get_token_start(&self, token: TokenIdx) -> u32 {
+    /// Returns byte offset of the token in the source string slice.
+    pub fn get_token_start(&self, token: TokenIdx) -> u32 {
         let tidx = token.0 as usize;
 
         debug_assert!(tidx < self.token_infos.len(), "Token index out of bounds");
         self.token_infos[tidx].start
     }
 
-    pub(crate) fn get_token_end(&self, token: TokenIdx) -> u32 {
+    /// Returns byte offset right after the token in the source string slice.
+    /// This is the same as the start of the next token or EOF.
+    /// Note that EOF offset is 1 more than the mximum valid index in the source string.
+    pub fn get_token_end(&self, token: TokenIdx) -> u32 {
         let tidx = token.0 as usize;
 
         debug_assert!(tidx < self.token_infos.len(), "Token index out of bounds");
@@ -174,14 +182,16 @@ impl TokenizedBuffer<'_> {
         end as u32
     }
 
-    pub(crate) fn get_token_start_line(&self, token: TokenIdx) -> u32 {
+    /// Returns line number of the token start, one-based.
+    pub fn get_token_start_line(&self, token: TokenIdx) -> u32 {
         let tidx = token.0 as usize;
 
         debug_assert!(tidx < self.token_infos.len(), "Token index out of bounds");
         self.token_infos[tidx].line.0 + 1
     }
 
-    pub(crate) fn get_token_end_line(&self, token: TokenIdx) -> u32 {
+    /// Returns line number of the token end, one-based.
+    pub fn get_token_end_line(&self, token: TokenIdx) -> u32 {
         let tidx = token.0 as usize;
 
         debug_assert!(tidx < self.token_infos.len(), "Token index out of bounds");
@@ -191,7 +201,7 @@ impl TokenizedBuffer<'_> {
         let tok_text = self.get_token_text(token);
 
         let line_count = if let Some(text) = tok_text {
-            text.matches('\n').count() as u32
+            (text.lines().count() - 1) as u32
         } else {
             0
         };
@@ -199,7 +209,8 @@ impl TokenizedBuffer<'_> {
         self.token_infos[tidx].line.0 + 1 + line_count
     }
 
-    pub(crate) fn get_token_start_column(&self, token: TokenIdx) -> u32 {
+    /// Returns column number of the token start, zero-based.
+    pub fn get_token_start_column(&self, token: TokenIdx) -> u32 {
         let tidx = token.0 as usize;
 
         debug_assert!(tidx < self.token_infos.len(), "Token index out of bounds");
@@ -210,7 +221,8 @@ impl TokenizedBuffer<'_> {
         token_info.start - line_info.start
     }
 
-    pub(crate) fn get_token_end_column(&self, token: TokenIdx) -> u32 {
+    /// Returns column number of the token end, zero-based.
+    pub fn get_token_end_column(&self, token: TokenIdx) -> u32 {
         let tidx = token.0 as usize;
 
         debug_assert!(tidx < self.token_infos.len(), "Token index out of bounds");
@@ -221,21 +233,24 @@ impl TokenizedBuffer<'_> {
         token_end - token_end_line_info.start
     }
 
-    pub(crate) fn get_token_type(&self, token: TokenIdx) -> token_type::TokenType {
+    /// Returns the token type
+    pub fn get_token_type(&self, token: TokenIdx) -> token_type::TokenType {
         let tidx = token.0 as usize;
 
         debug_assert!(tidx < self.token_infos.len(), "Token index out of bounds");
         self.token_infos[tidx].token_type
     }
 
-    pub(crate) fn get_token_channel(&self, token: TokenIdx) -> channel::TokenChannel {
+    /// Returns the token channel
+    pub fn get_token_channel(&self, token: TokenIdx) -> channel::TokenChannel {
         let tidx = token.0 as usize;
 
         debug_assert!(tidx < self.token_infos.len(), "Token index out of bounds");
         self.token_infos[tidx].channel
     }
 
-    pub(crate) fn get_token_text(&self, token: TokenIdx) -> Option<&str> {
+    /// Retruns the text of the token.
+    pub fn get_token_text(&self, token: TokenIdx) -> Option<&str> {
         let tidx = token.0 as usize;
 
         debug_assert!(tidx < self.token_infos.len(), "Token index out of bounds");
@@ -254,7 +269,8 @@ impl TokenizedBuffer<'_> {
         Some(&self.source[start..end])
     }
 
-    pub(crate) fn get_token_payload(&self, token: TokenIdx) -> Payload {
+    /// Returns the payload of the token.
+    pub fn get_token_payload(&self, token: TokenIdx) -> Payload {
         let tidx = token.0 as usize;
 
         debug_assert!(tidx < self.token_infos.len(), "Token index out of bounds");

@@ -6,6 +6,10 @@ use std::str::Chars;
 pub struct Cursor<'a> {
     /// Iterator over chars. Slightly faster than a &str.
     chars: Chars<'a>,
+
+    /// Stores the previous char for debug assertions
+    #[cfg(debug_assertions)]
+    prev_char: char,
 }
 
 pub(super) const EOF_CHAR: char = '\0';
@@ -14,6 +18,8 @@ impl<'a> Cursor<'a> {
     pub fn new(input: &'a str) -> Cursor<'a> {
         Cursor {
             chars: input.chars(),
+            #[cfg(debug_assertions)]
+            prev_char: EOF_CHAR,
         }
     }
 
@@ -47,7 +53,18 @@ impl<'a> Cursor<'a> {
     pub(super) fn advance(&mut self) -> Option<char> {
         let c = self.chars.next()?;
 
+        #[cfg(debug_assertions)]
+        {
+            self.prev_char = c;
+        }
+
         Some(c)
+    }
+
+    /// Returns the previous character. Debug only
+    #[cfg(debug_assertions)]
+    pub(super) const fn prev_char(&self) -> char {
+        self.prev_char
     }
 
     /// Returns the length of the remaining text.

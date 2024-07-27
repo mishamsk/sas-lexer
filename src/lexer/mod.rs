@@ -1,8 +1,8 @@
 pub(crate) mod buffer;
-mod channel;
+pub(crate) mod channel;
 mod cursor;
 pub mod print;
-mod token_type;
+pub(crate) mod token_type;
 
 use buffer::{LineIdx, Payload, TokenizedBuffer};
 use channel::TokenChannel;
@@ -18,8 +18,8 @@ struct Lexer<'src> {
     cursor: cursor::Cursor<'src>,
     /// Start byte offset of the token being lexed
     cur_token_start: u32,
-    /// Current line index
-    cur_line: LineIdx,
+    /// Start line index of the token being lexed
+    cur_token_line: LineIdx,
 }
 
 impl<'src> Lexer<'src> {
@@ -36,7 +36,7 @@ impl<'src> Lexer<'src> {
             buffer,
             cursor,
             cur_token_start: 0,
-            cur_line,
+            cur_token_line: cur_line,
         }
     }
 
@@ -45,9 +45,14 @@ impl<'src> Lexer<'src> {
         self.source_len - self.cursor.text_len()
     }
 
-    fn add_line(&mut self, start: u32) -> LineIdx {
-        self.cur_line = self.buffer.add_line(start);
-        self.cur_line
+    #[inline]
+    fn add_line(&mut self) {
+        self.buffer.add_line(self.cur_byte_offset());
+    }
+
+    fn start_token(&mut self) {
+        self.cur_token_start = self.cur_byte_offset();
+        self.cur_token_line = (self.buffer.line_count() - 1).into();
     }
 
     fn add_token(&mut self, channel: TokenChannel, token_type: TokenType) {
@@ -55,7 +60,7 @@ impl<'src> Lexer<'src> {
             channel,
             token_type,
             self.cur_token_start,
-            self.cur_line,
+            self.cur_token_line,
             Payload::None,
         );
     }
@@ -71,8 +76,9 @@ impl<'src> Lexer<'src> {
             );
         }
 
+        // If the source is empty, add EOF and return
         if self.source_len == 0 {
-            _add_eof(&mut self.buffer, self.source_len, self.cur_line);
+            _add_eof(&mut self.buffer, self.source_len, self.cur_token_line);
             return self.buffer;
         }
 
@@ -86,40 +92,88 @@ impl<'src> Lexer<'src> {
             self.lex_token();
         }
 
-        _add_eof(&mut self.buffer, self.source_len, self.cur_line);
+        _add_eof(&mut self.buffer, self.source_len, self.cur_token_line);
 
         self.buffer
     }
 
     fn lex_token(&mut self) {
-        self.cur_token_start = self.cur_byte_offset();
+        self.start_token();
 
-        match self.cursor.advance() {
-            Some(c) => {
-                if c.is_ascii() {
-                    match c {
-                        '\n' => {
-                            self.add_token(TokenChannel::HIDDEN, TokenType::WS);
-                            self.add_line(self.cur_byte_offset());
+        let c = self.cursor.peek();
+
+        if c.is_whitespace() {
+            self.lex_ws();
+            return;
+        }
+
+        if c.is_ascii() {
+            match c {
+                '\'' => self.lex_single_quoted_str(),
+                '*' => {
+                    self.cursor.advance();
+                    match (self.cursor.peek(), self.cursor.peek_next()) {
+                        ('\'', ';') | ('"', ';') => {
+                            self.cursor.advance();
+                            self.cursor.advance();
+                            self.add_token(TokenChannel::HIDDEN, TokenType::TermQuote);
                         }
-                        '*' => match (self.cursor.peek(), self.cursor.peek_next()) {
-                            ('\'', ';') | ('"', ';') => {
-                                self.cursor.advance();
-                                self.cursor.advance();
-                                self.add_token(TokenChannel::HIDDEN, TokenType::TermQuote);
-                            }
-                            _ => {
-                                self.add_token(TokenChannel::DEFAULT, TokenType::BaseCode);
-                            }
-                        },
                         _ => {
                             self.add_token(TokenChannel::DEFAULT, TokenType::BaseCode);
                         }
                     }
                 }
+                _ => {
+                    self.cursor.advance();
+                    self.add_token(TokenChannel::DEFAULT, TokenType::BaseCode);
+                }
             }
-            None => {}
+        } else {
+            self.cursor.advance();
+            self.add_token(TokenChannel::DEFAULT, TokenType::ERROR);
         }
+    }
+
+    fn lex_ws(&mut self) {
+        debug_assert!(self.cursor.peek().is_whitespace());
+
+        loop {
+            if let Some('\n') = self.cursor.advance() {
+                self.add_line();
+            }
+
+            if !self.cursor.peek().is_whitespace() {
+                break;
+            }
+        }
+        self.add_token(TokenChannel::HIDDEN, TokenType::WS);
+    }
+
+    fn lex_single_quoted_str(&mut self) {
+        debug_assert_eq!(self.cursor.peek(), '\'');
+
+        // Eat the opening single quote
+        self.cursor.advance();
+
+        while let Some(c) = self.cursor.advance() {
+            match c {
+                '\'' => {
+                    if self.cursor.peek() == '\'' {
+                        // escaped single quote
+                        self.cursor.advance();
+                        continue;
+                    }
+
+                    break;
+                }
+                '\n' => {
+                    self.add_line();
+                }
+                _ => {}
+            }
+        }
+
+        self.add_token(TokenChannel::DEFAULT, TokenType::SingleQuotedString);
     }
 }
 

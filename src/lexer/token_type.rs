@@ -1,11 +1,12 @@
 use strum::{Display, EnumIter};
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, EnumIter, Display)]
-pub(crate) enum TokenType {
+pub enum TokenType {
     ERROR,
     EOF,
     WS,
-    TermQuote, // *'; and *" ";
+    TermQuote,          // *'; and *" ";
+    SingleQuotedString, // 'string'
     AMP,
     PERCENT,
     BaseCode,
@@ -18,6 +19,7 @@ impl From<TokenType> for i16 {
             TokenType::EOF => 0,
             TokenType::WS => 1,
             TokenType::TermQuote => 2,
+            TokenType::SingleQuotedString => 3,
             TokenType::AMP => 10,
             TokenType::PERCENT => 11,
             TokenType::BaseCode => 12,
