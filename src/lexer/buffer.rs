@@ -1,16 +1,33 @@
 use std::fmt;
 
+use serde::Serialize;
+
 use crate::lexer::channel;
 use crate::lexer::token_type;
 
 /// A token index, used get actual token data via the tokenized buffer.
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize)]
 pub struct TokenIdx(u32);
 
 impl From<u32> for TokenIdx {
     fn from(val: u32) -> Self {
         TokenIdx(val)
     }
+}
+
+#[derive(Debug, Serialize)]
+pub struct MaterializedToken {
+    token_idx: TokenIdx,
+    token_start: u32,
+    token_end: u32,
+    token_type: token_type::TokenType,
+    start_line: u32,
+    start_column: u32,
+    end_line: u32,
+    end_column: u32,
+    token_channel: channel::TokenChannel,
+    token_text: String,
+    payload: Payload,
 }
 
 impl fmt::Display for TokenIdx {
@@ -30,9 +47,8 @@ impl From<u32> for LineIdx {
 }
 
 /// Enum representing varios types of extra data associated with a token.
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize)]
 pub(crate) enum Payload {
-    ErrorIdx(u32),
     None,
 }
 
@@ -65,12 +81,10 @@ const LINE_INFO_DIVISOR: usize = 120;
 const TOKEN_INFO_DIVISOR: usize = 4;
 
 #[derive(Debug)]
-pub(crate) struct TokenizedBuffer<'a> {
+pub struct TokenizedBuffer<'a> {
     source: &'a str,
     line_infos: Vec<LineInfo>,
     token_infos: Vec<TokenInfo>,
-    /// Store error strings to which error tokens can point
-    error_strings: Vec<String>,
 }
 
 impl TokenizedBuffer<'_> {
@@ -80,7 +94,6 @@ impl TokenizedBuffer<'_> {
                 source,
                 line_infos: Vec::new(),
                 token_infos: Vec::new(),
-                error_strings: Vec::new(),
             },
             Some(len) => TokenizedBuffer {
                 source,
@@ -92,7 +105,6 @@ impl TokenizedBuffer<'_> {
                     len / TOKEN_INFO_DIVISOR,
                     MIN_CAPACITY,
                 )),
-                error_strings: Vec::new(),
             },
         }
     }
@@ -212,12 +224,6 @@ impl TokenizedBuffer<'_> {
         let token_info = self.token_infos[tidx];
         let line_info = self.line_infos[token_info.line.0 as usize];
 
-        // if cfg!(debug_assertions) {
-        //     println!(
-        //         "Token start: {}. Line start: {}.",
-        //         token_info.start, line_info.start
-        //     );
-        // }
         token_info.start - line_info.start
     }
 
@@ -263,6 +269,49 @@ impl TokenizedBuffer<'_> {
         }
 
         Some(&self.source[start..end])
+    }
+
+    pub(crate) fn get_token_payload(&self, token: TokenIdx) -> Payload {
+        let tidx = token.0 as usize;
+
+        debug_assert!(tidx < self.token_infos.len(), "Token index out of bounds");
+        self.token_infos[tidx].payload
+    }
+
+    pub fn materialize_token(&self, token: TokenIdx) -> MaterializedToken {
+        let token_start = self.get_token_start(token);
+        let token_end = self.get_token_end(token);
+        let start_line = self.get_token_start_line(token);
+        let end_line = self.get_token_end_line(token);
+        let start_column = self.get_token_start_column(token);
+        let end_column = self.get_token_end_column(token);
+        let token_type = self.get_token_type(token);
+        let token_channel = self.get_token_channel(token);
+        let token_text = self.get_token_text(token).unwrap_or_default();
+        let payload = self.get_token_payload(token);
+
+        MaterializedToken {
+            token_idx: token,
+            token_start,
+            token_end,
+            token_type,
+            start_line,
+            start_column,
+            end_line,
+            end_column,
+            token_channel,
+            token_text: token_text.to_string(),
+            payload: payload,
+        }
+    }
+}
+
+impl IntoIterator for &TokenizedBuffer<'_> {
+    type Item = TokenIdx;
+    type IntoIter = std::iter::Map<std::ops::Range<u32>, fn(u32) -> TokenIdx>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        (0..self.token_count()).map(TokenIdx::from)
     }
 }
 

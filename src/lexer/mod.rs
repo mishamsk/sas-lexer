@@ -1,10 +1,9 @@
-mod buffer;
+pub(crate) mod buffer;
 mod channel;
 mod cursor;
 pub mod print;
 mod token_type;
 
-pub use buffer::TokenIdx;
 use buffer::{LineIdx, Payload, TokenizedBuffer};
 use channel::TokenChannel;
 use token_type::TokenType;

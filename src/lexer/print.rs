@@ -30,8 +30,11 @@ pub fn print_token(token: TokenIdx, buffer: &TokenizedBuffer) -> String {
     token_repr
 }
 
-pub fn print_tokens(tokens: Vec<TokenIdx>, buffer: &TokenizedBuffer) {
-    for token in tokens.into_iter() {
+pub fn print_tokens<I>(tokens: I, buffer: &TokenizedBuffer)
+where
+    I: IntoIterator<Item = TokenIdx>,
+{
+    for token in tokens {
         println!("{}", print_token(token, buffer));
     }
 }

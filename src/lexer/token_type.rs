@@ -1,6 +1,7 @@
+use serde::Serialize;
 use strum::{Display, EnumIter};
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy, EnumIter, Display)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, EnumIter, Display, Serialize)]
 pub(crate) enum TokenType {
     ERROR,
     EOF,

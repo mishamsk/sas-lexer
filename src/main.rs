@@ -1,10 +1,10 @@
 use clap::{Arg, Command};
-use lexer::print::print_tokens;
-use lexer::TokenIdx;
+use sas_lexer::lex;
+use sas_lexer::print::print_tokens;
+use sas_lexer::TokenIdx;
+
 use std::fs;
 use std::io;
-
-mod lexer;
 
 fn main() -> io::Result<()> {
     let matches = Command::new("SAS Lexer")
@@ -22,10 +22,8 @@ fn main() -> io::Result<()> {
     if let Some(file_path) = matches.get_one::<String>("file") {
         if let Ok(contents) = fs::read_to_string(file_path) {
             println!("Lexing file: {}", file_path);
-            let tok_buffer = lexer::lex(contents.as_str());
-            let tokens: Vec<TokenIdx> = (0..tok_buffer.token_count() - 1)
-                .map(TokenIdx::from)
-                .collect();
+            let tok_buffer = lex(contents.as_str());
+            let tokens: Vec<TokenIdx> = tok_buffer.into_iter().collect();
             // print_tokens(tokens, &tok_buffer);
             println!("Done! Found {} tokens", tokens.len());
         } else {
@@ -39,11 +37,8 @@ fn main() -> io::Result<()> {
             match io::stdin().read_line(&mut buffer) {
                 Ok(0) => {
                     println!("Lexing from stdin...");
-                    let tok_buffer = lexer::lex(buffer.as_str());
-                    let tokens: Vec<TokenIdx> = (0..tok_buffer.token_count() - 1)
-                        .map(TokenIdx::from)
-                        .collect();
-                    print_tokens(tokens, &tok_buffer);
+                    let tok_buffer = lex(buffer.as_str());
+                    print_tokens(tok_buffer.into_iter(), &tok_buffer);
                     println!("Done!");
                     buffer.clear();
                 }

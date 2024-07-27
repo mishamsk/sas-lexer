@@ -1,6 +1,7 @@
+use serde::Serialize;
 use strum::Display;
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy, Display)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Display, Serialize)]
 pub(crate) enum TokenChannel {
     #[strum(serialize = "<D>")]
     DEFAULT,
