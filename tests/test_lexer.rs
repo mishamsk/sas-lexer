@@ -115,6 +115,18 @@ fn check_single_lexeme(
 
 #[rstest]
 #[case::mixed_ws("\n\t \n", TokenType::WS, TokenChannel::HIDDEN, Payload::None)]
+#[case::cstyle_comment_single_line(
+    "/* this is comment */",
+    TokenType::CStyleComment,
+    TokenChannel::COMMENT,
+    Payload::None
+)]
+#[case::cstyle_comment_multi_line(
+    "/* this is 🔥\n comment */",
+    TokenType::CStyleComment,
+    TokenChannel::COMMENT,
+    Payload::None
+)]
 fn test_single_lexemes(
     #[case] contents: &str,
     #[case] token_type: TokenType,

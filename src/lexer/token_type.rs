@@ -16,6 +16,7 @@ pub enum TokenType {
     AMP,
     PERCENT,
     BaseCode,
+    CStyleComment, // /* ... */
 }
 
 impl From<TokenType> for i16 {
@@ -35,6 +36,7 @@ impl From<TokenType> for i16 {
             TokenType::AMP => 10,
             TokenType::PERCENT => 11,
             TokenType::BaseCode => 12,
+            TokenType::CStyleComment => 13,
         }
     }
 }

@@ -110,7 +110,17 @@ impl<'src> Lexer<'src> {
         if c.is_ascii() {
             match c {
                 '\'' => self.lex_single_quoted_str(),
+                '/' => {
+                    if self.cursor.peek_next() == '*' {
+                        self.lex_cstyle_comment();
+                    } else {
+                        // TODO: this is not done
+                        self.cursor.advance();
+                        self.add_token(TokenChannel::DEFAULT, TokenType::BaseCode);
+                    }
+                }
                 '*' => {
+                    // TODO: this is not done
                     self.cursor.advance();
                     match (self.cursor.peek(), self.cursor.peek_next()) {
                         ('\'', ';') | ('"', ';') => {
@@ -147,6 +157,28 @@ impl<'src> Lexer<'src> {
             }
         }
         self.add_token(TokenChannel::HIDDEN, TokenType::WS);
+    }
+
+    fn lex_cstyle_comment(&mut self) {
+        debug_assert_eq!(self.cursor.peek(), '/');
+        debug_assert_eq!(self.cursor.peek_next(), '*');
+
+        // Eat the opening comment
+        self.cursor.advance();
+        self.cursor.advance();
+
+        while let Some(c) = self.cursor.advance() {
+            if c == '*' && self.cursor.peek() == '/' {
+                self.cursor.advance();
+                break;
+            }
+
+            if c == '\n' {
+                self.add_line();
+            }
+        }
+
+        self.add_token(TokenChannel::COMMENT, TokenType::CStyleComment);
     }
 
     fn lex_single_quoted_str(&mut self) {
