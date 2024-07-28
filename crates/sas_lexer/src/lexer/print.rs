@@ -1,8 +1,8 @@
-/// Function to print the token
+/// Functions to print the token
 use crate::lexer::buffer::{Payload, TokenIdx, TokenizedBuffer};
 
 #[must_use]
-pub fn print_token(token: TokenIdx, buffer: &TokenizedBuffer) -> String {
+pub fn to_pretty_string(token: TokenIdx, buffer: &TokenizedBuffer) -> String {
     let start_line = buffer.get_token_start_line(token);
     let end_line = buffer.get_token_end_line(token);
     let start_column = buffer.get_token_start_column(token);
@@ -27,13 +27,4 @@ pub fn print_token(token: TokenIdx, buffer: &TokenizedBuffer) -> String {
     );
 
     token_repr
-}
-
-pub fn print_tokens<I>(tokens: I, buffer: &TokenizedBuffer)
-where
-    I: IntoIterator<Item = TokenIdx>,
-{
-    for token in tokens {
-        println!("{}", print_token(token, buffer));
-    }
 }

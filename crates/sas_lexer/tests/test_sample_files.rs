@@ -3,7 +3,7 @@ mod util;
 
 use insta::assert_yaml_snapshot;
 use rstest::rstest;
-use sas_lexer::{lex, print::print_token};
+use sas_lexer::{lex, print::to_pretty_string};
 use std::{fs, path::PathBuf};
 
 #[rstest]
@@ -20,10 +20,10 @@ fn test_snapshots(#[files("tests/samples/**/*.sas")] path: PathBuf) {
     set_snapshot_suffix!("{}", snap_name_str);
 
     let contents = fs::read_to_string(&path).unwrap();
-    let tok_buffer = lex(contents.as_str());
+    let tok_buffer = lex(contents.as_str()).unwrap();
     let tokens: Vec<String> = tok_buffer
         .into_iter()
-        .map(|tidx| print_token(tidx, &tok_buffer))
+        .map(|tidx| to_pretty_string(tidx, &tok_buffer))
         .collect();
 
     assert_yaml_snapshot!(tokens);
@@ -34,7 +34,7 @@ fn test_snapshots(#[files("tests/samples/**/*.sas")] path: PathBuf) {
 fn test_full_coverage(#[files("tests/samples/**/*.sas")] path: PathBuf) {
     let contents = fs::read_to_string(&path).unwrap();
 
-    let tok_buffer = lex(contents.as_str());
+    let tok_buffer = lex(contents.as_str()).unwrap();
 
     let mut end = 0;
 
@@ -44,7 +44,7 @@ fn test_full_coverage(#[files("tests/samples/**/*.sas")] path: PathBuf) {
             tok_buffer.get_token_start(token),
             end,
             "Token <{}> does not start where the previous token ended",
-            print_token(token, &tok_buffer)
+            to_pretty_string(token, &tok_buffer)
         );
 
         // Set the new end
@@ -54,7 +54,7 @@ fn test_full_coverage(#[files("tests/samples/**/*.sas")] path: PathBuf) {
         assert!(
             end >= tok_buffer.get_token_start(token),
             "Token <{}> has an end before the start",
-            print_token(token, &tok_buffer)
+            to_pretty_string(token, &tok_buffer)
         );
     }
 

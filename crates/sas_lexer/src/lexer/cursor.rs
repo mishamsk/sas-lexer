@@ -111,6 +111,9 @@ impl<'a> Cursor<'a> {
 
     /// Returns the length of the remaining text in bytes.
     /// This is used to calculate the offset of the current token.
+    /// SAFETY: Cursor is only used from the lexer, which guarantees that the
+    /// input length is not more than u32.
+    #[allow(clippy::cast_possible_truncation)]
     pub(super) fn text_len(&self) -> u32 {
         self.chars.as_str().len() as u32
     }
