@@ -16,7 +16,7 @@ const BOM: char = '\u{feff}';
 
 #[derive(Debug)]
 struct Lexer<'src> {
-    source: &'src str,
+    // source: &'src str,
     source_len: u32,
     buffer: TokenizedBuffer<'src>,
     cursor: cursor::Cursor<'src>,
@@ -35,7 +35,7 @@ impl<'src> Lexer<'src> {
         let cur_line = buffer.add_line(0);
 
         Lexer {
-            source,
+            // source,
             source_len: source.len() as u32,
             buffer,
             cursor,
