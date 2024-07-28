@@ -96,7 +96,7 @@ impl TokenizedBuffer<'_> {
     }
 
     pub(super) fn iter(&self) -> std::iter::Map<std::ops::Range<u32>, fn(u32) -> TokenIdx> {
-        (0..self.token_infos.len() as u32).map(TokenIdx::from)
+        (0..self.token_count()).map(TokenIdx::from)
     }
 
     pub(super) fn add_line(&mut self, start: u32) -> LineIdx {
@@ -105,7 +105,7 @@ impl TokenizedBuffer<'_> {
             "Line start out of bounds"
         );
         self.line_infos.push(LineInfo { start });
-        LineIdx(self.line_infos.len() as u32 - 1)
+        LineIdx(self.line_count() - 1)
     }
 
     pub(super) fn add_token(
@@ -153,16 +153,22 @@ impl TokenizedBuffer<'_> {
             line,
             payload,
         });
-        TokenIdx(self.token_infos.len() as u32 - 1)
+        TokenIdx(self.token_count() - 1)
     }
 
+    #[inline]
     #[must_use]
+    #[allow(clippy::cast_possible_truncation)]
     pub fn line_count(&self) -> u32 {
         self.line_infos.len() as u32
     }
 
+    #[inline]
     #[must_use]
+    #[allow(clippy::cast_possible_truncation)]
     pub fn token_count(&self) -> u32 {
+        // theoretically number of tokens may be larger than text size,
+        // which checked to be no more than u32, but this is not possible in practice
         self.token_infos.len() as u32
     }
 
@@ -179,6 +185,7 @@ impl TokenizedBuffer<'_> {
     /// This is the same as the start of the next token or EOF.
     /// Note that EOF offset is 1 more than the mximum valid index in the source string.
     #[must_use]
+    #[allow(clippy::cast_possible_truncation)]
     pub fn get_token_end(&self, token: TokenIdx) -> u32 {
         let tidx = token.0 as usize;
 
@@ -204,6 +211,7 @@ impl TokenizedBuffer<'_> {
 
     /// Returns line number of the token end, one-based.
     #[must_use]
+    #[allow(clippy::cast_possible_truncation)]
     pub fn get_token_end_line(&self, token: TokenIdx) -> u32 {
         let tidx = token.0 as usize;
 

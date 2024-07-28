@@ -1,3 +1,5 @@
+#![allow(clippy::cast_possible_truncation)]
+
 use rstest::rstest;
 
 use sas_lexer::{
@@ -121,8 +123,8 @@ fn check_single_real_token(
     // to compare the end column, we need to calculate the offset from the last line
     // lines iterator doesn't include the newline character, so we need to add 1
     // if the contents ends with a newline
-    let last_line_end_column = contents.lines().last().unwrap().len() as u32
-        + u32::from(contents.ends_with('\n'));
+    let last_line_end_column =
+        contents.lines().last().unwrap().len() as u32 + u32::from(contents.ends_with('\n'));
 
     // compare start and end byte offsets with the length of the contents
     let start_offset = 0;
@@ -154,7 +156,7 @@ fn check_single_lexeme(
     token_channel: TokenChannel,
     payload: Payload,
 ) {
-    let buffer = lex(contents);
+    let buffer = lex(contents).unwrap();
     let tokens: Vec<TokenIdx> = buffer.into_iter().collect();
 
     assert_eq!(
@@ -206,7 +208,7 @@ fn test_single_lexemes(
 #[test]
 fn test_unterminated_cstyle_comment() {
     let contents = "/* unterminated comment*";
-    let buffer = lex(contents);
+    let buffer = lex(contents).unwrap();
     let tokens: Vec<TokenIdx> = buffer.into_iter().collect();
 
     assert_eq!(
@@ -279,7 +281,7 @@ fn test_single_quoted_literals(#[case] contents: &str, #[case] token_type: Token
 #[test]
 fn test_unterminated_string_literal() {
     let contents = "'unterminated string";
-    let buffer = lex(contents);
+    let buffer = lex(contents).unwrap();
     let tokens: Vec<TokenIdx> = buffer.into_iter().collect();
 
     assert_eq!(

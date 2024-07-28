@@ -27,21 +27,25 @@ struct Lexer<'src> {
 }
 
 impl<'src> Lexer<'src> {
-    fn new(source: &str) -> Lexer {
+    fn new(source: &str) -> Result<Lexer, &str> {
+        let Ok(source_len) = u32::try_from(source.len()) else {
+            return Err("Lexing of files larger than 4GB is not supported");
+        };
+
         let cursor = cursor::Cursor::new(source);
         let mut buffer = TokenizedBuffer::new(source, Some(source.len()));
 
         // Add the first line
         let cur_line = buffer.add_line(0);
 
-        Lexer {
+        Ok(Lexer {
             // source,
-            source_len: source.len() as u32,
+            source_len,
             buffer,
             cursor,
             cur_token_start: 0,
             cur_token_line: cur_line,
-        }
+        })
     }
 
     #[inline]
@@ -357,9 +361,27 @@ impl<'src> Lexer<'src> {
     }
 }
 
-#[must_use]
-pub fn lex(source: &str) -> TokenizedBuffer {
-    let lexer = Lexer::new(source);
+/// Lex the source code and return the tokenized buffer
+///
+/// # Arguments
+/// * `source: &str` - The source code to lex
+///
+/// # Returns
+/// * `Result<TokenizedBuffer, &str>` - The tokenized buffer if lexing was successful
+///   or an error message if lexing failed
+///
+/// # Errors
+/// If the source code is larger than 4GB, an error message is returned
+///
+/// # Examples
+/// ```
+/// use sas_lexer::lex;
+/// let source = "let x = 42;";
+/// let result = lex(source);
+/// assert!(result.is_ok());
+/// ```
+pub fn lex(source: &str) -> Result<TokenizedBuffer, &str> {
+    let lexer = Lexer::new(source)?;
 
-    lexer.lex()
+    Ok(lexer.lex())
 }
