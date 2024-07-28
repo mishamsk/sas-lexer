@@ -122,7 +122,7 @@ fn check_single_real_token(
     // lines iterator doesn't include the newline character, so we need to add 1
     // if the contents ends with a newline
     let last_line_end_column = contents.lines().last().unwrap().len() as u32
-        + if contents.ends_with('\n') { 1 } else { 0 };
+        + u32::from(contents.ends_with('\n'));
 
     // compare start and end byte offsets with the length of the contents
     let start_offset = 0;

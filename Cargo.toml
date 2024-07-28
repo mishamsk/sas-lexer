@@ -24,6 +24,8 @@ unreachable_pub = "warn"
 
 [workspace.lints.clippy]
 pedantic = { level = "warn", priority = -2 }
+module_name_repetitions = "allow"
+cast_possible_truncation = "allow"
 # # Allowed pedantic lints
 # char_lit_as_u8 = "allow"
 # collapsible_else_if = "allow"

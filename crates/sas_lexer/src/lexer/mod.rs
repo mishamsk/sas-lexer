@@ -147,7 +147,7 @@ impl<'src> Lexer<'src> {
                     // TODO: this is not done
                     self.cursor.advance();
                     match (self.cursor.peek(), self.cursor.peek_next()) {
-                        ('\'', ';') | ('"', ';') => {
+                        ('\'' | '"', ';') => {
                             self.cursor.advance();
                             self.cursor.advance();
                             self.add_token(TokenChannel::HIDDEN, TokenType::TermQuote);
@@ -192,24 +192,21 @@ impl<'src> Lexer<'src> {
         self.cursor.advance();
 
         loop {
-            match self.cursor.advance() {
-                Some(c) => {
-                    if c == '*' && self.cursor.peek() == '/' {
-                        self.cursor.advance();
-                        break;
-                    }
+            if let Some(c) = self.cursor.advance() {
+                if c == '*' && self.cursor.peek() == '/' {
+                    self.cursor.advance();
+                    break;
+                }
 
-                    if c == '\n' {
-                        self.add_line();
-                    }
+                if c == '\n' {
+                    self.add_line();
                 }
-                None => {
-                    // EOF reached without a closing comment
-                    // Emit an error token and return
-                    self.add_token(TokenChannel::COMMENT, TokenType::CStyleComment);
-                    self.emit_error(LexerError::UnterminatedComment);
-                    return;
-                }
+            } else {
+                // EOF reached without a closing comment
+                // Emit an error token and return
+                self.add_token(TokenChannel::COMMENT, TokenType::CStyleComment);
+                self.emit_error(LexerError::UnterminatedComment);
+                return;
             }
         }
 
@@ -223,31 +220,28 @@ impl<'src> Lexer<'src> {
         self.cursor.advance();
 
         loop {
-            match self.cursor.advance() {
-                Some(c) => {
-                    match c {
-                        '\'' => {
-                            if self.cursor.peek() == '\'' {
-                                // escaped single quote
-                                self.cursor.advance();
-                                continue;
-                            }
+            if let Some(c) = self.cursor.advance() {
+                match c {
+                    '\'' => {
+                        if self.cursor.peek() == '\'' {
+                            // escaped single quote
+                            self.cursor.advance();
+                            continue;
+                        }
 
-                            break;
-                        }
-                        '\n' => {
-                            self.add_line();
-                        }
-                        _ => {}
+                        break;
                     }
+                    '\n' => {
+                        self.add_line();
+                    }
+                    _ => {}
                 }
-                None => {
-                    // EOF reached without a closing single quote
-                    // Emit an error token and return
-                    self.add_token(TokenChannel::DEFAULT, TokenType::SingleQuotedString);
-                    self.emit_error(LexerError::UnterminatedStringLiteral);
-                    return;
-                }
+            } else {
+                // EOF reached without a closing single quote
+                // Emit an error token and return
+                self.add_token(TokenChannel::DEFAULT, TokenType::SingleQuotedString);
+                self.emit_error(LexerError::UnterminatedStringLiteral);
+                return;
             }
         }
 
@@ -274,17 +268,17 @@ impl<'src> Lexer<'src> {
             self.cursor.advance();
         }
 
-        self.add_token(TokenChannel::DEFAULT, tok_type)
+        self.add_token(TokenChannel::DEFAULT, tok_type);
     }
 
     fn lex_macro_var_expr(&mut self) -> bool {
-        debug_assert_eq!(self.cursor.peek(), '&');
-
         #[derive(Clone, Copy)]
         enum State {
             Amp,
             Name,
         }
+
+        debug_assert_eq!(self.cursor.peek(), '&');
 
         // Unfortunately, arbitrary number of lookahead is needed to
         // confirm that this is a macro variable expression
@@ -333,7 +327,7 @@ impl<'src> Lexer<'src> {
                     // so we substract 1 from the skip_bytes
                     let skip_bytes = self.cursor.text_len() as usize
                         - la_view.as_str().len()
-                        - if c == '.' { 0 } else { 1 };
+                        - usize::from(c != '.');
 
                     // SAFETY: we only match ascii characters when we got here, so
                     // this the bytes offset can't hit in the middle of a multi-byte character
@@ -363,6 +357,7 @@ impl<'src> Lexer<'src> {
     }
 }
 
+#[must_use]
 pub fn lex(source: &str) -> TokenizedBuffer {
     let lexer = Lexer::new(source);
 

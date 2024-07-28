@@ -32,16 +32,16 @@ fn main() -> io::Result<()> {
         let file_path_str = file_path.to_str().unwrap_or("<invalid path>");
 
         if let Ok(contents) = fs::read_to_string(file_path) {
-            println!("Lexing file: {}", file_path_str);
+            println!("Lexing file: {file_path_str}");
             let tok_buffer = lex(contents.as_str());
             let tokens: Vec<TokenIdx> = tok_buffer.into_iter().collect();
             println!("Done! Found {} tokens", tokens.len());
 
             if cli.print {
-                print_tokens(tokens.into_iter(), &tok_buffer);
+                print_tokens(tokens, &tok_buffer);
             }
         } else {
-            eprintln!("Failed to read file: {}", file_path_str);
+            eprintln!("Failed to read file: {file_path_str}");
         }
     } else {
         println!("Enter input (Ctrl-D to submit, Ctrl-C to exit):");
@@ -52,7 +52,7 @@ fn main() -> io::Result<()> {
                 Ok(0) => {
                     println!("Lexing from stdin...");
                     let tok_buffer = lex(buffer.as_str());
-                    print_tokens(tok_buffer.into_iter(), &tok_buffer);
+                    print_tokens(&tok_buffer, &tok_buffer);
                     println!("Done!");
                     buffer.clear();
                 }

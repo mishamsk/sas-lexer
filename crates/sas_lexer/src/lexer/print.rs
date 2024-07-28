@@ -1,6 +1,7 @@
 /// Function to print the token
 use crate::lexer::buffer::{Payload, TokenIdx, TokenizedBuffer};
 
+#[must_use]
 pub fn print_token(token: TokenIdx, buffer: &TokenizedBuffer) -> String {
     let start_line = buffer.get_token_start_line(token);
     let end_line = buffer.get_token_end_line(token);
