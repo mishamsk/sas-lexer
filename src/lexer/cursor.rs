@@ -44,6 +44,13 @@ impl<'a> Cursor<'a> {
         iter.next().unwrap_or(EOF_CHAR)
     }
 
+    /// Returns the iterator over the remaining characters.
+    /// Maybe used for moe efficient arbitrary lookahead, by avoiding
+    /// extra clones.
+    pub(super) fn chars(&self) -> Chars<'a> {
+        self.chars.clone()
+    }
+
     /// Checks if there is nothing more to consume.
     pub(super) fn is_eof(&self) -> bool {
         self.chars.as_str().is_empty()
@@ -61,13 +68,48 @@ impl<'a> Cursor<'a> {
         Some(c)
     }
 
+    /// Moves N characters forward.
+    /// Returns the last character moved to.
+    // pub(super) fn advance_by(&mut self, n: usize) -> Option<char> {
+    //     for _ in 0..n - 1 {
+    //         self.chars.next()?;
+    //     }
+    //     self.chars.next()
+    // }
+
+    #[inline]
+    pub(super) fn eat_while(&mut self, mut predicate: impl FnMut(char) -> bool) {
+        // It was tried making optimized version of this for eg. line comments, but
+        // LLVM can inline all of this and compile it down to fast iteration over bytes.
+        while predicate(self.peek()) && !self.is_eof() {
+            self.advance();
+        }
+    }
+
+    /// Skips the next `count` bytes.
+    ///
+    /// ## Panics
+    ///  - If `count` is larger than the remaining bytes in the input stream.
+    ///  - If `count` indexes into a multi-byte character.
+    pub(super) fn skip_bytes(&mut self, count: usize) {
+        #[cfg(debug_assertions)]
+        {
+            self.prev_char = self.chars.as_str()[..count]
+                .chars()
+                .next_back()
+                .unwrap_or('\0');
+        }
+
+        self.chars = self.chars.as_str()[count..].chars();
+    }
+
     /// Returns the previous character. Debug only
     #[cfg(debug_assertions)]
     pub(super) const fn prev_char(&self) -> char {
         self.prev_char
     }
 
-    /// Returns the length of the remaining text.
+    /// Returns the length of the remaining text in bytes.
     /// This is used to calculate the offset of the current token.
     pub(super) fn text_len(&self) -> u32 {
         self.chars.as_str().len() as u32

@@ -1,5 +1,5 @@
 /// Function to print the token
-use crate::lexer::buffer::{TokenIdx, TokenizedBuffer};
+use crate::lexer::buffer::{Payload, TokenIdx, TokenizedBuffer};
 
 pub fn print_token(token: TokenIdx, buffer: &TokenizedBuffer) -> String {
     let start_line = buffer.get_token_start_line(token);
@@ -13,11 +13,16 @@ pub fn print_token(token: TokenIdx, buffer: &TokenizedBuffer) -> String {
     let token_channel = buffer.get_token_channel(token);
     let payload = buffer.get_token_payload(token);
 
+    let payload_str = match payload {
+        Payload::Error(e) => e.to_string(),
+        Payload::None => "<None>".to_string(),
+    };
+
     // Constructing the string representation of the token
     let token_repr = format!(
         "[@{token},{token_start}:{token_end}={token_text:?},<{token_type}>,\
         L{start_line}:C{start_column}-L{end_line}:C{end_column},chl={token_channel},\
-        pl={payload:?}]"
+        pl={payload_str:?}]"
     );
 
     token_repr

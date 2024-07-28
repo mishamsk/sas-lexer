@@ -17,6 +17,7 @@ pub enum TokenType {
     PERCENT,
     BaseCode,
     CStyleComment, // /* ... */
+    MacroVarExpr,  // &&mvar&another. etc.
 }
 
 impl From<TokenType> for i16 {
@@ -37,6 +38,7 @@ impl From<TokenType> for i16 {
             TokenType::PERCENT => 11,
             TokenType::BaseCode => 12,
             TokenType::CStyleComment => 13,
+            TokenType::MacroVarExpr => 14,
         }
     }
 }

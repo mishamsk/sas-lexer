@@ -3,6 +3,8 @@ use std::fmt;
 use crate::lexer::channel;
 use crate::lexer::token_type;
 
+use super::error::LexerError;
+
 /// A token index, used get actual token data via the tokenized buffer.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct TokenIdx(u32);
@@ -33,6 +35,7 @@ impl From<u32> for LineIdx {
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum Payload {
     None,
+    Error(LexerError),
 }
 
 /// A struct to hold information about the lines in the tokenized buffer.
