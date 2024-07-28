@@ -38,7 +38,7 @@ fn test_full_coverage(#[files("tests/samples/**/*.sas")] path: PathBuf) {
 
     let mut end = 0;
 
-    for token in tok_buffer.into_iter() {
+    for token in &tok_buffer {
         // Check that the token starts where the previous token ended
         assert_eq!(
             tok_buffer.get_token_start(token),

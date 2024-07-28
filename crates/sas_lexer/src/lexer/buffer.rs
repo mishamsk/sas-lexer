@@ -95,6 +95,10 @@ impl TokenizedBuffer<'_> {
         }
     }
 
+    pub(super) fn iter(&self) -> std::iter::Map<std::ops::Range<u32>, fn(u32) -> TokenIdx> {
+        (0..self.token_infos.len() as u32).map(TokenIdx::from)
+    }
+
     pub(super) fn add_line(&mut self, start: u32) -> LineIdx {
         debug_assert!(
             (start as usize) <= self.source.len(),
@@ -152,15 +156,18 @@ impl TokenizedBuffer<'_> {
         TokenIdx(self.token_infos.len() as u32 - 1)
     }
 
+    #[must_use]
     pub fn line_count(&self) -> u32 {
         self.line_infos.len() as u32
     }
 
+    #[must_use]
     pub fn token_count(&self) -> u32 {
         self.token_infos.len() as u32
     }
 
     /// Returns byte offset of the token in the source string slice.
+    #[must_use]
     pub fn get_token_start(&self, token: TokenIdx) -> u32 {
         let tidx = token.0 as usize;
 
@@ -171,6 +178,7 @@ impl TokenizedBuffer<'_> {
     /// Returns byte offset right after the token in the source string slice.
     /// This is the same as the start of the next token or EOF.
     /// Note that EOF offset is 1 more than the mximum valid index in the source string.
+    #[must_use]
     pub fn get_token_end(&self, token: TokenIdx) -> u32 {
         let tidx = token.0 as usize;
 
@@ -186,6 +194,7 @@ impl TokenizedBuffer<'_> {
     }
 
     /// Returns line number of the token start, one-based.
+    #[must_use]
     pub fn get_token_start_line(&self, token: TokenIdx) -> u32 {
         let tidx = token.0 as usize;
 
@@ -194,6 +203,7 @@ impl TokenizedBuffer<'_> {
     }
 
     /// Returns line number of the token end, one-based.
+    #[must_use]
     pub fn get_token_end_line(&self, token: TokenIdx) -> u32 {
         let tidx = token.0 as usize;
 
@@ -213,6 +223,7 @@ impl TokenizedBuffer<'_> {
     }
 
     /// Returns column number of the token start, zero-based.
+    #[must_use]
     pub fn get_token_start_column(&self, token: TokenIdx) -> u32 {
         let tidx = token.0 as usize;
 
@@ -225,6 +236,7 @@ impl TokenizedBuffer<'_> {
     }
 
     /// Returns column number of the token end, zero-based.
+    #[must_use]
     pub fn get_token_end_column(&self, token: TokenIdx) -> u32 {
         let tidx = token.0 as usize;
 
@@ -237,6 +249,7 @@ impl TokenizedBuffer<'_> {
     }
 
     /// Returns the token type
+    #[must_use]
     pub fn get_token_type(&self, token: TokenIdx) -> token_type::TokenType {
         let tidx = token.0 as usize;
 
@@ -245,6 +258,7 @@ impl TokenizedBuffer<'_> {
     }
 
     /// Returns the token channel
+    #[must_use]
     pub fn get_token_channel(&self, token: TokenIdx) -> channel::TokenChannel {
         let tidx = token.0 as usize;
 
@@ -253,6 +267,7 @@ impl TokenizedBuffer<'_> {
     }
 
     /// Retruns the text of the token.
+    #[must_use]
     pub fn get_token_text(&self, token: TokenIdx) -> Option<&str> {
         let tidx = token.0 as usize;
 
@@ -273,6 +288,7 @@ impl TokenizedBuffer<'_> {
     }
 
     /// Returns the payload of the token.
+    #[must_use]
     pub fn get_token_payload(&self, token: TokenIdx) -> Payload {
         let tidx = token.0 as usize;
 
@@ -286,7 +302,7 @@ impl IntoIterator for &TokenizedBuffer<'_> {
     type IntoIter = std::iter::Map<std::ops::Range<u32>, fn(u32) -> TokenIdx>;
 
     fn into_iter(self) -> Self::IntoIter {
-        (0..self.token_count()).map(TokenIdx::from)
+        self.iter()
     }
 }
 
