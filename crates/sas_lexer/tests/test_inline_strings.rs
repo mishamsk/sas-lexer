@@ -128,6 +128,20 @@ fn test_unicode_char_offset() {
     );
 }
 
+#[test]
+fn test_column_count_with_bom() {
+    let contents = "\u{FEFF}/* this is comment */";
+    let buffer = lex(contents).unwrap();
+    let token = buffer.into_iter().next().unwrap();
+
+    assert_eq!(
+        buffer.get_token_start_column(token),
+        0,
+        "Expected a start column 0, got {}",
+        buffer.get_token_start_column(token)
+    );
+}
+
 #[rstest]
 #[case::mixed_ws("\n\t \n", TokenType::WS, TokenChannel::HIDDEN, Payload::None)]
 #[case::cstyle_comment_single_line(
