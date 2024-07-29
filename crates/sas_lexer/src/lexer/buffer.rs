@@ -1,23 +1,25 @@
-use std::fmt;
+use std::ops::Range;
 
 use crate::lexer::channel;
 use crate::lexer::token_type;
 
 use super::error::LexerError;
+use super::text::ByteOffset;
+use super::text::CharOffset;
 
-/// A token index, used get actual token data via the tokenized buffer.
+/// A token index, used to get actual token data via the tokenized buffer.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct TokenIdx(u32);
 
-impl From<u32> for TokenIdx {
-    fn from(val: u32) -> Self {
+impl TokenIdx {
+    #[must_use]
+    pub fn new(val: u32) -> Self {
         TokenIdx(val)
     }
-}
 
-impl fmt::Display for TokenIdx {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.0)
+    #[must_use]
+    pub fn get(self) -> u32 {
+        self.0
     }
 }
 
@@ -25,8 +27,8 @@ impl fmt::Display for TokenIdx {
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub(crate) struct LineIdx(u32);
 
-impl From<u32> for LineIdx {
-    fn from(val: u32) -> Self {
+impl LineIdx {
+    pub(crate) fn new(val: u32) -> Self {
         LineIdx(val)
     }
 }
@@ -41,9 +43,15 @@ pub enum Payload {
 /// A struct to hold information about the lines in the tokenized buffer.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 struct LineInfo {
-    // Zero-based byte offset of the line start in the source string slice.
-    // u32 as we only support 4gb files
-    start: u32,
+    /// Zero-based byte offset of the line start in the source string slice.
+    /// u32 as we only support 4gb files
+    byte_offset: ByteOffset,
+
+    /// Zero-based char index of the line start in the source string.
+    /// Char here means a Unicode code point, not graphemes. This is
+    /// what Python uses to index strings, and IDEs show for cursor position.
+    /// u32 as we only support 4gb files
+    start: CharOffset,
 }
 
 /// A struct to hold information about the tokens in the tokenized buffer.
@@ -51,11 +59,19 @@ struct LineInfo {
 struct TokenInfo {
     channel: channel::TokenChannel,
     token_type: token_type::TokenType,
-    // Zero-based byte offset of the token in the source string slice.
-    // u32 as we only support 4gb files
-    start: u32,
-    // Starting line of the token, zero-based
-    // Also an index of the LineInfo in the TokenizedBuffer line_infos vector
+
+    /// Zero-based byte offset of the token in the source string slice.
+    /// u32 as we only support 4gb files
+    byte_offset: ByteOffset,
+
+    /// Zero-based char index of the token start in the source string.
+    /// Char here means a Unicode code point, not graphemes. This is
+    /// what Python uses to index strings, and IDEs show for cursor position.
+    /// u32 as we only support 4gb files
+    start: CharOffset,
+
+    /// Starting line of the token, zero-based.
+    /// Also an index of the `LineInfo` in the `TokenizedBuffer.line_infos` vector
     line: LineIdx,
 
     // Extra data associated with the token
@@ -63,26 +79,33 @@ struct TokenInfo {
 }
 
 const MIN_CAPACITY: usize = 4;
-const LINE_INFO_DIVISOR: usize = 120;
+const LINE_INFO_DIVISOR: usize = 88;
 const TOKEN_INFO_DIVISOR: usize = 4;
 
 #[derive(Debug)]
 pub struct TokenizedBuffer<'a> {
     source: &'a str,
+    source_len: ByteOffset,
     line_infos: Vec<LineInfo>,
     token_infos: Vec<TokenInfo>,
 }
 
 impl TokenizedBuffer<'_> {
-    pub(super) fn new(source: &str, char_len: Option<usize>) -> TokenizedBuffer {
-        match char_len {
-            Some(0) | None => TokenizedBuffer {
+    pub(super) fn new(source: &str) -> TokenizedBuffer {
+        // SAFETY: This can only be created from lexer, which explicitly checks for the length
+        #[allow(clippy::unwrap_used)]
+        let source_len = ByteOffset::new(u32::try_from(source.len()).unwrap());
+
+        match source.len() {
+            0 => TokenizedBuffer {
                 source,
+                source_len,
                 line_infos: Vec::new(),
                 token_infos: Vec::new(),
             },
-            Some(len) => TokenizedBuffer {
+            len => TokenizedBuffer {
                 source,
+                source_len,
                 line_infos: Vec::with_capacity(std::cmp::max(
                     len / LINE_INFO_DIVISOR,
                     MIN_CAPACITY,
@@ -96,15 +119,15 @@ impl TokenizedBuffer<'_> {
     }
 
     pub(super) fn iter(&self) -> std::iter::Map<std::ops::Range<u32>, fn(u32) -> TokenIdx> {
-        (0..self.token_count()).map(TokenIdx::from)
+        (0..self.token_count()).map(TokenIdx::new)
     }
 
-    pub(super) fn add_line(&mut self, start: u32) -> LineIdx {
+    pub(super) fn add_line(&mut self, byte_offset: ByteOffset, start: CharOffset) -> LineIdx {
         debug_assert!(
-            (start as usize) <= self.source.len(),
-            "Line start out of bounds"
+            byte_offset <= self.source_len,
+            "Line byte offset out of bounds"
         );
-        self.line_infos.push(LineInfo { start });
+        self.line_infos.push(LineInfo { byte_offset, start });
         LineIdx(self.line_count() - 1)
     }
 
@@ -112,25 +135,27 @@ impl TokenizedBuffer<'_> {
         &mut self,
         channel: channel::TokenChannel,
         token_type: token_type::TokenType,
-        start: u32,
+        byte_offset: ByteOffset,
+        start: CharOffset,
         line: LineIdx,
         payload: Payload,
     ) -> TokenIdx {
         // Check that the token start is within the source string
         debug_assert!(
-            start as usize <= self.source.len(),
-            "Token start out of bounds"
+            byte_offset <= self.source_len,
+            "Token byte offset out of bounds"
         );
 
         // Check that the token start is more or equal to the start of the previous token
         if cfg!(debug_assertions) {
             if let Some(last_token) = self.token_infos.last() {
                 debug_assert!(
-                    start >= last_token.start,
-                    "Token start before previous token start"
+                    byte_offset >= last_token.byte_offset,
+                    "Token byte offset before previous token byte offset"
                 );
             } else {
-                debug_assert!(start == 0, "First token start not at 0");
+                // It may be poosible for the first token to start at offset > 0
+                // e.g. due to BOM
             }
         }
 
@@ -142,18 +167,19 @@ impl TokenizedBuffer<'_> {
 
         // Check that the token start is greater or equal than the line start
         debug_assert!(
-            start >= self.line_infos[line.0 as usize].start,
-            "Token start before line start"
+            byte_offset >= self.line_infos[line.0 as usize].byte_offset,
+            "Token byte offset before line byte offset"
         );
 
         self.token_infos.push(TokenInfo {
             channel,
             token_type,
+            byte_offset,
             start,
             line,
             payload,
         });
-        TokenIdx(self.token_count() - 1)
+        TokenIdx::new(self.token_count() - 1)
     }
 
     #[inline]
@@ -174,7 +200,18 @@ impl TokenizedBuffer<'_> {
 
     /// Returns byte offset of the token in the source string slice.
     #[must_use]
-    pub fn get_token_start(&self, token: TokenIdx) -> u32 {
+    pub fn get_token_start_byte_offset(&self, token: TokenIdx) -> ByteOffset {
+        let tidx = token.0 as usize;
+
+        debug_assert!(tidx < self.token_infos.len(), "Token index out of bounds");
+        self.token_infos[tidx].byte_offset
+    }
+
+    /// Returns char offset of the token in the source string.
+    /// Char here means a Unicode code point, not graphemes. This is
+    /// what Python uses to index strings, and IDEs show for cursor position.
+    #[must_use]
+    pub fn get_token_start(&self, token: TokenIdx) -> CharOffset {
         let tidx = token.0 as usize;
 
         debug_assert!(tidx < self.token_infos.len(), "Token index out of bounds");
@@ -182,22 +219,49 @@ impl TokenizedBuffer<'_> {
     }
 
     /// Returns byte offset right after the token in the source string slice.
+    ///
     /// This is the same as the start of the next token or EOF.
+    ///
     /// Note that EOF offset is 1 more than the mximum valid index in the source string.
     #[must_use]
     #[allow(clippy::cast_possible_truncation)]
-    pub fn get_token_end(&self, token: TokenIdx) -> u32 {
+    pub fn get_token_end_byte_offset(&self, token: TokenIdx) -> ByteOffset {
+        let tidx = token.0 as usize;
+
+        debug_assert!(tidx < self.token_infos.len(), "Token index out of bounds");
+
+        if tidx + 1 < self.token_infos.len() {
+            self.token_infos[tidx + 1].byte_offset
+        } else {
+            self.source_len
+        }
+    }
+
+    /// Returns char offset right after the token in the source string.
+    ///
+    /// This is the same as the start of the next token or EOF.
+    ///
+    /// Note that EOF offset is 1 more than the mximum valid index in the source string.
+    ///
+    /// Char here means a Unicode code point, not graphemes. This is
+    /// what Python uses to index strings, and IDEs show for cursor position.
+    #[must_use]
+    #[allow(clippy::cast_possible_truncation)]
+    pub fn get_token_end(&self, token: TokenIdx) -> CharOffset {
         let tidx = token.0 as usize;
 
         debug_assert!(tidx < self.token_infos.len(), "Token index out of bounds");
 
         let end = if tidx + 1 < self.token_infos.len() {
-            self.token_infos[tidx + 1].start as usize
+            self.token_infos[tidx + 1].start
         } else {
-            self.source.len()
+            // This is quite inefficient, but since normally the last token is the EOF token,
+            // and it is unlikely that someone cares about the end of the EOF token, this is fine.
+            #[allow(clippy::cast_possible_truncation)]
+            CharOffset::new(self.source.chars().count() as u32)
         };
 
-        end as u32
+        end
     }
 
     /// Returns line number of the token start, one-based.
@@ -240,7 +304,7 @@ impl TokenizedBuffer<'_> {
         let token_info = self.token_infos[tidx];
         let line_info = self.line_infos[token_info.line.0 as usize];
 
-        token_info.start - line_info.start
+        token_info.start.get() - line_info.start.get()
     }
 
     /// Returns column number of the token end, zero-based.
@@ -253,7 +317,7 @@ impl TokenizedBuffer<'_> {
         let token_end = self.get_token_end(token);
         let token_end_line_info = self.line_infos[(self.get_token_end_line(token) - 1) as usize];
 
-        token_end - token_end_line_info.start
+        token_end.get() - token_end_line_info.start.get()
     }
 
     /// Returns the token type
@@ -282,17 +346,21 @@ impl TokenizedBuffer<'_> {
         debug_assert!(tidx < self.token_infos.len(), "Token index out of bounds");
         let token_info = self.token_infos[tidx];
 
-        let start = token_info.start as usize;
+        let text_range = Range {
+            start: token_info.byte_offset.into(),
+            end: self.get_token_end_byte_offset(token).into(),
+        };
 
-        let end = self.get_token_end(token) as usize;
+        debug_assert!(
+            text_range.start <= text_range.end,
+            "Token start is after end"
+        );
 
-        debug_assert!(start <= end, "Token start is after end");
-
-        if start == end {
+        if text_range.is_empty() {
             return None;
         }
 
-        Some(&self.source[start..end])
+        Some(&self.source[text_range])
     }
 
     /// Returns the payload of the token.
@@ -321,7 +389,7 @@ mod tests {
     #[test]
     fn tokenized_buffer_new() {
         let source = "Hello, world!";
-        let buffer = TokenizedBuffer::new(source, Some(source.len()));
+        let buffer = TokenizedBuffer::new(source);
 
         assert_eq!(buffer.source, source);
         assert_eq!(buffer.line_infos.capacity(), 4);
@@ -330,21 +398,23 @@ mod tests {
 
     fn get_two_tok_buffer() -> (TokenizedBuffer<'static>, TokenIdx, TokenIdx) {
         let source = "Hello, world!\nThis is a test.";
-        let mut buffer = TokenizedBuffer::new(source, Some(source.len()));
+        let mut buffer = TokenizedBuffer::new(source);
 
-        let line1 = buffer.add_line(0);
+        let line1 = buffer.add_line(ByteOffset::default(), CharOffset::default());
         let token1 = buffer.add_token(
             channel::TokenChannel::DEFAULT,
             token_type::TokenType::BaseCode,
-            0,
+            ByteOffset::default(),
+            CharOffset::default(),
             line1,
             Payload::None,
         );
-        let line2 = buffer.add_line(14);
+        let line2 = buffer.add_line(ByteOffset::new(14), CharOffset::new(14));
         let token2 = buffer.add_token(
             channel::TokenChannel::DEFAULT,
             token_type::TokenType::BaseCode,
-            15,
+            ByteOffset::new(15),
+            CharOffset::new(15),
             line2,
             Payload::None,
         );
@@ -364,8 +434,8 @@ mod tests {
     fn tokenized_buffer_get_token_end() {
         let (buffer, token1, token2) = get_two_tok_buffer();
 
-        assert_eq!(buffer.get_token_end(token1), 15);
-        assert_eq!(buffer.get_token_end(token2), 29);
+        assert_eq!(buffer.get_token_end(token1).get(), 15);
+        assert_eq!(buffer.get_token_end(token2).get(), 29);
     }
 
     #[test]
@@ -403,13 +473,14 @@ mod tests {
     #[test]
     fn tokenized_buffer_get_token_type() {
         let source = "Hello, world!";
-        let mut buffer = TokenizedBuffer::new(source, Some(source.len()));
+        let mut buffer = TokenizedBuffer::new(source);
 
-        let line = buffer.add_line(0);
+        let line = buffer.add_line(ByteOffset::default(), CharOffset::default());
         let token = buffer.add_token(
             channel::TokenChannel::DEFAULT,
             token_type::TokenType::BaseCode,
-            0,
+            ByteOffset::default(),
+            CharOffset::default(),
             line,
             Payload::None,
         );
@@ -423,13 +494,14 @@ mod tests {
     #[test]
     fn tokenized_buffer_get_token_channel() {
         let source = "Hello, world!";
-        let mut buffer = TokenizedBuffer::new(source, Some(source.len()));
+        let mut buffer = TokenizedBuffer::new(source);
 
-        let line = buffer.add_line(0);
+        let line = buffer.add_line(ByteOffset::default(), CharOffset::default());
         let token = buffer.add_token(
             channel::TokenChannel::DEFAULT,
             token_type::TokenType::BaseCode,
-            0,
+            ByteOffset::default(),
+            CharOffset::default(),
             line,
             Payload::None,
         );

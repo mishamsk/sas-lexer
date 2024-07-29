@@ -2,10 +2,13 @@ use std::str::Chars;
 
 /// Peekable iterator over a char sequence.
 /// Based on [`rustc`'s `Cursor`](https://github.com/rust-lang/rust/blob/d1b7355d3d7b4ead564dbecb1d240fcc74fff21b/compiler/rustc_lexer/src/cursor.rs)
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct Cursor<'a> {
     /// Iterator over chars. Slightly faster than a &str.
     chars: Chars<'a>,
+
+    /// Stores the char offset in the input stream.
+    char_offset: u32,
 
     /// Stores the previous char for debug assertions
     #[cfg(debug_assertions)]
@@ -18,6 +21,7 @@ impl<'a> Cursor<'a> {
     pub(super) fn new(input: &'a str) -> Cursor<'a> {
         Cursor {
             chars: input.chars(),
+            char_offset: 0,
             #[cfg(debug_assertions)]
             prev_char: EOF_CHAR,
         }
@@ -44,13 +48,6 @@ impl<'a> Cursor<'a> {
         iter.next().unwrap_or(EOF_CHAR)
     }
 
-    /// Returns the iterator over the remaining characters.
-    /// Maybe used for moe efficient arbitrary lookahead, by avoiding
-    /// extra clones.
-    pub(super) fn chars(&self) -> Chars<'a> {
-        self.chars.clone()
-    }
-
     /// Checks if there is nothing more to consume.
     pub(super) fn is_eof(&self) -> bool {
         self.chars.as_str().is_empty()
@@ -65,17 +62,58 @@ impl<'a> Cursor<'a> {
             self.prev_char = c;
         }
 
+        self.char_offset += 1;
         Some(c)
     }
 
     /// Moves N characters forward.
-    /// Returns the last character moved to.
-    // pub(super) fn advance_by(&mut self, n: usize) -> Option<char> {
-    //     for _ in 0..n - 1 {
-    //         self.chars.next()?;
-    //     }
-    //     self.chars.next()
-    // }
+    ///
+    /// Returns the last character advanced to or EOF if not enough characters left.
+    ///
+    /// SAFETY: N should be greater than 0.
+    pub(super) fn advance_by(&mut self, n: u32) -> char {
+        debug_assert!(n > 0);
+
+        let mut advance_count: u32 = 0;
+
+        for c in self.chars.by_ref() {
+            advance_count += 1;
+
+            #[cfg(debug_assertions)]
+            {
+                self.prev_char = c;
+            }
+
+            if advance_count == n {
+                self.char_offset += n;
+                return c;
+            }
+        }
+
+        self.char_offset += advance_count;
+        EOF_CHAR
+    }
+
+    /// Advances to the end of the file.
+    ///
+    /// This will not update the debug only previous char.
+    #[allow(clippy::cast_possible_truncation)]
+    pub(super) fn advance_to_eof(&mut self) {
+        // Count the remaining chars to get the offset right
+        self.char_offset += self.chars.as_str().chars().count() as u32;
+
+        // Set the chars to empty iterator
+        self.chars = "".chars();
+    }
+
+    pub(super) fn eat_char(&mut self, c: char) -> bool {
+        if self.peek() == c {
+            self.advance();
+            true
+        } else {
+            false
+        }
+    }
 
     #[inline]
     pub(super) fn eat_while(&mut self, mut predicate: impl FnMut(char) -> bool) {
@@ -84,23 +122,6 @@ impl<'a> Cursor<'a> {
         while predicate(self.peek()) && !self.is_eof() {
             self.advance();
         }
-    }
-
-    /// Skips the next `count` bytes.
-    ///
-    /// ## Panics
-    ///  - If `count` is larger than the remaining bytes in the input stream.
-    ///  - If `count` indexes into a multi-byte character.
-    pub(super) fn skip_bytes(&mut self, count: usize) {
-        #[cfg(debug_assertions)]
-        {
-            self.prev_char = self.chars.as_str()[..count]
-                .chars()
-                .next_back()
-                .unwrap_or('\0');
-        }
-
-        self.chars = self.chars.as_str()[count..].chars();
     }
 
     /// Returns the previous character. Debug only
@@ -114,7 +135,12 @@ impl<'a> Cursor<'a> {
     /// SAFETY: Cursor is only used from the lexer, which guarantees that the
     /// input length is not more than u32.
     #[allow(clippy::cast_possible_truncation)]
-    pub(super) fn text_len(&self) -> u32 {
+    pub(super) fn remaining_len(&self) -> u32 {
         self.chars.as_str().len() as u32
+    }
+
+    /// Returns the current char offset in the input stream.
+    pub(super) fn char_offset(&self) -> u32 {
+        self.char_offset
     }
 }

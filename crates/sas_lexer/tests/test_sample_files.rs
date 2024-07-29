@@ -41,18 +41,18 @@ fn test_full_coverage(#[files("tests/samples/**/*.sas")] path: PathBuf) {
     for token in &tok_buffer {
         // Check that the token starts where the previous token ended
         assert_eq!(
-            tok_buffer.get_token_start(token),
+            tok_buffer.get_token_start(token).get(),
             end,
             "Token <{}> does not start where the previous token ended",
             to_pretty_string(token, &tok_buffer)
         );
 
         // Set the new end
-        end = tok_buffer.get_token_end(token);
+        end = tok_buffer.get_token_end(token).get();
 
         // Check that the end is greater than the start
         assert!(
-            end >= tok_buffer.get_token_start(token),
+            end >= tok_buffer.get_token_start(token).get(),
             "Token <{}> has an end before the start",
             to_pretty_string(token, &tok_buffer)
         );

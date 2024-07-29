@@ -4,12 +4,14 @@ mod cursor;
 pub mod error;
 pub mod print;
 mod sas_lang;
+mod text;
 pub(crate) mod token_type;
 
 use buffer::{LineIdx, Payload, TokenizedBuffer};
 use channel::TokenChannel;
 use error::LexerError;
 use sas_lang::is_valid_sas_name_start;
+use text::{ByteOffset, CharOffset};
 use token_type::TokenType;
 
 const BOM: char = '\u{feff}';
@@ -21,7 +23,9 @@ struct Lexer<'src> {
     buffer: TokenizedBuffer<'src>,
     cursor: cursor::Cursor<'src>,
     /// Start byte offset of the token being lexed
-    cur_token_start: u32,
+    cur_token_byte_offset: ByteOffset,
+    /// Start char offset of the token being lexed
+    cur_token_start: CharOffset,
     /// Start line index of the token being lexed
     cur_token_line: LineIdx,
 }
@@ -32,41 +36,54 @@ impl<'src> Lexer<'src> {
             return Err("Lexing of files larger than 4GB is not supported");
         };
 
-        let cursor = cursor::Cursor::new(source);
-        let mut buffer = TokenizedBuffer::new(source, Some(source.len()));
+        let mut cursor = cursor::Cursor::new(source);
+        let mut buffer = TokenizedBuffer::new(source);
+
+        // Skip BOM if present
+        let cur_token_start = CharOffset::new(u32::from(cursor.eat_char(BOM)));
+        let cur_token_byte_offset = ByteOffset::new(source_len - cursor.remaining_len());
 
         // Add the first line
-        let cur_line = buffer.add_line(0);
+        let cur_token_line = buffer.add_line(cur_token_byte_offset, cur_token_start);
 
         Ok(Lexer {
             // source,
             source_len,
             buffer,
             cursor,
-            cur_token_start: 0,
-            cur_token_line: cur_line,
+            cur_token_byte_offset,
+            cur_token_start,
+            cur_token_line,
         })
     }
 
     #[inline]
-    fn cur_byte_offset(&self) -> u32 {
-        self.source_len - self.cursor.text_len()
+    fn cur_byte_offset(&self) -> ByteOffset {
+        ByteOffset::new(self.source_len - self.cursor.remaining_len())
+    }
+
+    #[inline]
+    fn cur_char_offset(&self) -> CharOffset {
+        CharOffset::new(self.cursor.char_offset())
     }
 
     #[inline]
     fn add_line(&mut self) {
-        self.buffer.add_line(self.cur_byte_offset());
+        self.buffer
+            .add_line(self.cur_byte_offset(), self.cur_char_offset());
     }
 
     fn start_token(&mut self) {
-        self.cur_token_start = self.cur_byte_offset();
-        self.cur_token_line = (self.buffer.line_count() - 1).into();
+        self.cur_token_byte_offset = self.cur_byte_offset();
+        self.cur_token_start = self.cur_char_offset();
+        self.cur_token_line = LineIdx::new(self.buffer.line_count() - 1);
     }
 
     fn add_token(&mut self, channel: TokenChannel, token_type: TokenType) {
         self.buffer.add_token(
             channel,
             token_type,
+            self.cur_token_byte_offset,
             self.cur_token_start,
             self.cur_token_line,
             Payload::None,
@@ -78,39 +95,25 @@ impl<'src> Lexer<'src> {
             TokenChannel::DEFAULT,
             TokenType::ERROR,
             self.cur_byte_offset(),
-            (self.buffer.line_count() - 1).into(),
+            self.cur_char_offset(),
+            LineIdx::new(self.buffer.line_count() - 1),
             Payload::Error(error),
         );
     }
 
     fn lex(mut self) -> TokenizedBuffer<'src> {
-        fn _add_eof(buffer: &mut TokenizedBuffer, source_len: u32, cur_line: LineIdx) {
-            buffer.add_token(
-                TokenChannel::DEFAULT,
-                TokenType::EOF,
-                source_len,
-                cur_line,
-                Payload::None,
-            );
-        }
-
-        // If the source is empty, add EOF and return
-        if self.source_len == 0 {
-            _add_eof(&mut self.buffer, self.source_len, self.cur_token_line);
-            return self.buffer;
-        }
-
-        // Skip BOM if present
-        if self.cursor.peek() == BOM {
-            self.cursor.advance();
-            self.cur_token_start += 1;
-        }
-
         while !self.cursor.is_eof() {
             self.lex_token();
         }
 
-        _add_eof(&mut self.buffer, self.source_len, self.cur_token_line);
+        self.buffer.add_token(
+            TokenChannel::DEFAULT,
+            TokenType::EOF,
+            self.cur_byte_offset(),
+            self.cur_char_offset(),
+            self.cur_token_line, // use the last token line
+            Payload::None,
+        );
 
         self.buffer
     }
@@ -293,12 +296,12 @@ impl<'src> Lexer<'src> {
         // we not only need a mini state machine but we also need to gradually
         // advance our real cursor when we have fully formed part like &&expr
         // and then continue the loop until we hit non macro var expr
-        let mut la_view = self.cursor.chars();
+        let mut la_view = self.cursor.clone();
         let mut state = State::Amp;
         let mut lexed_macro_var_expr = false;
 
         loop {
-            match (state, la_view.next()) {
+            match (state, la_view.advance()) {
                 (State::Amp, Some(c)) => {
                     if is_valid_sas_name_start(c) {
                         // Ok, this is a macro expr for sure
@@ -329,13 +332,10 @@ impl<'src> Lexer<'src> {
                     // If the last character is a dot, which terminates a macro var expr
                     // we need to consume it as well, but otherwise not,
                     // so we substract 1 from the skip_bytes
-                    let skip_bytes = self.cursor.text_len() as usize
-                        - la_view.as_str().len()
-                        - usize::from(c != '.');
+                    let skip_chars =
+                        la_view.char_offset() - self.cursor.char_offset() - u32::from(c != '.');
 
-                    // SAFETY: we only match ascii characters when we got here, so
-                    // this the bytes offset can't hit in the middle of a multi-byte character
-                    self.cursor.skip_bytes(skip_bytes);
+                    self.cursor.advance_by(skip_chars);
 
                     if c == '&' {
                         // Possibly more macro var expr
@@ -347,8 +347,7 @@ impl<'src> Lexer<'src> {
                 }
                 (State::Name, None) => {
                     // Reached end of file, implicitly end of macro var expr
-                    self.cursor
-                        .skip_bytes(self.cursor.text_len() as usize - la_view.as_str().len());
+                    self.cursor.advance_to_eof();
                 }
             }
         }

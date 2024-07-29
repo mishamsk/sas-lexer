@@ -1,104 +1,12 @@
 #![allow(clippy::cast_possible_truncation)]
+mod util;
 
 use rstest::rstest;
+use util::check_token;
 
 use sas_lexer::{
     error::LexerError, lex, Payload, TokenChannel, TokenIdx, TokenType, TokenizedBuffer,
 };
-
-fn check_token(
-    token: TokenIdx,
-    buffer: &TokenizedBuffer,
-    start_offset: u32,
-    end_offset: u32,
-    start_line: u32,
-    line_count: u32,
-    start_column: u32,
-    end_column: u32,
-    token_type: TokenType,
-    token_channel: TokenChannel,
-    payload: Payload,
-    token_text: Option<&str>,
-) {
-    assert_eq!(
-        buffer.get_token_start_line(token),
-        start_line,
-        "Expected start line {}, got {}",
-        start_line,
-        buffer.get_token_start_line(token)
-    );
-
-    let end_line = start_line + line_count - 1;
-
-    assert_eq!(
-        buffer.get_token_end_line(token),
-        end_line,
-        "Expected end line {}, got {}",
-        end_line,
-        buffer.get_token_end_line(token)
-    );
-
-    assert_eq!(
-        buffer.get_token_start_column(token),
-        start_column,
-        "Expected start column {}, got {}",
-        start_column,
-        buffer.get_token_start_column(token)
-    );
-
-    assert_eq!(
-        buffer.get_token_end_column(token),
-        end_column,
-        "Expected end column {}, got {}",
-        end_column,
-        buffer.get_token_end_column(token)
-    );
-
-    assert_eq!(
-        buffer.get_token_start(token),
-        start_offset,
-        "Expected start offset {}, got {}",
-        start_offset,
-        buffer.get_token_start(token)
-    );
-    assert_eq!(
-        buffer.get_token_end(token),
-        end_offset,
-        "Expected end offset {}, got {}",
-        end_offset,
-        buffer.get_token_end(token)
-    );
-
-    assert_eq!(
-        buffer.get_token_text(token),
-        token_text,
-        "Expected text {:?}, got {:?}",
-        token_text,
-        buffer.get_token_text(token)
-    );
-
-    assert_eq!(
-        buffer.get_token_type(token),
-        token_type,
-        "Expected token type {:?}, got {:?}",
-        token_type,
-        buffer.get_token_type(token)
-    );
-    assert_eq!(
-        buffer.get_token_channel(token),
-        token_channel,
-        "Expected token channel {:?}, got {:?}",
-        token_channel,
-        buffer.get_token_channel(token)
-    );
-    assert_eq!(
-        buffer.get_token_payload(token),
-        payload,
-        "Expected token payload {:?}, got {:?}",
-        payload,
-        buffer.get_token_payload(token)
-    );
-}
 
 /// Helper function to check the properties of a single token that is supposed
 /// to span the entire contents.
@@ -123,12 +31,13 @@ fn check_single_real_token(
     // to compare the end column, we need to calculate the offset from the last line
     // lines iterator doesn't include the newline character, so we need to add 1
     // if the contents ends with a newline
-    let last_line_end_column =
-        contents.lines().last().unwrap().len() as u32 + u32::from(contents.ends_with('\n'));
+    let last_line_end_column = contents.lines().last().unwrap().chars().count() as u32
+        + u32::from(contents.ends_with('\n'));
 
     // compare start and end byte offsets with the length of the contents
     let start_offset = 0;
-    let end_offset = contents.len() as u32;
+    let end_byte_offset = contents.len() as u32;
+    let end_char_offset = contents.chars().count() as u32;
 
     // we are not testing ephemeral tokens here, so we should always have text
     // and match the entire contents
@@ -138,7 +47,9 @@ fn check_single_real_token(
         token,
         buffer,
         start_offset,
-        end_offset,
+        end_byte_offset,
+        start_offset,
+        end_char_offset,
         start_line,
         end_line,
         start_column,
@@ -179,6 +90,41 @@ fn check_single_lexeme(
         token_type,
         token_channel,
         payload,
+    );
+}
+
+#[test]
+fn test_unicode_char_offset() {
+    let contents = "'🔥'";
+    let buffer = lex(contents).unwrap();
+    let token = buffer.into_iter().next().unwrap();
+
+    assert_eq!(
+        buffer.get_token_end(token).get(),
+        3,
+        "Expected a char offset of 3, got {}",
+        buffer.get_token_end(token).get()
+    );
+
+    assert_eq!(
+        buffer.get_token_end_byte_offset(token).get(),
+        contents.len() as u32,
+        "Expected a byte offset of {}, got {}",
+        contents.len(),
+        buffer.get_token_end_byte_offset(token).get()
+    );
+
+    // Now test the ubiquotous Hoe many characters is 🤦🏼‍♂️ case.
+    // We want python compatibility here. So 5 characters.
+    let contents = "'🤦🏼‍♂️'";
+    let buffer = lex(contents).unwrap();
+    let token = buffer.into_iter().next().unwrap();
+
+    assert_eq!(
+        buffer.get_token_end(token).get(),
+        7, // 5 characters + 2 quotes
+        "Expected a char offset of 7, got {}",
+        buffer.get_token_end(token).get()
     );
 }
 
@@ -241,6 +187,8 @@ fn test_unterminated_cstyle_comment() {
         &buffer,
         24,
         24,
+        24,
+        24,
         1,
         1,
         24,
@@ -269,11 +217,11 @@ fn test_single_quoted_string(#[case] contents: &str) {
 
 #[rstest]
 #[case::bit_testing("'1'b", TokenType::SingleQuotedBitTestingLiteral)]
-#[case::bit_testing("'4may2022'd", TokenType::SingleQuotedDateLiteral)]
-#[case::bit_testing("'01may2021:12:30'dt", TokenType::SingleQuotedDateTimeLiteral)]
-#[case::bit_testing("'unicode 🙏 col'n", TokenType::SingleQuotedNameLiteral)]
-#[case::bit_testing("'00:42't", TokenType::SingleQuotedTimeLiteral)]
-#[case::bit_testing("'FF'x", TokenType::SingleQuotedHexStringLiteral)]
+#[case::date("'4may2022'd", TokenType::SingleQuotedDateLiteral)]
+#[case::datetime("'01may2021:12:30'dt", TokenType::SingleQuotedDateTimeLiteral)]
+#[case::name("'unicode 🙏 col'n", TokenType::SingleQuotedNameLiteral)]
+#[case::time("'00:42't", TokenType::SingleQuotedTimeLiteral)]
+#[case::hex("'FF'x", TokenType::SingleQuotedHexStringLiteral)]
 fn test_single_quoted_literals(#[case] contents: &str, #[case] token_type: TokenType) {
     check_single_lexeme(contents, token_type, TokenChannel::DEFAULT, Payload::None);
 }
@@ -312,6 +260,8 @@ fn test_unterminated_string_literal() {
     check_token(
         tokens[1],
         &buffer,
+        20,
+        20,
         20,
         20,
         1,
