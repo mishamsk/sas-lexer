@@ -5,6 +5,7 @@ use insta::assert_yaml_snapshot;
 use rstest::rstest;
 use sas_lexer::{lex, print::to_pretty_string};
 use std::{fs, path::PathBuf};
+use util::validate_detached_buffer;
 
 #[rstest]
 fn test_snapshots(#[files("tests/samples/**/*.sas")] path: PathBuf) {
@@ -60,4 +61,14 @@ fn test_full_coverage(#[files("tests/samples/**/*.sas")] path: PathBuf) {
 
     // Check that the last token ends at the end of the file
     assert_eq!(end, contents.len() as u32);
+}
+
+/// Tests that detached buffers are equal to the original buffer
+#[rstest]
+fn test_detached_buffer_equlity(#[files("tests/samples/**/*.sas")] path: PathBuf) {
+    let contents = fs::read_to_string(&path).unwrap();
+
+    let tok_buffer = lex(contents.as_str()).unwrap();
+
+    validate_detached_buffer(&tok_buffer, contents.as_str());
 }

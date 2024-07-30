@@ -1,6 +1,6 @@
 mod lexer;
 
-pub use lexer::buffer::{Payload, TokenIdx, TokenizedBuffer};
+pub use lexer::buffer::{DetachedTokenizedBuffer, Payload, TokenIdx, TokenizedBuffer};
 pub use lexer::channel::TokenChannel;
 pub use lexer::error;
 pub use lexer::lex;

@@ -128,3 +128,60 @@ pub(crate) fn check_token(
         buffer.get_token_text(token)
     );
 }
+
+pub(crate) fn validate_detached_buffer(buffer: &TokenizedBuffer, source: &str) {
+    let detached = buffer.into_detached().unwrap();
+
+    // Now compare all getters between the original and detached buffer
+    assert_eq!(buffer.line_count(), detached.line_count());
+    assert_eq!(buffer.token_count(), detached.token_count());
+    assert_eq!(
+        buffer.into_iter().collect::<Vec<_>>(),
+        detached.into_iter().collect::<Vec<_>>()
+    );
+
+    for token in buffer {
+        assert_eq!(
+            buffer.get_token_start_byte_offset(token),
+            detached.get_token_start_byte_offset(token)
+        );
+        assert_eq!(
+            buffer.get_token_start(token),
+            detached.get_token_start(token)
+        );
+        assert_eq!(
+            buffer.get_token_end_byte_offset(token),
+            detached.get_token_end_byte_offset(token)
+        );
+        assert_eq!(buffer.get_token_end(token), detached.get_token_end(token));
+        assert_eq!(
+            buffer.get_token_start_line(token),
+            detached.get_token_start_line(token)
+        );
+        assert_eq!(
+            buffer.get_token_end_line(token),
+            detached.get_token_end_line(token)
+        );
+        assert_eq!(
+            buffer.get_token_start_column(token),
+            detached.get_token_start_column(token)
+        );
+        assert_eq!(
+            buffer.get_token_end_column(token),
+            detached.get_token_end_column(token)
+        );
+        assert_eq!(buffer.get_token_type(token), detached.get_token_type(token));
+        assert_eq!(
+            buffer.get_token_channel(token),
+            detached.get_token_channel(token)
+        );
+        assert_eq!(
+            buffer.get_token_text(token),
+            detached.get_token_text(token, &source)
+        );
+        assert_eq!(
+            buffer.get_token_payload(token),
+            detached.get_token_payload(token)
+        );
+    }
+}
