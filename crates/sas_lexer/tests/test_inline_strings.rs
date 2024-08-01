@@ -5,7 +5,7 @@ use rstest::rstest;
 use util::check_token;
 
 use sas_lexer::{
-    error::LexerError, lex, Payload, TokenChannel, TokenIdx, TokenType, TokenizedBuffer,
+    error::ErrorType, lex, Payload, TokenChannel, TokenIdx, TokenType, TokenizedBuffer,
 };
 
 /// Helper function to check the properties of a single token that is supposed
@@ -209,7 +209,7 @@ fn test_unterminated_cstyle_comment() {
         24,
         TokenType::ERROR,
         TokenChannel::DEFAULT,
-        Payload::Error(LexerError::UnterminatedComment),
+        Payload::Error(ErrorType::UnterminatedComment),
         None,
     );
 }
@@ -223,7 +223,7 @@ fn test_unterminated_cstyle_comment() {
 fn test_single_quoted_string(#[case] contents: &str) {
     check_single_lexeme(
         contents,
-        TokenType::SingleQuotedString,
+        TokenType::SingleQuotedStringLiteral,
         TokenChannel::DEFAULT,
         Payload::None,
     );
@@ -248,13 +248,13 @@ fn test_unterminated_string_literal() {
 
     assert_eq!(
         tokens.len(),
-        3,
-        "Expected a 3 tokens (string, error & EOF), got {}",
+        2,
+        "Expected 2 tokens (string & EOF), got {}",
         tokens.len()
     );
 
     assert_eq!(
-        buffer.get_token_type(tokens[2]),
+        buffer.get_token_type(tokens[1]),
         TokenType::EOF,
         "Expected EOF token, got {:?}",
         buffer.get_token_type(tokens[1])
@@ -265,12 +265,12 @@ fn test_unterminated_string_literal() {
         contents,
         tokens[0],
         &buffer,
-        TokenType::SingleQuotedString,
+        TokenType::SingleQuotedStringLiteral,
         TokenChannel::DEFAULT,
         Payload::None,
     );
 
-    // check the error token
+    // check the error
     check_token(
         tokens[1],
         &buffer,
@@ -284,7 +284,7 @@ fn test_unterminated_string_literal() {
         20,
         TokenType::ERROR,
         TokenChannel::DEFAULT,
-        Payload::Error(LexerError::UnterminatedStringLiteral),
+        Payload::Error(ErrorType::UnterminatedStringLiteral),
         None,
     );
 }

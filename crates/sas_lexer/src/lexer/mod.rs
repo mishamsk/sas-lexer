@@ -9,12 +9,22 @@ pub(crate) mod token_type;
 
 use buffer::{LineIdx, Payload, TokenizedBuffer};
 use channel::TokenChannel;
-use error::LexerError;
+use error::{ErrorInfo, ErrorType};
 use sas_lang::is_valid_sas_name_start;
 use text::{ByteOffset, CharOffset};
 use token_type::TokenType;
 
 const BOM: char = '\u{feff}';
+
+/// The lexer mode
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum LexerMode {
+    /// The default mode
+    #[default]
+    Default,
+    /// The macro variable expression mode
+    DoubleQuotedString,
+}
 
 #[derive(Debug)]
 struct Lexer<'src> {
@@ -28,10 +38,14 @@ struct Lexer<'src> {
     cur_token_start: CharOffset,
     /// Start line index of the token being lexed
     cur_token_line: LineIdx,
+    /// Lexer mode stack
+    mode_stack: Vec<LexerMode>,
+    /// Errors encountered during lexing
+    errors: Vec<ErrorInfo>,
 }
 
 impl<'src> Lexer<'src> {
-    fn new(source: &str) -> Result<Lexer, &str> {
+    fn new(source: &str, init_mode: Option<LexerMode>) -> Result<Lexer, &str> {
         let Ok(source_len) = u32::try_from(source.len()) else {
             return Err("Lexing of files larger than 4GB is not supported");
         };
@@ -54,6 +68,8 @@ impl<'src> Lexer<'src> {
             cur_token_byte_offset,
             cur_token_start,
             cur_token_line,
+            mode_stack: vec![init_mode.unwrap_or_default()],
+            errors: Vec::new(),
         })
     }
 
@@ -65,6 +81,29 @@ impl<'src> Lexer<'src> {
     #[inline]
     fn cur_char_offset(&self) -> CharOffset {
         CharOffset::new(self.cursor.char_offset())
+    }
+
+    #[inline]
+    fn push_mode(&mut self, mode: LexerMode) -> LexerMode {
+        self.mode_stack.push(mode);
+        mode
+    }
+
+    fn pop_mode(&mut self) -> LexerMode {
+        self.mode_stack.pop().unwrap_or_else(|| {
+            self.emit_error(ErrorType::EmptyModeStack);
+            self.push_mode(LexerMode::default())
+        })
+    }
+
+    fn mode(&mut self) -> LexerMode {
+        match self.mode_stack.last() {
+            Some(&mode) => mode,
+            None => {
+                self.emit_error(ErrorType::EmptyModeStack);
+                self.push_mode(LexerMode::default())
+            }
+        }
     }
 
     #[inline]
@@ -90,15 +129,27 @@ impl<'src> Lexer<'src> {
         );
     }
 
-    fn emit_error(&mut self, error: LexerError) {
-        self.buffer.add_token(
-            TokenChannel::DEFAULT,
-            TokenType::ERROR,
-            self.cur_byte_offset(),
-            self.cur_char_offset(),
-            LineIdx::new(self.buffer.line_count() - 1),
-            Payload::Error(error),
-        );
+    fn emit_error(&mut self, error: ErrorType) {
+        let last_line_char_offset = if let Some(line_info) = self.buffer.get_line_infos().last() {
+            line_info.get_start_char_offset().get()
+        } else {
+            0
+        };
+
+        let last_char_offset = self.cur_char_offset().get();
+
+        self.errors.push(ErrorInfo {
+            error_type: error,
+            at_byte_offset: self.cur_byte_offset().get(),
+            at_char_offset: last_char_offset,
+            on_line: self.buffer.line_count(),
+            at_column: last_char_offset - last_line_char_offset,
+            last_token: self
+                .buffer
+                .into_iter()
+                .last()
+                .map(|tidx| self.buffer.get_token_type(tidx)),
+        });
     }
 
     fn lex(mut self) -> TokenizedBuffer<'src> {
@@ -131,6 +182,7 @@ impl<'src> Lexer<'src> {
         if c.is_ascii() {
             match c {
                 '\'' => self.lex_single_quoted_str(),
+                '"' => self.lex_double_quoted_str(),
                 '/' => {
                     if self.cursor.peek_next() == '*' {
                         self.lex_cstyle_comment();
@@ -212,7 +264,7 @@ impl<'src> Lexer<'src> {
                 // EOF reached without a closing comment
                 // Emit an error token and return
                 self.add_token(TokenChannel::COMMENT, TokenType::CStyleComment);
-                self.emit_error(LexerError::UnterminatedComment);
+                self.emit_error(ErrorType::UnterminatedComment);
                 return;
             }
         }
@@ -246,13 +298,13 @@ impl<'src> Lexer<'src> {
             } else {
                 // EOF reached without a closing single quote
                 // Emit an error token and return
-                self.add_token(TokenChannel::DEFAULT, TokenType::SingleQuotedString);
-                self.emit_error(LexerError::UnterminatedStringLiteral);
+                self.add_token(TokenChannel::DEFAULT, TokenType::SingleQuotedStringLiteral);
+                self.emit_error(ErrorType::UnterminatedStringLiteral);
                 return;
             }
         }
 
-        // Now check if this is a single quoted string or one of the literals
+        // Now check if this is a single quoted string or one of the other literals
         let tok_type = match self.cursor.peek() {
             'b' => TokenType::SingleQuotedBitTestingLiteral,
             'd' => {
@@ -267,15 +319,78 @@ impl<'src> Lexer<'src> {
             'n' => TokenType::SingleQuotedNameLiteral,
             't' => TokenType::SingleQuotedTimeLiteral,
             'x' => TokenType::SingleQuotedHexStringLiteral,
-            _ => TokenType::SingleQuotedString,
+            _ => TokenType::SingleQuotedStringLiteral,
         };
 
         // If we found a literal, advance the cursor
-        if tok_type != TokenType::SingleQuotedString {
+        if tok_type != TokenType::SingleQuotedStringLiteral {
             self.cursor.advance();
         }
 
         self.add_token(TokenChannel::DEFAULT, tok_type);
+    }
+
+    fn lex_double_quoted_str(&mut self) {
+        debug_assert_eq!(self.cursor.peek(), '"');
+
+        self.push_mode(LexerMode::DoubleQuotedString);
+
+        !todo!();
+
+        // Eat the opening single quote
+        self.cursor.advance();
+
+        loop {
+            if let Some(c) = self.cursor.advance() {
+                match c {
+                    '\'' => {
+                        if self.cursor.peek() == '\'' {
+                            // escaped single quote
+                            self.cursor.advance();
+                            continue;
+                        }
+
+                        break;
+                    }
+                    '\n' => {
+                        self.add_line();
+                    }
+                    _ => {}
+                }
+            } else {
+                // EOF reached without a closing single quote
+                // Emit an error token and return
+                self.add_token(TokenChannel::DEFAULT, TokenType::SingleQuotedStringLiteral);
+                self.emit_error(ErrorType::UnterminatedStringLiteral);
+                return;
+            }
+        }
+
+        // Now check if this is a regular double quoted string or one of the literals
+        let tok_type = match self.cursor.peek() {
+            'b' => TokenType::DoubleQuotedBitTestingExprEnd,
+            'd' => {
+                if self.cursor.peek_next() == 't' {
+                    self.cursor.advance();
+
+                    TokenType::DoubleQuotedDateTimeExprEnd
+                } else {
+                    TokenType::DoubleQuotedDateExprEnd
+                }
+            }
+            'n' => TokenType::DoubleQuotedNameExprEnd,
+            't' => TokenType::DoubleQuotedTimeExprEnd,
+            'x' => TokenType::DoubleQuotedHexStringExprEnd,
+            _ => TokenType::DoubleQuotedStringExprEnd,
+        };
+
+        // If we found a literal, advance the cursor
+        if tok_type != TokenType::DoubleQuotedStringExprEnd {
+            self.cursor.advance();
+        }
+
+        self.add_token(TokenChannel::DEFAULT, tok_type);
+        self.pop_mode();
     }
 
     fn lex_macro_var_expr(&mut self) -> bool {
@@ -380,7 +495,8 @@ impl<'src> Lexer<'src> {
 /// assert!(result.is_ok());
 /// ```
 pub fn lex(source: &str) -> Result<TokenizedBuffer, &str> {
-    let lexer = Lexer::new(source)?;
+    let lexer = Lexer::new(source, None)?;
 
+    !todo!(); // return errors...
     Ok(lexer.lex())
 }

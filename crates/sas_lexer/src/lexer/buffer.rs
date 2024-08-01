@@ -3,7 +3,7 @@ use std::ops::Range;
 use crate::lexer::channel;
 use crate::lexer::token_type;
 
-use super::error::LexerError;
+use super::error::ErrorType;
 use super::text::ByteOffset;
 use super::text::CharOffset;
 
@@ -37,12 +37,12 @@ impl LineIdx {
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum Payload {
     None,
-    Error(LexerError),
+    Error(ErrorType),
 }
 
 /// A struct to hold information about the lines in the tokenized buffer.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
-struct LineInfo {
+pub(super) struct LineInfo {
     /// Zero-based byte offset of the line start in the source string slice.
     /// u32 as we only support 4gb files
     byte_offset: ByteOffset,
@@ -52,6 +52,14 @@ struct LineInfo {
     /// what Python uses to index strings, and IDEs show for cursor position.
     /// u32 as we only support 4gb files
     start: CharOffset,
+}
+
+impl LineInfo {
+    #[must_use]
+    #[inline]
+    pub(super) fn get_start_char_offset(self) -> CharOffset {
+        self.start
+    }
 }
 
 /// A struct to hold information about the tokens in the tokenized buffer.
@@ -122,6 +130,12 @@ impl TokenizedBuffer<'_> {
         (0..self.token_count()).map(TokenIdx::new)
     }
 
+    /// Converts the `TokenizedBuffer` into a `DetachedTokenizedBuffer`.
+    /// This is supposed to be called only when the tokenization is finished.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the EOF token is not the last token in the buffer.
     pub fn into_detached(&self) -> Result<DetachedTokenizedBuffer, &str> {
         if !self
             .token_infos
@@ -195,6 +209,10 @@ impl TokenizedBuffer<'_> {
             payload,
         });
         TokenIdx::new(self.token_count() - 1)
+    }
+
+    pub(super) fn get_line_infos(&self) -> &[LineInfo] {
+        &self.line_infos
     }
 
     #[inline]
