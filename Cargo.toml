@@ -24,7 +24,9 @@ unreachable_pub = "warn"
 
 [workspace.lints.clippy]
 pedantic = { level = "warn", priority = -2 }
+# allowed pedantic lints
 module_name_repetitions = "allow"
+single_match_else = "allow"
 # Disallowed restriction lints
 print_stdout = "warn"
 print_stderr = "warn"

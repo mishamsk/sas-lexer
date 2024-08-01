@@ -6,13 +6,20 @@ pub enum TokenType {
     EOF,
     WS,
     TermQuote,                     // *'; and *" ";
-    SingleQuotedString,            // 'string'
+    SingleQuotedStringLiteral,     // 'string'
     SingleQuotedBitTestingLiteral, // 'stuff'b
     SingleQuotedDateLiteral,       // 'stuff'd
     SingleQuotedDateTimeLiteral,   // 'stuff'dt
     SingleQuotedNameLiteral,       // 'stuff'n
     SingleQuotedTimeLiteral,       // 'stuff't
     SingleQuotedHexStringLiteral,  // 'stuff'x
+    DoubleQuotedStringExprEnd,     // "string"
+    DoubleQuotedBitTestingExprEnd, // "stuff"b
+    DoubleQuotedDateExprEnd,       // "stuff"d
+    DoubleQuotedDateTimeExprEnd,   // "stuff"dt
+    DoubleQuotedNameExprEnd,       // "stuff"n
+    DoubleQuotedTimeExprEnd,       // "stuff"t
+    DoubleQuotedHexStringExprEnd,  // "stuff"x
     AMP,
     PERCENT,
     BaseCode,
@@ -27,7 +34,7 @@ impl From<TokenType> for i16 {
             TokenType::EOF => 0,
             TokenType::WS => 1,
             TokenType::TermQuote => 2,
-            TokenType::SingleQuotedString => 3,
+            TokenType::SingleQuotedStringLiteral => 3,
             TokenType::SingleQuotedBitTestingLiteral => 4,
             TokenType::SingleQuotedDateLiteral => 5,
             TokenType::SingleQuotedDateTimeLiteral => 6,
@@ -39,6 +46,13 @@ impl From<TokenType> for i16 {
             TokenType::BaseCode => 12,
             TokenType::CStyleComment => 13,
             TokenType::MacroVarExpr => 14,
+            TokenType::DoubleQuotedStringExprEnd => 15,
+            TokenType::DoubleQuotedBitTestingExprEnd => 16,
+            TokenType::DoubleQuotedDateExprEnd => 17,
+            TokenType::DoubleQuotedDateTimeExprEnd => 18,
+            TokenType::DoubleQuotedNameExprEnd => 19,
+            TokenType::DoubleQuotedTimeExprEnd => 20,
+            TokenType::DoubleQuotedHexStringExprEnd => 21,
         }
     }
 }
