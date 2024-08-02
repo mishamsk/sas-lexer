@@ -141,17 +141,18 @@ impl TokenizedBuffer<'_> {
     ///
     /// Returns an error if the EOF token is not the last token in the buffer.
     pub(super) fn into_detached(self) -> Result<DetachedTokenizedBuffer, String> {
-        if !self
-            .token_infos
-            .last()
-            .map_or(false, |t| t.token_type == token_type::TokenType::EOF)
+        if cfg!(debug_assertions)
+            && !self
+                .token_infos
+                .last()
+                .map_or(false, |t| t.token_type == token_type::TokenType::EOF)
         {
             return Err("EOF token is not the last token".to_string());
         }
 
         Ok(DetachedTokenizedBuffer {
-            line_infos: self.line_infos.clone().into_boxed_slice(),
-            token_infos: self.token_infos.clone().into_boxed_slice(),
+            line_infos: self.line_infos.into_boxed_slice(),
+            token_infos: self.token_infos.into_boxed_slice(),
         })
     }
 
