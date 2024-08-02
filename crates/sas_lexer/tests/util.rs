@@ -1,6 +1,9 @@
 #![allow(dead_code)]
 
-use sas_lexer::{Payload, TokenChannel, TokenIdx, TokenType, TokenizedBuffer};
+use sas_lexer::{
+    error::{ErrorInfo, ErrorType},
+    DetachedTokenizedBuffer, Payload, TokenChannel, TokenIdx, TokenType,
+};
 
 #[macro_export]
 macro_rules! set_snapshot_suffix {
@@ -12,8 +15,9 @@ macro_rules! set_snapshot_suffix {
 }
 
 pub(crate) fn check_token(
+    source: &str,
     token: TokenIdx,
-    buffer: &TokenizedBuffer,
+    buffer: &DetachedTokenizedBuffer,
     start_byte_offset: u32,
     end_byte_offset: u32,
     start_char_offset: u32,
@@ -121,67 +125,68 @@ pub(crate) fn check_token(
     );
 
     assert_eq!(
-        buffer.get_token_text(token),
+        buffer.get_token_text(token, &source),
         token_text,
         "Expected text {:?}, got {:?}",
         token_text,
-        buffer.get_token_text(token)
+        buffer.get_token_text(token, &source)
     );
 }
 
-pub(crate) fn validate_detached_buffer(buffer: &TokenizedBuffer, source: &str) {
-    let detached = buffer.into_detached().unwrap();
-
-    // Now compare all getters between the original and detached buffer
-    assert_eq!(buffer.line_count(), detached.line_count());
-    assert_eq!(buffer.token_count(), detached.token_count());
+pub(crate) fn check_error(
+    error: &ErrorInfo,
+    error_type: ErrorType,
+    at_byte_offset: u32,
+    at_char_offset: u32,
+    on_line: u32,
+    at_column: u32,
+    last_token_idx: Option<TokenIdx>,
+) {
     assert_eq!(
-        buffer.into_iter().collect::<Vec<_>>(),
-        detached.into_iter().collect::<Vec<_>>()
+        error.error_type(),
+        error_type,
+        "Expected error type {:?}, got {:?}",
+        error_type,
+        error.error_type()
     );
 
-    for token in buffer {
-        assert_eq!(
-            buffer.get_token_start_byte_offset(token),
-            detached.get_token_start_byte_offset(token)
-        );
-        assert_eq!(
-            buffer.get_token_start(token),
-            detached.get_token_start(token)
-        );
-        assert_eq!(
-            buffer.get_token_end_byte_offset(token),
-            detached.get_token_end_byte_offset(token)
-        );
-        assert_eq!(buffer.get_token_end(token), detached.get_token_end(token));
-        assert_eq!(
-            buffer.get_token_start_line(token),
-            detached.get_token_start_line(token)
-        );
-        assert_eq!(
-            buffer.get_token_end_line(token),
-            detached.get_token_end_line(token)
-        );
-        assert_eq!(
-            buffer.get_token_start_column(token),
-            detached.get_token_start_column(token)
-        );
-        assert_eq!(
-            buffer.get_token_end_column(token),
-            detached.get_token_end_column(token)
-        );
-        assert_eq!(buffer.get_token_type(token), detached.get_token_type(token));
-        assert_eq!(
-            buffer.get_token_channel(token),
-            detached.get_token_channel(token)
-        );
-        assert_eq!(
-            buffer.get_token_text(token),
-            detached.get_token_text(token, &source)
-        );
-        assert_eq!(
-            buffer.get_token_payload(token),
-            detached.get_token_payload(token)
-        );
-    }
+    assert_eq!(
+        error.at_byte_offset(),
+        at_byte_offset,
+        "Expected byte offset {}, got {}",
+        at_byte_offset,
+        error.at_byte_offset()
+    );
+
+    assert_eq!(
+        error.at_char_offset(),
+        at_char_offset,
+        "Expected char offset {}, got {}",
+        at_char_offset,
+        error.at_char_offset()
+    );
+
+    assert_eq!(
+        error.on_line(),
+        on_line,
+        "Expected line {}, got {}",
+        on_line,
+        error.on_line()
+    );
+
+    assert_eq!(
+        error.at_column(),
+        at_column,
+        "Expected column {}, got {}",
+        at_column,
+        error.at_column()
+    );
+
+    let last_token = error.last_token();
+
+    assert_eq!(
+        last_token, last_token_idx,
+        "Expected last token index {:?}, got {:?}",
+        last_token_idx, last_token
+    );
 }

@@ -7,7 +7,7 @@ mod sas_lang;
 mod text;
 pub(crate) mod token_type;
 
-use buffer::{LineIdx, Payload, TokenizedBuffer};
+use buffer::{DetachedTokenizedBuffer, LineIdx, Payload, TokenizedBuffer};
 use channel::TokenChannel;
 use error::{ErrorInfo, ErrorType};
 use sas_lang::is_valid_sas_name_start;
@@ -138,21 +138,17 @@ impl<'src> Lexer<'src> {
 
         let last_char_offset = self.cur_char_offset().get();
 
-        self.errors.push(ErrorInfo {
-            error_type: error,
-            at_byte_offset: self.cur_byte_offset().get(),
-            at_char_offset: last_char_offset,
-            on_line: self.buffer.line_count(),
-            at_column: last_char_offset - last_line_char_offset,
-            last_token: self
-                .buffer
-                .into_iter()
-                .last()
-                .map(|tidx| self.buffer.get_token_type(tidx)),
-        });
+        self.errors.push(ErrorInfo::new(
+            error,
+            self.cur_byte_offset().get(),
+            last_char_offset,
+            self.buffer.line_count(),
+            last_char_offset - last_line_char_offset,
+            self.buffer.into_iter().last(),
+        ));
     }
 
-    fn lex(mut self) -> TokenizedBuffer<'src> {
+    fn lex(mut self) -> (TokenizedBuffer<'src>, Box<[ErrorInfo]>) {
         while !self.cursor.is_eof() {
             self.lex_token();
         }
@@ -162,11 +158,11 @@ impl<'src> Lexer<'src> {
             TokenType::EOF,
             self.cur_byte_offset(),
             self.cur_char_offset(),
-            self.cur_token_line, // use the last token line
+            LineIdx::new(self.buffer.line_count() - 1), // use the last added line
             Payload::None,
         );
 
-        self.buffer
+        (self.buffer, self.errors.into_boxed_slice())
     }
 
     fn lex_token(&mut self) {
@@ -223,7 +219,7 @@ impl<'src> Lexer<'src> {
             }
         } else {
             self.cursor.advance();
-            self.add_token(TokenChannel::DEFAULT, TokenType::ERROR);
+            self.add_token(TokenChannel::DEFAULT, TokenType::BaseCode);
         }
     }
 
@@ -494,9 +490,8 @@ impl<'src> Lexer<'src> {
 /// let result = lex(source);
 /// assert!(result.is_ok());
 /// ```
-pub fn lex(source: &str) -> Result<TokenizedBuffer, &str> {
+pub fn lex(source: &str) -> Result<(DetachedTokenizedBuffer, Box<[ErrorInfo]>), String> {
     let lexer = Lexer::new(source, None)?;
-
-    !todo!(); // return errors...
-    Ok(lexer.lex())
+    let (buffer, errors) = lexer.lex();
+    Ok((buffer.into_detached()?, errors))
 }

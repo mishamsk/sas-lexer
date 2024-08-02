@@ -2,18 +2,18 @@
 mod util;
 
 use rstest::rstest;
-use util::check_token;
+use util::{check_error, check_token};
 
 use sas_lexer::{
-    error::ErrorType, lex, Payload, TokenChannel, TokenIdx, TokenType, TokenizedBuffer,
+    error::ErrorType, lex, DetachedTokenizedBuffer, Payload, TokenChannel, TokenIdx, TokenType,
 };
 
 /// Helper function to check the properties of a single token that is supposed
 /// to span the entire contents.
 fn check_single_real_token(
-    contents: &str,
+    source: &str,
     token: TokenIdx,
-    buffer: &TokenizedBuffer,
+    buffer: &DetachedTokenizedBuffer,
     token_type: TokenType,
     token_channel: TokenChannel,
     payload: Payload,
@@ -23,7 +23,7 @@ fn check_single_real_token(
 
     // compare line count with the number of lines in the contents
     // for singles we should have consumed all the lines
-    let end_line = contents.lines().count() as u32;
+    let end_line = source.lines().count() as u32;
 
     // for single tests column should always be 0
     let start_column = 0;
@@ -31,19 +31,20 @@ fn check_single_real_token(
     // to compare the end column, we need to calculate the offset from the last line
     // lines iterator doesn't include the newline character, so we need to add 1
     // if the contents ends with a newline
-    let last_line_end_column = contents.lines().last().unwrap().chars().count() as u32
-        + u32::from(contents.ends_with('\n'));
+    let last_line_end_column =
+        source.lines().last().unwrap().chars().count() as u32 + u32::from(source.ends_with('\n'));
 
     // compare start and end byte offsets with the length of the contents
     let start_offset = 0;
-    let end_byte_offset = contents.len() as u32;
-    let end_char_offset = contents.chars().count() as u32;
+    let end_byte_offset = source.len() as u32;
+    let end_char_offset = source.chars().count() as u32;
 
     // we are not testing ephemeral tokens here, so we should always have text
     // and match the entire contents
-    let token_text = Some(contents);
+    let token_text = Some(source);
 
     check_token(
+        source,
         token,
         buffer,
         start_offset,
@@ -62,12 +63,15 @@ fn check_single_real_token(
 }
 
 fn check_single_lexeme(
-    contents: &str,
+    source: &str,
     token_type: TokenType,
     token_channel: TokenChannel,
     payload: Payload,
 ) {
-    let buffer = lex(contents).unwrap();
+    let (buffer, errors) = lex(source).unwrap();
+
+    assert_eq!(errors.len(), 0, "Expected no errors, got {}", errors.len());
+
     let tokens: Vec<TokenIdx> = buffer.into_iter().collect();
 
     assert_eq!(
@@ -84,7 +88,7 @@ fn check_single_lexeme(
     );
 
     check_single_real_token(
-        contents,
+        source,
         tokens[0],
         &buffer,
         token_type,
@@ -95,8 +99,11 @@ fn check_single_lexeme(
 
 #[test]
 fn test_unicode_char_offset() {
-    let contents = "'🔥'";
-    let buffer = lex(contents).unwrap();
+    let source = "'🔥'";
+    let (buffer, errors) = lex(source).unwrap();
+
+    assert_eq!(errors.len(), 0, "Expected no errors, got {}", errors.len());
+
     let token = buffer.into_iter().next().unwrap();
 
     assert_eq!(
@@ -108,16 +115,19 @@ fn test_unicode_char_offset() {
 
     assert_eq!(
         buffer.get_token_end_byte_offset(token).get(),
-        contents.len() as u32,
+        source.len() as u32,
         "Expected a byte offset of {}, got {}",
-        contents.len(),
+        source.len(),
         buffer.get_token_end_byte_offset(token).get()
     );
 
     // Now test the ubiquotous Hoe many characters is 🤦🏼‍♂️ case.
     // We want python compatibility here. So 5 characters.
-    let contents = "'🤦🏼‍♂️'";
-    let buffer = lex(contents).unwrap();
+    let source = "'🤦🏼‍♂️'";
+    let (buffer, errors) = lex(source).unwrap();
+
+    assert_eq!(errors.len(), 0, "Expected no errors, got {}", errors.len());
+
     let token = buffer.into_iter().next().unwrap();
 
     assert_eq!(
@@ -130,8 +140,12 @@ fn test_unicode_char_offset() {
 
 #[test]
 fn test_column_count_with_bom() {
-    let contents = "\u{FEFF}/* this is comment */";
-    let buffer = lex(contents).unwrap();
+    let source = "\u{FEFF}/* this is comment */";
+
+    let (buffer, errors) = lex(source).unwrap();
+
+    assert_eq!(errors.len(), 0, "Expected no errors, got {}", errors.len());
+
     let token = buffer.into_iter().next().unwrap();
 
     assert_eq!(
@@ -167,19 +181,21 @@ fn test_single_lexemes(
 
 #[test]
 fn test_unterminated_cstyle_comment() {
-    let contents = "/* unterminated comment*";
-    let buffer = lex(contents).unwrap();
+    let source = "/* unterminated comment*";
+
+    let (buffer, errors) = lex(source).unwrap();
+
     let tokens: Vec<TokenIdx> = buffer.into_iter().collect();
 
     assert_eq!(
         tokens.len(),
-        3,
-        "Expected a 3 tokens (comment, error & EOF), got {}",
+        2,
+        "Expected a 2 tokens (comment & EOF), got {}",
         tokens.len()
     );
 
     assert_eq!(
-        buffer.get_token_type(tokens[2]),
+        buffer.get_token_type(tokens[1]),
         TokenType::EOF,
         "Expected EOF token, got {:?}",
         buffer.get_token_type(tokens[1])
@@ -187,7 +203,7 @@ fn test_unterminated_cstyle_comment() {
 
     // check the comment token
     check_single_real_token(
-        contents,
+        source,
         tokens[0],
         &buffer,
         TokenType::CStyleComment,
@@ -195,22 +211,17 @@ fn test_unterminated_cstyle_comment() {
         Payload::None,
     );
 
-    // check the error token
-    check_token(
-        tokens[1],
-        &buffer,
-        24,
-        24,
+    // check the error
+    assert_eq!(errors.len(), 1, "Expected 1 errors, got {}", errors.len());
+
+    check_error(
+        &errors[0],
+        ErrorType::UnterminatedComment,
         24,
         24,
         1,
-        1,
         24,
-        24,
-        TokenType::ERROR,
-        TokenChannel::DEFAULT,
-        Payload::Error(ErrorType::UnterminatedComment),
-        None,
+        Some(tokens[0]),
     );
 }
 
@@ -242,8 +253,10 @@ fn test_single_quoted_literals(#[case] contents: &str, #[case] token_type: Token
 
 #[test]
 fn test_unterminated_string_literal() {
-    let contents = "'unterminated string";
-    let buffer = lex(contents).unwrap();
+    let source = "'unterminated string";
+
+    let (buffer, errors) = lex(source).unwrap();
+
     let tokens: Vec<TokenIdx> = buffer.into_iter().collect();
 
     assert_eq!(
@@ -262,7 +275,7 @@ fn test_unterminated_string_literal() {
 
     // check the string literal token
     check_single_real_token(
-        contents,
+        source,
         tokens[0],
         &buffer,
         TokenType::SingleQuotedStringLiteral,
@@ -271,20 +284,15 @@ fn test_unterminated_string_literal() {
     );
 
     // check the error
-    check_token(
-        tokens[1],
-        &buffer,
-        20,
-        20,
+    assert_eq!(errors.len(), 1, "Expected 1 errors, got {}", errors.len());
+
+    check_error(
+        &errors[0],
+        ErrorType::UnterminatedStringLiteral,
         20,
         20,
         1,
-        1,
         20,
-        20,
-        TokenType::ERROR,
-        TokenChannel::DEFAULT,
-        Payload::Error(ErrorType::UnterminatedStringLiteral),
-        None,
+        Some(tokens[0]),
     );
 }
