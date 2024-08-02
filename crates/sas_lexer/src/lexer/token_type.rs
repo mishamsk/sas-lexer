@@ -2,7 +2,6 @@ use strum::{Display, EnumIter};
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, EnumIter, Display)]
 pub enum TokenType {
-    ERROR,
     EOF,
     WS,
     TermQuote,                     // *'; and *" ";
@@ -30,7 +29,6 @@ pub enum TokenType {
 impl From<TokenType> for i16 {
     fn from(variant: TokenType) -> Self {
         match variant {
-            TokenType::ERROR => -1,
             TokenType::EOF => 0,
             TokenType::WS => 1,
             TokenType::TermQuote => 2,

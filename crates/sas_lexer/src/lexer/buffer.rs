@@ -3,7 +3,6 @@ use std::ops::Range;
 use crate::lexer::channel;
 use crate::lexer::token_type;
 
-use super::error::ErrorType;
 use super::text::ByteOffset;
 use super::text::CharOffset;
 
@@ -37,7 +36,6 @@ impl LineIdx {
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum Payload {
     None,
-    Error(ErrorType),
 }
 
 /// A struct to hold information about the lines in the tokenized buffer.
@@ -90,8 +88,14 @@ const MIN_CAPACITY: usize = 4;
 const LINE_INFO_DIVISOR: usize = 88;
 const TOKEN_INFO_DIVISOR: usize = 4;
 
-#[derive(Debug)]
-pub struct TokenizedBuffer<'a> {
+/// A special structure used during lexing that stores
+/// the full information about lexed tokens and lines.
+/// A struct of arrays, used to optimize memory usage and cache locality.
+///
+/// It is not used as a public API, but is used internally by the lexer.
+/// The public API uses `DetachedTokenizedBuffer` instead.
+#[derive(Debug, Clone)]
+pub(crate) struct TokenizedBuffer<'a> {
     source: &'a str,
     source_len: ByteOffset,
     line_infos: Vec<LineInfo>,
@@ -136,13 +140,13 @@ impl TokenizedBuffer<'_> {
     /// # Errors
     ///
     /// Returns an error if the EOF token is not the last token in the buffer.
-    pub fn into_detached(&self) -> Result<DetachedTokenizedBuffer, &str> {
+    pub(super) fn into_detached(self) -> Result<DetachedTokenizedBuffer, String> {
         if !self
             .token_infos
             .last()
             .map_or(false, |t| t.token_type == token_type::TokenType::EOF)
         {
-            return Err("EOF token is not the last token");
+            return Err("EOF token is not the last token".to_string());
         }
 
         Ok(DetachedTokenizedBuffer {
@@ -218,14 +222,14 @@ impl TokenizedBuffer<'_> {
     #[inline]
     #[must_use]
     #[allow(clippy::cast_possible_truncation)]
-    pub fn line_count(&self) -> u32 {
+    pub(super) fn line_count(&self) -> u32 {
         self.line_infos.len() as u32
     }
 
     #[inline]
     #[must_use]
     #[allow(clippy::cast_possible_truncation)]
-    pub fn token_count(&self) -> u32 {
+    pub(super) fn token_count(&self) -> u32 {
         // theoretically number of tokens may be larger than text size,
         // which checked to be no more than u32, but this is not possible in practice
         self.token_infos.len() as u32
@@ -233,7 +237,8 @@ impl TokenizedBuffer<'_> {
 
     /// Returns byte offset of the token in the source string slice.
     #[must_use]
-    pub fn get_token_start_byte_offset(&self, token: TokenIdx) -> ByteOffset {
+    #[cfg(test)]
+    fn get_token_start_byte_offset(&self, token: TokenIdx) -> ByteOffset {
         let tidx = token.0 as usize;
 
         debug_assert!(tidx < self.token_infos.len(), "Token index out of bounds");
@@ -244,7 +249,8 @@ impl TokenizedBuffer<'_> {
     /// Char here means a Unicode code point, not graphemes. This is
     /// what Python uses to index strings, and IDEs show for cursor position.
     #[must_use]
-    pub fn get_token_start(&self, token: TokenIdx) -> CharOffset {
+    #[cfg(test)]
+    fn get_token_start(&self, token: TokenIdx) -> CharOffset {
         let tidx = token.0 as usize;
 
         debug_assert!(tidx < self.token_infos.len(), "Token index out of bounds");
@@ -257,8 +263,9 @@ impl TokenizedBuffer<'_> {
     ///
     /// Note that EOF offset is 1 more than the mximum valid index in the source string.
     #[must_use]
+    #[cfg(test)]
     #[allow(clippy::cast_possible_truncation)]
-    pub fn get_token_end_byte_offset(&self, token: TokenIdx) -> ByteOffset {
+    fn get_token_end_byte_offset(&self, token: TokenIdx) -> ByteOffset {
         let tidx = token.0 as usize;
 
         debug_assert!(tidx < self.token_infos.len(), "Token index out of bounds");
@@ -279,8 +286,9 @@ impl TokenizedBuffer<'_> {
     /// Char here means a Unicode code point, not graphemes. This is
     /// what Python uses to index strings, and IDEs show for cursor position.
     #[must_use]
+    #[cfg(test)]
     #[allow(clippy::cast_possible_truncation)]
-    pub fn get_token_end(&self, token: TokenIdx) -> CharOffset {
+    fn get_token_end(&self, token: TokenIdx) -> CharOffset {
         let tidx = token.0 as usize;
 
         debug_assert!(tidx < self.token_infos.len(), "Token index out of bounds");
@@ -297,7 +305,8 @@ impl TokenizedBuffer<'_> {
 
     /// Returns line number of the token start, one-based.
     #[must_use]
-    pub fn get_token_start_line(&self, token: TokenIdx) -> u32 {
+    #[cfg(test)]
+    fn get_token_start_line(&self, token: TokenIdx) -> u32 {
         let tidx = token.0 as usize;
 
         debug_assert!(tidx < self.token_infos.len(), "Token index out of bounds");
@@ -306,8 +315,9 @@ impl TokenizedBuffer<'_> {
 
     /// Returns line number of the token end, one-based.
     #[must_use]
+    #[cfg(test)]
     #[allow(clippy::cast_possible_truncation)]
-    pub fn get_token_end_line(&self, token: TokenIdx) -> u32 {
+    fn get_token_end_line(&self, token: TokenIdx) -> u32 {
         let tidx = token.0 as usize;
 
         debug_assert!(tidx < self.token_infos.len(), "Token index out of bounds");
@@ -327,7 +337,8 @@ impl TokenizedBuffer<'_> {
 
     /// Returns column number of the token start, zero-based.
     #[must_use]
-    pub fn get_token_start_column(&self, token: TokenIdx) -> u32 {
+    #[cfg(test)]
+    fn get_token_start_column(&self, token: TokenIdx) -> u32 {
         let tidx = token.0 as usize;
 
         debug_assert!(tidx < self.token_infos.len(), "Token index out of bounds");
@@ -340,7 +351,8 @@ impl TokenizedBuffer<'_> {
 
     /// Returns column number of the token end, zero-based.
     #[must_use]
-    pub fn get_token_end_column(&self, token: TokenIdx) -> u32 {
+    #[cfg(test)]
+    fn get_token_end_column(&self, token: TokenIdx) -> u32 {
         let tidx = token.0 as usize;
 
         debug_assert!(tidx < self.token_infos.len(), "Token index out of bounds");
@@ -353,7 +365,8 @@ impl TokenizedBuffer<'_> {
 
     /// Returns the token type
     #[must_use]
-    pub fn get_token_type(&self, token: TokenIdx) -> token_type::TokenType {
+    #[cfg(test)]
+    fn get_token_type(&self, token: TokenIdx) -> token_type::TokenType {
         let tidx = token.0 as usize;
 
         debug_assert!(tidx < self.token_infos.len(), "Token index out of bounds");
@@ -362,7 +375,8 @@ impl TokenizedBuffer<'_> {
 
     /// Returns the token channel
     #[must_use]
-    pub fn get_token_channel(&self, token: TokenIdx) -> channel::TokenChannel {
+    #[cfg(test)]
+    fn get_token_channel(&self, token: TokenIdx) -> channel::TokenChannel {
         let tidx = token.0 as usize;
 
         debug_assert!(tidx < self.token_infos.len(), "Token index out of bounds");
@@ -371,7 +385,8 @@ impl TokenizedBuffer<'_> {
 
     /// Retruns the text of the token.
     #[must_use]
-    pub fn get_token_text(&self, token: TokenIdx) -> Option<&str> {
+    #[cfg(test)]
+    fn get_token_text(&self, token: TokenIdx) -> Option<&str> {
         let tidx = token.0 as usize;
 
         debug_assert!(tidx < self.token_infos.len(), "Token index out of bounds");
@@ -396,7 +411,8 @@ impl TokenizedBuffer<'_> {
 
     /// Returns the payload of the token.
     #[must_use]
-    pub fn get_token_payload(&self, token: TokenIdx) -> Payload {
+    #[cfg(test)]
+    fn get_token_payload(&self, token: TokenIdx) -> Payload {
         let tidx = token.0 as usize;
 
         debug_assert!(tidx < self.token_infos.len(), "Token index out of bounds");
@@ -413,10 +429,15 @@ impl IntoIterator for &TokenizedBuffer<'_> {
     }
 }
 
-/// A `TokenizedBuffer` that has been detached from the source string.
+/// A special structure produced by the lexer that stores the full information
+/// about lexed tokens and lines.
+/// A struct of arrays, used to optimize memory usage and cache locality.
 ///
-/// It is immutable by design and can only be created from a finished `TokenizedBuffer`.
-/// Partly becomes it relies (and checks on creation) an invariant that
+/// It is immutable by design and can only be created by the lexer.
+/// It doesn't store reference to the original source string, so it can be used
+/// after the source string is dropped. But to get the text of the token,
+/// the source string must be provided.
+///
 /// EOF token is always the last token.
 #[derive(Debug, Clone)]
 pub struct DetachedTokenizedBuffer {
@@ -530,7 +551,7 @@ impl DetachedTokenizedBuffer {
             self.token_infos[tidx + 1].line
         } else {
             // Must be EOF token => same as start line of EOF token
-            self.token_infos[tidx].line
+            return self.token_infos[tidx].line.0 + 1;
         };
 
         let next_token_line_info = self.line_infos[next_token_line_idx.0 as usize];
@@ -687,7 +708,7 @@ mod tests {
         assert_eq!(detached.unwrap_err(), "EOF token is not the last token");
     }
 
-    fn validate_detached_buffer(buffer: &mut TokenizedBuffer) {
+    fn validate_detached_buffer(mut buffer: TokenizedBuffer) {
         // Add eof token if not already present
         if buffer
             .token_infos
@@ -704,7 +725,7 @@ mod tests {
             );
         }
 
-        let detached = buffer.into_detached().unwrap();
+        let detached = buffer.clone().into_detached().unwrap();
 
         // Now compare all getters between the original and detached buffer
         assert_eq!(buffer.line_count(), detached.line_count());
@@ -762,9 +783,9 @@ mod tests {
 
     #[test]
     fn test_detached_two_tokens() {
-        let (mut buffer, _, _) = get_two_tok_buffer();
+        let (buffer, _, _) = get_two_tok_buffer();
 
-        validate_detached_buffer(&mut buffer);
+        validate_detached_buffer(buffer);
     }
 
     #[test]
