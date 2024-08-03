@@ -12,6 +12,7 @@ version = { workspace = true }
 [dependencies]
 strum = { workspace = true }
 sas_lexer_macro = { workspace = true }
+unicode-ident = "1.0.12"
 
 [dev-dependencies]
 insta = { workspace = true }

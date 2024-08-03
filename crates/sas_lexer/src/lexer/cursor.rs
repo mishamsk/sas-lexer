@@ -27,9 +27,9 @@ impl<'a> Cursor<'a> {
         }
     }
 
-    // pub(super) fn as_str(&self) -> &'a str {
-    //     self.chars.as_str()
-    // }
+    pub(super) fn as_str(&self) -> &'a str {
+        self.chars.as_str()
+    }
 
     /// Returns a clone of the underlying char iterator.
     pub(super) fn chars(&self) -> Chars<'a> {

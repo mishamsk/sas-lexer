@@ -2,7 +2,9 @@
 
 use sas_lexer::{
     error::{ErrorInfo, ErrorType},
-    lex, Payload, TokenChannel, TokenIdx, TokenType, TokenizedBuffer,
+    lex,
+    print::token_to_string,
+    Payload, TokenChannel, TokenIdx, TokenType, TokenizedBuffer,
 };
 
 #[macro_export]
@@ -49,12 +51,10 @@ impl TokenTestCase for (&str, TokenType) {
     }
 
     fn token_channel(&self) -> TokenChannel {
-        assert_ne!(
-            self.1,
-            TokenType::WS,
-            "Whitespace token must have a channel"
-        );
-        TokenChannel::default()
+        match self.1 {
+            TokenType::WS => TokenChannel::HIDDEN,
+            _ => TokenChannel::default(),
+        }
     }
 
     fn payload(&self) -> Payload {
@@ -139,6 +139,18 @@ impl TokenTestCase for TokenType {
     }
 }
 
+fn format_tokens_for_trace<'a, I, S>(tokens: I, buffer: &TokenizedBuffer, source: &S) -> String
+where
+    I: IntoIterator<Item = TokenIdx>,
+    S: AsRef<str> + 'a,
+{
+    tokens
+        .into_iter()
+        .map(|token| format!("- {}", token_to_string(token, buffer, source)))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 pub(crate) fn check_token<S: AsRef<str>>(
     source: &str,
     token: TokenIdx,
@@ -160,102 +172,113 @@ pub(crate) fn check_token<S: AsRef<str>>(
 
     // Byte offsets
     assert_eq!(
+        start_byte_offset,
         buffer.get_token_start_byte_offset(token).get(),
+        "Expected start byte offset {}, got {}: {}",
         start_byte_offset,
-        "Expected start byte offset {}, got {}",
-        start_byte_offset,
-        buffer.get_token_start(token).get()
+        buffer.get_token_start(token).get(),
+        token_to_string(token, buffer, &source)
     );
 
     assert_eq!(
+        end_byte_offset,
         buffer.get_token_end_byte_offset(token).get(),
+        "Expected end byte offset {}, got {}: {}",
         end_byte_offset,
-        "Expected end byte offset {}, got {}",
-        end_byte_offset,
-        buffer.get_token_end(token).get()
+        buffer.get_token_end(token).get(),
+        token_to_string(token, buffer, &source)
     );
 
     // Char offsets
     assert_eq!(
+        start_char_offset,
         buffer.get_token_start(token).get(),
+        "Expected start char offset {}, got {}: {}",
         start_char_offset,
-        "Expected start char offset {}, got {}",
-        start_char_offset,
-        buffer.get_token_start(token).get()
+        buffer.get_token_start(token).get(),
+        token_to_string(token, buffer, &source)
     );
     assert_eq!(
+        end_char_offset,
         buffer.get_token_end(token).get(),
+        "Expected end char offset {}, got {}: {}",
         end_char_offset,
-        "Expected end char offset {}, got {}",
-        end_char_offset,
-        buffer.get_token_end(token).get()
+        buffer.get_token_end(token).get(),
+        token_to_string(token, buffer, &source)
     );
 
     // Line and column
     assert_eq!(
+        start_line,
         buffer.get_token_start_line(token),
+        "Expected start line {}, got {}: {}",
         start_line,
-        "Expected start line {}, got {}",
-        start_line,
-        buffer.get_token_start_line(token)
+        buffer.get_token_start_line(token),
+        token_to_string(token, buffer, &source)
     );
 
     let end_line = start_line + line_count - 1;
 
     assert_eq!(
+        end_line,
         buffer.get_token_end_line(token),
+        "Expected end line {}, got {}: {}",
         end_line,
-        "Expected end line {}, got {}",
-        end_line,
-        buffer.get_token_end_line(token)
+        buffer.get_token_end_line(token),
+        token_to_string(token, buffer, &source)
     );
 
     assert_eq!(
+        start_column,
         buffer.get_token_start_column(token),
+        "Expected start column {}, got {}: {}",
         start_column,
-        "Expected start column {}, got {}",
-        start_column,
-        buffer.get_token_start_column(token)
+        buffer.get_token_start_column(token),
+        token_to_string(token, buffer, &source)
     );
 
     assert_eq!(
+        end_column,
         buffer.get_token_end_column(token),
+        "Expected end column {}, got {}: {}",
         end_column,
-        "Expected end column {}, got {}",
-        end_column,
-        buffer.get_token_end_column(token)
+        buffer.get_token_end_column(token),
+        token_to_string(token, buffer, &source)
     );
 
     // Token type, channel, payload and text
     assert_eq!(
+        token_type,
         buffer.get_token_type(token),
+        "Expected token type {:?}, got {:?}: {}",
         token_type,
-        "Expected token type {:?}, got {:?}",
-        token_type,
-        buffer.get_token_type(token)
+        buffer.get_token_type(token),
+        token_to_string(token, buffer, &source)
     );
 
     assert_eq!(
+        token_channel,
         buffer.get_token_channel(token),
+        "Expected token channel {:?}, got {:?}: {}",
         token_channel,
-        "Expected token channel {:?}, got {:?}",
-        token_channel,
-        buffer.get_token_channel(token)
+        buffer.get_token_channel(token),
+        token_to_string(token, buffer, &source)
     );
 
     assert_eq!(
+        payload,
         buffer.get_token_payload(token),
+        "Expected token payload {:?}, got {:?}: {}",
         payload,
-        "Expected token payload {:?}, got {:?}",
-        payload,
-        buffer.get_token_payload(token)
+        buffer.get_token_payload(token),
+        token_to_string(token, buffer, &source)
     );
 
     let token_text = token_text.as_ref().map(|s| s.as_ref());
 
     assert_eq!(
-        buffer.get_token_text(token, &source),
         token_text,
+        buffer.get_token_text(token, &source),
         "Expected text {:?}, got {:?}",
         token_text,
         buffer.get_token_text(token, &source)
@@ -370,11 +393,12 @@ pub(crate) fn assert_lexing(
 
     // Check total token count
     assert_eq!(
+        expected_tokens.len() + 1,
         tokens.len(),
+        "Expected {} tokens including EOF, got {}:\n{}",
         expected_tokens.len() + 1,
-        "Expected {} tokens including EOF, got {}",
-        expected_tokens.len() + 1,
-        tokens.len()
+        tokens.len(),
+        format_tokens_for_trace(tokens, &buffer, &source)
     );
 
     // reverse the tokens, so we could compare left to right

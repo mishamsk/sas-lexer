@@ -100,6 +100,7 @@ fn test_unterminated_cstyle_comment() {
 #[case::empty("")]
 #[case::escaped("some#other")] // we use the #, to let the test function put the right quotes
 #[case::with_newline("some\nother")]
+#[case::with_crlf("some\r\nother")]
 #[case::with_unicode("some\n🔥\n")]
 #[case::with_macro_chars("&9 and &&&, 9% and %%%")]
 #[case::with_real_macro("%some() and &mvar")]
@@ -205,4 +206,77 @@ fn test_string_expr(
             NO_ERRORS,
         );
     }
+}
+
+#[rstest]
+#[case::simple("body,1,2")]
+#[case::with_macro("&mv,%mcall()")]
+#[case::with_newline("datalines\nother")]
+#[case::with_unicode("some\n🔥\n")]
+#[case::with_semi("; datalines; other")]
+fn test_datalines(#[values("", ";", ";\n\t/*comment*/  ")] prefix: &str, #[case] body: &str) {
+    // choose the right keywords to test
+    let (starts, ending) = if body.contains(";") {
+        (
+            ["dAtALiNeS4", "lInEs4", "cArDs4", "cArDs4  ", "cArDs4\n"],
+            ";;;;",
+        )
+    } else {
+        (["dAtALiNeS", "lInEs", "cArDs", "cArDs  ", "cArDs\n"], ";")
+    };
+
+    let (buffer, _) = lex(&prefix).unwrap();
+
+    let prefix_expected_tokens = if prefix.is_empty() {
+        vec![]
+    } else {
+        buffer
+            .into_iter()
+            .filter(|t| buffer.get_token_type(*t) != TokenType::EOF)
+            .map(|t| {
+                (
+                    buffer.get_token_text(t, &prefix).unwrap(),
+                    buffer.get_token_type(t),
+                    buffer.get_token_channel(t),
+                )
+            })
+            .collect()
+    };
+
+    for start_sans_semi in starts {
+        // Construct the source string
+        let full_start = format!("{start_sans_semi};");
+
+        let source = format!("{prefix}{full_start}{body}{ending}");
+
+        let mut expected_tokens = prefix_expected_tokens.clone();
+
+        expected_tokens.extend([
+            (
+                full_start.as_ref(),
+                TokenType::DatalinesStart,
+                TokenChannel::DEFAULT,
+            ),
+            (body, TokenType::DatalinesData, TokenChannel::DEFAULT),
+            (ending, TokenType::DatalinesEnd, TokenChannel::DEFAULT),
+        ]);
+
+        assert_lexing(source.as_str(), expected_tokens, NO_ERRORS);
+    }
+}
+
+#[test]
+fn test_not_datalines() {
+    let source = "input datalines4;";
+    assert_lexing(
+        source,
+        vec![
+            // this is temporary, will fail when we add keywords
+            ("input", TokenType::BaseIdentifier),
+            (" ", TokenType::WS),
+            ("datalines4", TokenType::BaseIdentifier),
+            (";", TokenType::SEMI),
+        ],
+        NO_ERRORS,
+    );
 }
