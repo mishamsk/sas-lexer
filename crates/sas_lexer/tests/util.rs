@@ -368,8 +368,7 @@ pub(crate) fn check_error(
 
     assert_eq!(
         last_token, last_token_idx,
-        "Expected last token index {:?}, got {:?}",
-        last_token_idx, last_token
+        "Expected last token index {last_token_idx:?}, got {last_token:?}"
     );
 }
 
@@ -505,7 +504,7 @@ pub(crate) fn assert_lexing(
     );
 
     for (i, expected_err) in expected_errors.iter().enumerate() {
-        let lexed_err = errors.get(i).unwrap();
+        let lexed_err = &errors[i];
 
         check_error(
             lexed_err,

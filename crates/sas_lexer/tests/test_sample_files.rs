@@ -1,3 +1,5 @@
+#![allow(clippy::cast_possible_truncation, clippy::unwrap_used)]
+
 #[macro_use]
 mod util;
 
@@ -11,6 +13,7 @@ fn test_snapshots(#[files("tests/samples/**/*.sas")] path: PathBuf) {
     // Compute the absolute path of the prefix
 
     use sas_lexer::print::error_to_string;
+
     let prefix = fs::canonicalize("tests/samples/").unwrap();
 
     let snap_name = path.strip_prefix(&prefix).unwrap();
@@ -38,7 +41,7 @@ fn test_snapshots(#[files("tests/samples/**/*.sas")] path: PathBuf) {
     } else {
         let error_strins = errors
             .iter()
-            .map(|error| format!("{}", error_to_string(error, &tok_buffer, &contents)))
+            .map(|error| error_to_string(error, &tok_buffer, &contents).to_string())
             .collect::<Vec<String>>();
         assert_yaml_snapshot!("errors_snapshot", error_strins);
     }
