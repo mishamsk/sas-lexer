@@ -1,24 +1,27 @@
-use strum::{Display, EnumIter};
+use sas_lexer_macro::{FromU16, ToU16};
+use strum::Display;
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy, EnumIter, Display)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, ToU16, FromU16, Display)]
 pub enum TokenType {
     EOF,
     WS,
-    TermQuote,                     // *'; and *" ";
-    SingleQuotedStringLiteral,     // 'string'
-    SingleQuotedBitTestingLiteral, // 'stuff'b
-    SingleQuotedDateLiteral,       // 'stuff'd
-    SingleQuotedDateTimeLiteral,   // 'stuff'dt
-    SingleQuotedNameLiteral,       // 'stuff'n
-    SingleQuotedTimeLiteral,       // 'stuff't
-    SingleQuotedHexStringLiteral,  // 'stuff'x
-    DoubleQuotedStringExprEnd,     // "string"
-    DoubleQuotedBitTestingExprEnd, // "stuff"b
-    DoubleQuotedDateExprEnd,       // "stuff"d
-    DoubleQuotedDateTimeExprEnd,   // "stuff"dt
-    DoubleQuotedNameExprEnd,       // "stuff"n
-    DoubleQuotedTimeExprEnd,       // "stuff"t
-    DoubleQuotedHexStringExprEnd,  // "stuff"x
+    TermQuote,                // *'; and *" ";
+    StringLiteral,            // 'string'
+    BitTestingLiteral,        // 'stuff'b
+    DateLiteral,              // 'stuff'd
+    DateTimeLiteral,          // 'stuff'dt
+    NameLiteral,              // 'stuff'n
+    TimeLiteral,              // 'stuff't
+    HexStringLiteral,         // 'stuff'x
+    StringExprStart,          // "
+    StringExprText,           // "&mv.-->string<--"
+    StringExprEnd,            // "&mv.string" <-- this is the end
+    BitTestingLiteralExprEnd, // "&mv.stuff"b
+    DateLiteralExprEnd,       // "&mv.stuff"d
+    DateTimeLiteralExprEnd,   // "&mv.stuff"dt
+    NameLiteralExprEnd,       // "&mv.stuff"n
+    TimeLiteralExprEnd,       // "&mv.stuff"t
+    HexStringLiteralExprEnd,  // "&mv.stuff"x
     AMP,
     PERCENT,
     BaseCode,
@@ -26,47 +29,25 @@ pub enum TokenType {
     MacroVarExpr,  // &&mvar&another. etc.
 }
 
-impl From<TokenType> for i16 {
-    fn from(variant: TokenType) -> Self {
-        match variant {
-            TokenType::EOF => 0,
-            TokenType::WS => 1,
-            TokenType::TermQuote => 2,
-            TokenType::SingleQuotedStringLiteral => 3,
-            TokenType::SingleQuotedBitTestingLiteral => 4,
-            TokenType::SingleQuotedDateLiteral => 5,
-            TokenType::SingleQuotedDateTimeLiteral => 6,
-            TokenType::SingleQuotedNameLiteral => 7,
-            TokenType::SingleQuotedTimeLiteral => 8,
-            TokenType::SingleQuotedHexStringLiteral => 9,
-            TokenType::AMP => 10,
-            TokenType::PERCENT => 11,
-            TokenType::BaseCode => 12,
-            TokenType::CStyleComment => 13,
-            TokenType::MacroVarExpr => 14,
-            TokenType::DoubleQuotedStringExprEnd => 15,
-            TokenType::DoubleQuotedBitTestingExprEnd => 16,
-            TokenType::DoubleQuotedDateExprEnd => 17,
-            TokenType::DoubleQuotedDateTimeExprEnd => 18,
-            TokenType::DoubleQuotedNameExprEnd => 19,
-            TokenType::DoubleQuotedTimeExprEnd => 20,
-            TokenType::DoubleQuotedHexStringExprEnd => 21,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use strum::IntoEnumIterator;
 
     #[test]
-    fn token_type_values_are_unique() {
-        let variants = TokenType::iter();
-        let mut values = variants.map(i16::from).collect::<Vec<_>>();
-        values.sort_unstable();
-        values.dedup();
+    fn test_eof_u16_conversion() {
+        assert_eq!(TokenType::EOF as u16, 0);
+        assert_eq!(Some(TokenType::EOF), TokenType::from_u16(0));
+    }
 
-        assert_eq!(values.len(), TokenType::iter().count());
+    #[test]
+    fn test_all_tokens_round_trip() {
+        const TOKEN_COUNT: u16 = 24;
+
+        for i in 0..TOKEN_COUNT {
+            let token = TokenType::from_u16(i).unwrap();
+            assert_eq!(i, token as u16);
+        }
+
+        assert_eq!(TokenType::from_u16(TOKEN_COUNT), None);
     }
 }

@@ -7,6 +7,7 @@ pub enum ErrorType {
     UnterminatedStringLiteral,
     UnterminatedComment,
     EmptyModeStack,
+    InternalError(&'static str),
 }
 
 impl Display for ErrorType {
@@ -20,6 +21,9 @@ impl Display for ErrorType {
             }
             ErrorType::EmptyModeStack => {
                 write!(f, "Unexpected empty mode stack")
+            }
+            ErrorType::InternalError(msg) => {
+                write!(f, "Internal error: {msg}")
             }
         }
     }

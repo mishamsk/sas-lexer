@@ -11,6 +11,7 @@ version = { workspace = true }
 
 [dependencies]
 strum = { workspace = true }
+sas_lexer_macro = { workspace = true }
 
 [dev-dependencies]
 insta = { workspace = true }

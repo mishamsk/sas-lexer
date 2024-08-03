@@ -1,12 +1,12 @@
 use crate::error::ErrorInfo;
 /// Functions to print the token
-use crate::lexer::buffer::{DetachedTokenizedBuffer, Payload, TokenIdx};
+use crate::lexer::buffer::{Payload, TokenIdx, TokenizedBuffer};
 
 #[must_use]
-pub fn token_to_string<'a, S: AsRef<str> + 'a>(
+pub fn token_to_string<S: AsRef<str>>(
     token: TokenIdx,
-    buffer: &DetachedTokenizedBuffer,
-    source: &'a S,
+    buffer: &TokenizedBuffer,
+    source: &S,
 ) -> String {
     let token_idx = token.get();
     let start_line = buffer.get_token_start_line(token);
@@ -34,10 +34,10 @@ pub fn token_to_string<'a, S: AsRef<str> + 'a>(
     token_repr
 }
 
-pub fn error_to_string<'a, S: AsRef<str> + 'a>(
+pub fn error_to_string<S: AsRef<str>>(
     error: &ErrorInfo,
-    buffer: &DetachedTokenizedBuffer,
-    source: &'a S,
+    buffer: &TokenizedBuffer,
+    source: &S,
 ) -> String {
     let error_type = error.error_type();
     let at_byte_offset = error.at_byte_offset();

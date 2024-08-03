@@ -54,16 +54,18 @@ pub(super) struct LineInfo {
 
 impl LineInfo {
     #[must_use]
-    #[inline]
-    pub(super) fn get_start_char_offset(self) -> CharOffset {
+    pub(super) fn start(self) -> CharOffset {
         self.start
     }
 }
 
 /// A struct to hold information about the tokens in the tokenized buffer.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
-struct TokenInfo {
+pub(super) struct TokenInfo {
+    /// Channel of the token.
     channel: channel::TokenChannel,
+
+    /// Type of the token.
     token_type: token_type::TokenType,
 
     /// Zero-based byte offset of the token in the source string slice.
@@ -84,6 +86,38 @@ struct TokenInfo {
     payload: Payload,
 }
 
+impl TokenInfo {
+    // #[must_use]
+    // pub(super) fn channel(&self) -> channel::TokenChannel {
+    //     self.channel
+    // }
+
+    #[must_use]
+    pub(super) fn token_type(&self) -> token_type::TokenType {
+        self.token_type
+    }
+
+    #[must_use]
+    pub(super) fn byte_offset(&self) -> ByteOffset {
+        self.byte_offset
+    }
+
+    #[must_use]
+    pub(super) fn start(&self) -> CharOffset {
+        self.start
+    }
+
+    #[must_use]
+    pub(super) fn line(&self) -> LineIdx {
+        self.line
+    }
+
+    // #[must_use]
+    // pub(super) fn payload(&self) -> Payload {
+    //     self.payload
+    // }
+}
+
 const MIN_CAPACITY: usize = 4;
 const LINE_INFO_DIVISOR: usize = 88;
 const TOKEN_INFO_DIVISOR: usize = 4;
@@ -93,30 +127,27 @@ const TOKEN_INFO_DIVISOR: usize = 4;
 /// A struct of arrays, used to optimize memory usage and cache locality.
 ///
 /// It is not used as a public API, but is used internally by the lexer.
-/// The public API uses `DetachedTokenizedBuffer` instead.
+/// The public API uses `TokenizedBuffer` instead.
 #[derive(Debug, Clone)]
-pub(crate) struct TokenizedBuffer<'a> {
-    source: &'a str,
+pub(crate) struct WorkTokenizedBuffer {
     source_len: ByteOffset,
     line_infos: Vec<LineInfo>,
     token_infos: Vec<TokenInfo>,
 }
 
-impl TokenizedBuffer<'_> {
-    pub(super) fn new(source: &str) -> TokenizedBuffer {
+impl WorkTokenizedBuffer {
+    pub(super) fn new(source: &str) -> WorkTokenizedBuffer {
         // SAFETY: This can only be created from lexer, which explicitly checks for the length
         #[allow(clippy::unwrap_used)]
         let source_len = ByteOffset::new(u32::try_from(source.len()).unwrap());
 
         match source.len() {
-            0 => TokenizedBuffer {
-                source,
+            0 => WorkTokenizedBuffer {
                 source_len,
                 line_infos: Vec::new(),
                 token_infos: Vec::new(),
             },
-            len => TokenizedBuffer {
-                source,
+            len => WorkTokenizedBuffer {
                 source_len,
                 line_infos: Vec::with_capacity(std::cmp::max(
                     len / LINE_INFO_DIVISOR,
@@ -130,27 +161,23 @@ impl TokenizedBuffer<'_> {
         }
     }
 
-    pub(super) fn iter(&self) -> std::iter::Map<std::ops::Range<u32>, fn(u32) -> TokenIdx> {
-        (0..self.token_count()).map(TokenIdx::new)
-    }
-
-    /// Converts the `TokenizedBuffer` into a `DetachedTokenizedBuffer`.
+    /// Converts the `WorkTokenizedBuffer` into a `TokenizedBuffer`.
     /// This is supposed to be called only when the tokenization is finished.
     ///
     /// # Errors
     ///
     /// Returns an error if the EOF token is not the last token in the buffer.
-    pub(super) fn into_detached(self) -> Result<DetachedTokenizedBuffer, String> {
+    pub(super) fn into_detached(self) -> Result<TokenizedBuffer, &'static str> {
         if cfg!(debug_assertions)
             && !self
                 .token_infos
                 .last()
                 .map_or(false, |t| t.token_type == token_type::TokenType::EOF)
         {
-            return Err("EOF token is not the last token".to_string());
+            return Err("EOF token is not the last token");
         }
 
-        Ok(DetachedTokenizedBuffer {
+        Ok(TokenizedBuffer {
             line_infos: self.line_infos.into_boxed_slice(),
             token_infos: self.token_infos.into_boxed_slice(),
         })
@@ -216,8 +243,24 @@ impl TokenizedBuffer<'_> {
         TokenIdx::new(self.token_count() - 1)
     }
 
-    pub(super) fn get_line_infos(&self) -> &[LineInfo] {
-        &self.line_infos
+    pub(super) fn pop_token(&mut self) -> Option<TokenInfo> {
+        self.token_infos.pop()
+    }
+
+    // pub(super) fn iter_line_infos(&self) -> std::slice::Iter<'_, LineInfo> {
+    //     self.line_infos.iter()
+    // }
+
+    pub(super) fn last_line_info(&self) -> Option<&LineInfo> {
+        self.line_infos.last()
+    }
+
+    // pub(super) fn iter_token_infos(&self) -> std::slice::Iter<'_, TokenInfo> {
+    //     self.token_infos.iter()
+    // }
+
+    pub(super) fn last_token_info(&self) -> Option<&TokenInfo> {
+        self.token_infos.last()
     }
 
     #[inline]
@@ -235,199 +278,6 @@ impl TokenizedBuffer<'_> {
         // which checked to be no more than u32, but this is not possible in practice
         self.token_infos.len() as u32
     }
-
-    /// Returns byte offset of the token in the source string slice.
-    #[must_use]
-    #[cfg(test)]
-    fn get_token_start_byte_offset(&self, token: TokenIdx) -> ByteOffset {
-        let tidx = token.0 as usize;
-
-        debug_assert!(tidx < self.token_infos.len(), "Token index out of bounds");
-        self.token_infos[tidx].byte_offset
-    }
-
-    /// Returns char offset of the token in the source string.
-    /// Char here means a Unicode code point, not graphemes. This is
-    /// what Python uses to index strings, and IDEs show for cursor position.
-    #[must_use]
-    #[cfg(test)]
-    fn get_token_start(&self, token: TokenIdx) -> CharOffset {
-        let tidx = token.0 as usize;
-
-        debug_assert!(tidx < self.token_infos.len(), "Token index out of bounds");
-        self.token_infos[tidx].start
-    }
-
-    /// Returns byte offset right after the token in the source string slice.
-    ///
-    /// This is the same as the start of the next token or EOF.
-    ///
-    /// Note that EOF offset is 1 more than the mximum valid index in the source string.
-    #[must_use]
-    #[cfg(test)]
-    #[allow(clippy::cast_possible_truncation)]
-    fn get_token_end_byte_offset(&self, token: TokenIdx) -> ByteOffset {
-        let tidx = token.0 as usize;
-
-        debug_assert!(tidx < self.token_infos.len(), "Token index out of bounds");
-
-        if tidx + 1 < self.token_infos.len() {
-            self.token_infos[tidx + 1].byte_offset
-        } else {
-            self.source_len
-        }
-    }
-
-    /// Returns char offset right after the token in the source string.
-    ///
-    /// This is the same as the start of the next token or EOF.
-    ///
-    /// Note that EOF offset is 1 more than the mximum valid index in the source string.
-    ///
-    /// Char here means a Unicode code point, not graphemes. This is
-    /// what Python uses to index strings, and IDEs show for cursor position.
-    #[must_use]
-    #[cfg(test)]
-    #[allow(clippy::cast_possible_truncation)]
-    fn get_token_end(&self, token: TokenIdx) -> CharOffset {
-        let tidx = token.0 as usize;
-
-        debug_assert!(tidx < self.token_infos.len(), "Token index out of bounds");
-
-        if tidx + 1 < self.token_infos.len() {
-            self.token_infos[tidx + 1].start
-        } else {
-            // This is quite inefficient, but since normally the last token is the EOF token,
-            // and it is unlikely that someone cares about the end of the EOF token, this is fine.
-            #[allow(clippy::cast_possible_truncation)]
-            CharOffset::new(self.source.chars().count() as u32)
-        }
-    }
-
-    /// Returns line number of the token start, one-based.
-    #[must_use]
-    #[cfg(test)]
-    fn get_token_start_line(&self, token: TokenIdx) -> u32 {
-        let tidx = token.0 as usize;
-
-        debug_assert!(tidx < self.token_infos.len(), "Token index out of bounds");
-        self.token_infos[tidx].line.0 + 1
-    }
-
-    /// Returns line number of the token end, one-based.
-    #[must_use]
-    #[cfg(test)]
-    #[allow(clippy::cast_possible_truncation)]
-    fn get_token_end_line(&self, token: TokenIdx) -> u32 {
-        let tidx = token.0 as usize;
-
-        debug_assert!(tidx < self.token_infos.len(), "Token index out of bounds");
-
-        // This is more elaborate than the start line, as we need to count
-        // the number of newlines in the token text
-        let tok_text = self.get_token_text(token);
-
-        let line_count = if let Some(text) = tok_text {
-            (text.lines().count() - 1) as u32
-        } else {
-            0
-        };
-
-        self.token_infos[tidx].line.0 + 1 + line_count
-    }
-
-    /// Returns column number of the token start, zero-based.
-    #[must_use]
-    #[cfg(test)]
-    fn get_token_start_column(&self, token: TokenIdx) -> u32 {
-        let tidx = token.0 as usize;
-
-        debug_assert!(tidx < self.token_infos.len(), "Token index out of bounds");
-
-        let token_info = self.token_infos[tidx];
-        let line_info = self.line_infos[token_info.line.0 as usize];
-
-        token_info.start.get() - line_info.start.get()
-    }
-
-    /// Returns column number of the token end, zero-based.
-    #[must_use]
-    #[cfg(test)]
-    fn get_token_end_column(&self, token: TokenIdx) -> u32 {
-        let tidx = token.0 as usize;
-
-        debug_assert!(tidx < self.token_infos.len(), "Token index out of bounds");
-
-        let token_end = self.get_token_end(token);
-        let token_end_line_info = self.line_infos[(self.get_token_end_line(token) - 1) as usize];
-
-        token_end.get() - token_end_line_info.start.get()
-    }
-
-    /// Returns the token type
-    #[must_use]
-    #[cfg(test)]
-    fn get_token_type(&self, token: TokenIdx) -> token_type::TokenType {
-        let tidx = token.0 as usize;
-
-        debug_assert!(tidx < self.token_infos.len(), "Token index out of bounds");
-        self.token_infos[tidx].token_type
-    }
-
-    /// Returns the token channel
-    #[must_use]
-    #[cfg(test)]
-    fn get_token_channel(&self, token: TokenIdx) -> channel::TokenChannel {
-        let tidx = token.0 as usize;
-
-        debug_assert!(tidx < self.token_infos.len(), "Token index out of bounds");
-        self.token_infos[tidx].channel
-    }
-
-    /// Retruns the text of the token.
-    #[must_use]
-    #[cfg(test)]
-    fn get_token_text(&self, token: TokenIdx) -> Option<&str> {
-        let tidx = token.0 as usize;
-
-        debug_assert!(tidx < self.token_infos.len(), "Token index out of bounds");
-        let token_info = self.token_infos[tidx];
-
-        let text_range = Range {
-            start: token_info.byte_offset.into(),
-            end: self.get_token_end_byte_offset(token).into(),
-        };
-
-        debug_assert!(
-            text_range.start <= text_range.end,
-            "Token start is after end"
-        );
-
-        if text_range.is_empty() {
-            return None;
-        }
-
-        Some(&self.source[text_range])
-    }
-
-    /// Returns the payload of the token.
-    #[must_use]
-    #[cfg(test)]
-    fn get_token_payload(&self, token: TokenIdx) -> Payload {
-        let tidx = token.0 as usize;
-
-        debug_assert!(tidx < self.token_infos.len(), "Token index out of bounds");
-        self.token_infos[tidx].payload
-    }
-}
-
-impl IntoIterator for &TokenizedBuffer<'_> {
-    type Item = TokenIdx;
-    type IntoIter = std::iter::Map<std::ops::Range<u32>, fn(u32) -> TokenIdx>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.iter()
-    }
 }
 
 /// A special structure produced by the lexer that stores the full information
@@ -441,12 +291,12 @@ impl IntoIterator for &TokenizedBuffer<'_> {
 ///
 /// EOF token is always the last token.
 #[derive(Debug, Clone)]
-pub struct DetachedTokenizedBuffer {
+pub struct TokenizedBuffer {
     line_infos: Box<[LineInfo]>,
     token_infos: Box<[TokenInfo]>,
 }
 
-impl DetachedTokenizedBuffer {
+impl TokenizedBuffer {
     #[inline]
     #[must_use]
     #[allow(clippy::cast_possible_truncation)]
@@ -650,12 +500,20 @@ impl DetachedTokenizedBuffer {
     }
 }
 
-impl IntoIterator for &DetachedTokenizedBuffer {
+impl IntoIterator for &TokenizedBuffer {
     type Item = TokenIdx;
     type IntoIter = std::iter::Map<std::ops::Range<u32>, fn(u32) -> TokenIdx>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
+    }
+}
+
+impl TryFrom<WorkTokenizedBuffer> for TokenizedBuffer {
+    type Error = &'static str;
+
+    fn try_from(buffer: WorkTokenizedBuffer) -> Result<Self, Self::Error> {
+        buffer.into_detached()
     }
 }
 
@@ -666,16 +524,15 @@ mod tests {
     #[test]
     fn tokenized_buffer_new() {
         let source = "Hello, world!";
-        let buffer = TokenizedBuffer::new(source);
+        let buffer = WorkTokenizedBuffer::new(source);
 
-        assert_eq!(buffer.source, source);
         assert_eq!(buffer.line_infos.capacity(), 4);
         assert_eq!(buffer.token_infos.capacity(), 4);
     }
 
-    fn get_two_tok_buffer() -> (TokenizedBuffer<'static>, TokenIdx, TokenIdx) {
+    fn get_two_tok_buffer() -> (TokenizedBuffer, TokenIdx, TokenIdx) {
         let source = "Hello, world!\nThis is a test.";
-        let mut buffer = TokenizedBuffer::new(source);
+        let mut buffer = WorkTokenizedBuffer::new(source);
 
         let line1 = buffer.add_line(ByteOffset::default(), CharOffset::default());
         let token1 = buffer.add_token(
@@ -696,105 +553,44 @@ mod tests {
             Payload::None,
         );
 
-        (buffer, token1, token2)
-    }
-
-    #[test]
-    fn check_detached_buffer_eof_invariant() {
-        let source = "Hello, world!";
-        let buffer = TokenizedBuffer::new(source);
-
-        let detached = buffer.into_detached();
-        assert!(detached.is_err());
-        assert_eq!(detached.unwrap_err(), "EOF token is not the last token");
-    }
-
-    fn validate_detached_buffer(mut buffer: TokenizedBuffer) {
-        // Add eof token if not already present
-        if buffer
-            .token_infos
-            .last()
-            .map_or(true, |t| t.token_type != token_type::TokenType::EOF)
-        {
-            buffer.add_token(
-                channel::TokenChannel::DEFAULT,
-                token_type::TokenType::EOF,
-                buffer.source_len,
-                CharOffset::new(buffer.source.chars().count() as u32),
-                LineIdx::new(buffer.line_count() - 1),
-                Payload::None,
-            );
-        }
-
-        let detached = buffer.clone().into_detached().unwrap();
-
-        // Now compare all getters between the original and detached buffer
-        assert_eq!(buffer.line_count(), detached.line_count());
-        assert_eq!(buffer.token_count(), detached.token_count());
-        assert_eq!(
-            buffer.iter().collect::<Vec<_>>(),
-            detached.iter().collect::<Vec<_>>()
+        // add EOF
+        buffer.add_token(
+            channel::TokenChannel::DEFAULT,
+            token_type::TokenType::EOF,
+            ByteOffset::new(29),
+            CharOffset::new(29),
+            line2,
+            Payload::None,
         );
 
-        for token in buffer.iter() {
-            assert_eq!(
-                buffer.get_token_start_byte_offset(token),
-                detached.get_token_start_byte_offset(token)
-            );
-            assert_eq!(
-                buffer.get_token_start(token),
-                detached.get_token_start(token)
-            );
-            assert_eq!(
-                buffer.get_token_end_byte_offset(token),
-                detached.get_token_end_byte_offset(token)
-            );
-            assert_eq!(buffer.get_token_end(token), detached.get_token_end(token));
-            assert_eq!(
-                buffer.get_token_start_line(token),
-                detached.get_token_start_line(token)
-            );
-            assert_eq!(
-                buffer.get_token_end_line(token),
-                detached.get_token_end_line(token)
-            );
-            assert_eq!(
-                buffer.get_token_start_column(token),
-                detached.get_token_start_column(token)
-            );
-            assert_eq!(
-                buffer.get_token_end_column(token),
-                detached.get_token_end_column(token)
-            );
-            assert_eq!(buffer.get_token_type(token), detached.get_token_type(token));
-            assert_eq!(
-                buffer.get_token_channel(token),
-                detached.get_token_channel(token)
-            );
-            assert_eq!(
-                buffer.get_token_text(token),
-                detached.get_token_text(token, &buffer.source)
-            );
-            assert_eq!(
-                buffer.get_token_payload(token),
-                detached.get_token_payload(token)
-            );
-        }
+        (buffer.try_into().unwrap(), token1, token2)
     }
 
     #[test]
-    fn test_detached_two_tokens() {
-        let (buffer, _, _) = get_two_tok_buffer();
+    fn check_buffer_eof_invariant() {
+        let source = "Hello, world!";
+        let work_buf = WorkTokenizedBuffer::new(source);
 
-        validate_detached_buffer(buffer);
+        let buf = work_buf.into_detached();
+        assert_eq!(buf.unwrap_err(), "EOF token is not the last token");
     }
 
     #[test]
     fn tokenized_buffer_get_token_text() {
         let (buffer, token1, token2) = get_two_tok_buffer();
 
-        assert_eq!(buffer.get_token_text(token1).unwrap(), "Hello, world!\nT");
-        assert_eq!(buffer.get_token_text(token2).unwrap(), "his is a test.");
+        assert_eq!(
+            buffer
+                .get_token_text(token1, &"Hello, world!\nThis is a test.")
+                .unwrap(),
+            "Hello, world!\nT"
+        );
+        assert_eq!(
+            buffer
+                .get_token_text(token2, &"Hello, world!\nThis is a test.")
+                .unwrap(),
+            "his is a test."
+        );
     }
 
     #[test]
@@ -838,12 +634,12 @@ mod tests {
     }
 
     #[test]
-    fn tokenized_buffer_get_token_type() {
+    fn tokenized_buffer_get_token_type_channel() {
         let source = "Hello, world!";
-        let mut buffer = TokenizedBuffer::new(source);
+        let mut work_buf = WorkTokenizedBuffer::new(source);
 
-        let line = buffer.add_line(ByteOffset::default(), CharOffset::default());
-        let token = buffer.add_token(
+        let line = work_buf.add_line(ByteOffset::default(), CharOffset::default());
+        let token = work_buf.add_token(
             channel::TokenChannel::DEFAULT,
             token_type::TokenType::BaseCode,
             ByteOffset::default(),
@@ -852,30 +648,19 @@ mod tests {
             Payload::None,
         );
 
-        assert_eq!(
-            buffer.get_token_type(token),
-            token_type::TokenType::BaseCode
-        );
-    }
-
-    #[test]
-    fn tokenized_buffer_get_token_channel() {
-        let source = "Hello, world!";
-        let mut buffer = TokenizedBuffer::new(source);
-
-        let line = buffer.add_line(ByteOffset::default(), CharOffset::default());
-        let token = buffer.add_token(
+        // add EOF
+        work_buf.add_token(
             channel::TokenChannel::DEFAULT,
-            token_type::TokenType::BaseCode,
-            ByteOffset::default(),
-            CharOffset::default(),
+            token_type::TokenType::EOF,
+            ByteOffset::new(13),
+            CharOffset::new(13),
             line,
             Payload::None,
         );
 
-        assert_eq!(
-            buffer.get_token_channel(token),
-            channel::TokenChannel::DEFAULT
-        );
+        let buf = work_buf.into_detached().unwrap();
+
+        assert_eq!(buf.get_token_type(token), token_type::TokenType::BaseCode);
+        assert_eq!(buf.get_token_channel(token), channel::TokenChannel::DEFAULT);
     }
 }

@@ -1,0 +1,20 @@
+[package]
+name = "sas_lexer_macro"
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+authors.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[lib]
+proc-macro = true
+
+
+[dependencies]
+quote = "1.0.36"
+syn = "2.0.72"
+
+
+[lints]
+workspace = true

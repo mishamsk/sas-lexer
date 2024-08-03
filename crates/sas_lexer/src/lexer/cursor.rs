@@ -31,6 +31,11 @@ impl<'a> Cursor<'a> {
     //     self.chars.as_str()
     // }
 
+    /// Returns a clone of the underlying char iterator.
+    pub(super) fn chars(&self) -> Chars<'a> {
+        self.chars.clone()
+    }
+
     /// Peeks the next symbol from the input stream without consuming it.
     /// If requested position doesn't exist, `EOF_CHAR` is returned.
     /// However, getting `EOF_CHAR` doesn't always mean actual end of file,
@@ -97,14 +102,14 @@ impl<'a> Cursor<'a> {
     /// Advances to the end of the file.
     ///
     /// This will not update the debug only previous char.
-    #[allow(clippy::cast_possible_truncation)]
-    pub(super) fn advance_to_eof(&mut self) {
-        // Count the remaining chars to get the offset right
-        self.char_offset += self.chars.as_str().chars().count() as u32;
+    // #[allow(clippy::cast_possible_truncation)]
+    // pub(super) fn advance_to_eof(&mut self) {
+    //     // Count the remaining chars to get the offset right
+    //     self.char_offset += self.chars.as_str().chars().count() as u32;
 
-        // Set the chars to empty iterator
-        self.chars = "".chars();
-    }
+    //     // Set the chars to empty iterator
+    //     self.chars = "".chars();
+    // }
 
     pub(super) fn eat_char(&mut self, c: char) -> bool {
         if self.peek() == c {
@@ -125,10 +130,10 @@ impl<'a> Cursor<'a> {
     }
 
     /// Returns the previous character. Debug only
-    // #[cfg(debug_assertions)]
-    // pub(super) const fn prev_char(&self) -> char {
-    //     self.prev_char
-    // }
+    #[cfg(debug_assertions)]
+    pub(super) const fn prev_char(&self) -> char {
+        self.prev_char
+    }
 
     /// Returns the length of the remaining text in bytes.
     /// This is used to calculate the offset of the current token.
