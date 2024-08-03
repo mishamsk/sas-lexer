@@ -615,7 +615,7 @@ impl<'src> Lexer<'src> {
                 TokenChannel::DEFAULT,
                 TokenType::StringLiteral,
                 Payload::None,
-            )
+            );
         } else {
             self.add_token(
                 TokenChannel::DEFAULT,
@@ -822,6 +822,7 @@ impl<'src> Lexer<'src> {
     /// If so, then consumes not only the start, but also the body and the end of the datalines
     /// and returns `true`. Otherwise, returns `false`.
     #[must_use]
+    #[allow(clippy::cast_possible_truncation)]
     fn lex_datalines(&mut self, is_datalines4: bool) -> bool {
         #[cfg(debug_assertions)]
         if is_datalines4 {
@@ -899,7 +900,7 @@ impl<'src> Lexer<'src> {
             match self.cursor.peek() {
                 '\n' => {
                     self.cursor.advance();
-                    self.add_line()
+                    self.add_line();
                 }
                 ';' => {
                     let rem_text = self.cursor.as_str();

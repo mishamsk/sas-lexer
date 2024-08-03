@@ -3,6 +3,8 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::{parse_macro_input, Data, DeriveInput};
 
+/// # Panics
+/// Panics if the input is not an enum.
 #[proc_macro_derive(ToU16)]
 pub fn to_u16_conversions_derive(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
@@ -34,6 +36,8 @@ pub fn to_u16_conversions_derive(input: TokenStream) -> TokenStream {
     TokenStream::from(expanded)
 }
 
+/// # Panics
+/// Panics if the input is not an enum.
 #[proc_macro_derive(FromU16)]
 pub fn from_u16_conversions_derive(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);

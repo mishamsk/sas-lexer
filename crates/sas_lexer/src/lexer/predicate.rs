@@ -32,7 +32,7 @@ pub(crate) fn is_macro_amp<I: Iterator<Item = char>>(mut chars: I) -> (bool, u32
 /// Must be passed an iterator that starts with the percent.
 ///
 /// Consumes the iterator! Pass a clone if you need to keep the original.
-pub(crate) fn is_macro_percent<I: Iterator<Item = char>>(mut chars: I) -> bool {
+pub(crate) fn is_macro_percent<I: Iterator<Item = char>>(chars: I) -> bool {
     return false;
     !todo!();
 }

@@ -1,4 +1,4 @@
-#![allow(clippy::cast_possible_truncation)]
+#![allow(clippy::cast_possible_truncation, clippy::unwrap_used)]
 mod util;
 
 use std::vec;
@@ -216,7 +216,7 @@ fn test_string_expr(
 #[case::with_semi("; datalines; other")]
 fn test_datalines(#[values("", ";", ";\n\t/*comment*/  ")] prefix: &str, #[case] body: &str) {
     // choose the right keywords to test
-    let (starts, ending) = if body.contains(";") {
+    let (starts, ending) = if body.contains(';') {
         (
             ["dAtALiNeS4", "lInEs4", "cArDs4", "cArDs4  ", "cArDs4\n"],
             ";;;;",
