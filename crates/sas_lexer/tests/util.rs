@@ -2,7 +2,7 @@
 
 use sas_lexer::{
     error::{ErrorInfo, ErrorType},
-    DetachedTokenizedBuffer, Payload, TokenChannel, TokenIdx, TokenType,
+    Payload, TokenChannel, TokenIdx, TokenType, TokenizedBuffer,
 };
 
 #[macro_export]
@@ -17,7 +17,7 @@ macro_rules! set_snapshot_suffix {
 pub(crate) fn check_token(
     source: &str,
     token: TokenIdx,
-    buffer: &DetachedTokenizedBuffer,
+    buffer: &TokenizedBuffer,
     start_byte_offset: u32,
     end_byte_offset: u32,
     start_char_offset: u32,
@@ -31,6 +31,8 @@ pub(crate) fn check_token(
     payload: Payload,
     token_text: Option<&str>,
 ) {
+    assert_ne!(line_count, 0, "Line count must be greater than 0");
+
     // Byte offsets
     assert_eq!(
         buffer.get_token_start_byte_offset(token).get(),

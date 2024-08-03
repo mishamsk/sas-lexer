@@ -433,6 +433,7 @@ version = "0.1.0"
 dependencies = [
  "insta",
  "rstest",
+ "sas_lexer_macro",
  "serde",
  "strum",
 ]
@@ -443,6 +444,14 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "sas_lexer",
+]
+
+[[package]]
+name = "sas_lexer_macro"
+version = "0.1.0"
+dependencies = [
+ "quote",
+ "syn",
 ]
 
 [[package]]

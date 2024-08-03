@@ -6,8 +6,8 @@ use sas_lexer::error::ErrorInfo;
 use sas_lexer::lex;
 use sas_lexer::print::error_to_string;
 use sas_lexer::print::token_to_string;
-use sas_lexer::DetachedTokenizedBuffer;
 use sas_lexer::TokenIdx;
+use sas_lexer::TokenizedBuffer;
 
 use std::fs;
 use std::io;
@@ -30,7 +30,7 @@ struct Cli {
     debug: u8,
 }
 
-pub fn print_tokens<'a, I, S>(tokens: I, buffer: &DetachedTokenizedBuffer, source: &S)
+pub fn print_tokens<'a, I, S>(tokens: I, buffer: &TokenizedBuffer, source: &S)
 where
     I: IntoIterator<Item = TokenIdx>,
     S: AsRef<str> + 'a,
@@ -40,7 +40,7 @@ where
     }
 }
 
-pub fn print_errors<'a, I, S>(errors: I, buffer: &DetachedTokenizedBuffer, source: &S)
+pub fn print_errors<'a, I, S>(errors: I, buffer: &TokenizedBuffer, source: &S)
 where
     I: IntoIterator<Item = ErrorInfo>,
     S: AsRef<str> + 'a,
@@ -51,7 +51,7 @@ where
 }
 
 fn lex_and_print(source: &String, print: bool) {
-    match lex(source.as_str()) {
+    match lex(source) {
         Ok((tok_buffer, errors)) => {
             let tokens: Vec<TokenIdx> = tok_buffer.into_iter().collect();
 
