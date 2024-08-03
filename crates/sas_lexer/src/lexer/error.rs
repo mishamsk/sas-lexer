@@ -6,6 +6,7 @@ use crate::TokenIdx;
 pub enum ErrorType {
     UnterminatedStringLiteral,
     UnterminatedComment,
+    UnterminatedDatalines,
     EmptyModeStack,
     InternalError(&'static str),
 }
@@ -18,6 +19,9 @@ impl Display for ErrorType {
             }
             ErrorType::UnterminatedComment => {
                 write!(f, "Unterminated comment")
+            }
+            ErrorType::UnterminatedDatalines => {
+                write!(f, "Unterminated datalines")
             }
             ErrorType::EmptyModeStack => {
                 write!(f, "Unexpected empty mode stack")

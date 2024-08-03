@@ -1,7 +1,7 @@
 use std::ops::Range;
 
-use crate::lexer::channel;
-use crate::lexer::token_type;
+use super::channel::TokenChannel;
+use super::token_type::TokenType;
 
 use super::text::ByteOffset;
 use super::text::CharOffset;
@@ -63,10 +63,10 @@ impl LineInfo {
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub(super) struct TokenInfo {
     /// Channel of the token.
-    channel: channel::TokenChannel,
+    channel: TokenChannel,
 
     /// Type of the token.
-    token_type: token_type::TokenType,
+    token_type: TokenType,
 
     /// Zero-based byte offset of the token in the source string slice.
     /// u32 as we only support 4gb files
@@ -88,12 +88,12 @@ pub(super) struct TokenInfo {
 
 impl TokenInfo {
     // #[must_use]
-    // pub(super) fn channel(&self) -> channel::TokenChannel {
+    // pub(super) fn channel(&self) -> TokenChannel {
     //     self.channel
     // }
 
     #[must_use]
-    pub(super) fn token_type(&self) -> token_type::TokenType {
+    pub(super) fn token_type(&self) -> TokenType {
         self.token_type
     }
 
@@ -172,7 +172,7 @@ impl WorkTokenizedBuffer {
             && !self
                 .token_infos
                 .last()
-                .map_or(false, |t| t.token_type == token_type::TokenType::EOF)
+                .map_or(false, |t| t.token_type == TokenType::EOF)
         {
             return Err("EOF token is not the last token");
         }
@@ -194,8 +194,8 @@ impl WorkTokenizedBuffer {
 
     pub(super) fn add_token(
         &mut self,
-        channel: channel::TokenChannel,
-        token_type: token_type::TokenType,
+        channel: TokenChannel,
+        token_type: TokenType,
         byte_offset: ByteOffset,
         start: CharOffset,
         line: LineIdx,
@@ -261,6 +261,10 @@ impl WorkTokenizedBuffer {
 
     pub(super) fn last_token_info(&self) -> Option<&TokenInfo> {
         self.token_infos.last()
+    }
+
+    pub(super) fn last_token_on_channel_info(&self, channel: TokenChannel) -> Option<&TokenInfo> {
+        self.token_infos.iter().rev().find(|t| t.channel == channel)
     }
 
     #[inline]
@@ -445,7 +449,7 @@ impl TokenizedBuffer {
 
     /// Returns the token type
     #[must_use]
-    pub fn get_token_type(&self, token: TokenIdx) -> token_type::TokenType {
+    pub fn get_token_type(&self, token: TokenIdx) -> TokenType {
         let tidx = token.0 as usize;
 
         debug_assert!(tidx < self.token_infos.len(), "Token index out of bounds");
@@ -454,7 +458,7 @@ impl TokenizedBuffer {
 
     /// Returns the token channel
     #[must_use]
-    pub fn get_token_channel(&self, token: TokenIdx) -> channel::TokenChannel {
+    pub fn get_token_channel(&self, token: TokenIdx) -> TokenChannel {
         let tidx = token.0 as usize;
 
         debug_assert!(tidx < self.token_infos.len(), "Token index out of bounds");
@@ -536,8 +540,8 @@ mod tests {
 
         let line1 = buffer.add_line(ByteOffset::default(), CharOffset::default());
         let token1 = buffer.add_token(
-            channel::TokenChannel::DEFAULT,
-            token_type::TokenType::BaseCode,
+            TokenChannel::DEFAULT,
+            TokenType::BaseCode,
             ByteOffset::default(),
             CharOffset::default(),
             line1,
@@ -545,8 +549,8 @@ mod tests {
         );
         let line2 = buffer.add_line(ByteOffset::new(14), CharOffset::new(14));
         let token2 = buffer.add_token(
-            channel::TokenChannel::DEFAULT,
-            token_type::TokenType::BaseCode,
+            TokenChannel::DEFAULT,
+            TokenType::BaseCode,
             ByteOffset::new(15),
             CharOffset::new(15),
             line2,
@@ -555,8 +559,8 @@ mod tests {
 
         // add EOF
         buffer.add_token(
-            channel::TokenChannel::DEFAULT,
-            token_type::TokenType::EOF,
+            TokenChannel::DEFAULT,
+            TokenType::EOF,
             ByteOffset::new(29),
             CharOffset::new(29),
             line2,
@@ -640,8 +644,8 @@ mod tests {
 
         let line = work_buf.add_line(ByteOffset::default(), CharOffset::default());
         let token = work_buf.add_token(
-            channel::TokenChannel::DEFAULT,
-            token_type::TokenType::BaseCode,
+            TokenChannel::DEFAULT,
+            TokenType::BaseCode,
             ByteOffset::default(),
             CharOffset::default(),
             line,
@@ -650,8 +654,8 @@ mod tests {
 
         // add EOF
         work_buf.add_token(
-            channel::TokenChannel::DEFAULT,
-            token_type::TokenType::EOF,
+            TokenChannel::DEFAULT,
+            TokenType::EOF,
             ByteOffset::new(13),
             CharOffset::new(13),
             line,
@@ -660,7 +664,7 @@ mod tests {
 
         let buf = work_buf.into_detached().unwrap();
 
-        assert_eq!(buf.get_token_type(token), token_type::TokenType::BaseCode);
-        assert_eq!(buf.get_token_channel(token), channel::TokenChannel::DEFAULT);
+        assert_eq!(buf.get_token_type(token), TokenType::BaseCode);
+        assert_eq!(buf.get_token_channel(token), TokenChannel::DEFAULT);
     }
 }

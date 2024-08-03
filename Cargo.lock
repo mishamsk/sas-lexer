@@ -436,6 +436,7 @@ dependencies = [
  "sas_lexer_macro",
  "serde",
  "strum",
+ "unicode-ident",
 ]
 
 [[package]]

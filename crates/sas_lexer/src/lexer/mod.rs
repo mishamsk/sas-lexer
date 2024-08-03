@@ -16,6 +16,7 @@ use predicate::{is_macro_amp, is_macro_percent};
 use sas_lang::is_valid_sas_name_start;
 use text::{ByteOffset, CharOffset};
 use token_type::TokenType;
+use unicode_ident::{is_xid_continue, is_xid_start};
 
 use crate::TokenIdx;
 
@@ -33,7 +34,7 @@ enum LexerMode {
 
 #[derive(Debug)]
 struct Lexer<'src> {
-    // source: &'src str,
+    source: &'src str,
     source_len: u32,
     buffer: WorkTokenizedBuffer,
     cursor: cursor::Cursor<'src>,
@@ -66,7 +67,7 @@ impl<'src> Lexer<'src> {
         let cur_token_line = buffer.add_line(cur_token_byte_offset, cur_token_start);
 
         Ok(Lexer {
-            // source,
+            source,
             source_len,
             buffer,
             cursor,
@@ -86,6 +87,12 @@ impl<'src> Lexer<'src> {
     #[inline]
     fn cur_char_offset(&self) -> CharOffset {
         CharOffset::new(self.cursor.char_offset())
+    }
+
+    #[inline]
+    fn pending_token_text(&self) -> &str {
+        &self.source
+            [self.cur_token_byte_offset.get() as usize..self.cur_byte_offset().get() as usize]
     }
 
     #[inline]
@@ -229,6 +236,10 @@ impl<'src> Lexer<'src> {
                     );
                     self.push_mode(LexerMode::StringExpr);
                 }
+                ';' => {
+                    self.cursor.advance();
+                    self.add_token(TokenChannel::DEFAULT, TokenType::SEMI, Payload::None);
+                }
                 '/' => {
                     if self.cursor.peek_next() == '*' {
                         self.lex_cstyle_comment();
@@ -268,6 +279,9 @@ impl<'src> Lexer<'src> {
                             );
                         }
                     }
+                }
+                c if c.is_ascii_alphabetic() || c == '_' => {
+                    self.lex_identifier();
                 }
                 _ => {
                     self.cursor.advance();
@@ -732,6 +746,205 @@ impl<'src> Lexer<'src> {
                 }
             }
         }
+    }
+
+    fn lex_identifier(&mut self) {
+        debug_assert!(is_xid_start(self.cursor.peek()));
+
+        // Eat the first character and start tracking whether the identifier is ASCII
+        // It is necessary, as we neew to lower case the identifier if it is ASCII
+        // for dispatching, and if it is not ASCII, we know it is not a keyword and can
+        // skip the dispatching
+        let mut is_ascii = if let Some(c) = self.cursor.advance() {
+            c.is_ascii()
+        } else {
+            // This should not be possible really, but to make the production code
+            // more robust, we'll handle this case
+            true
+        };
+
+        // Eat the rest of the identifier
+        self.cursor.eat_while(|c| {
+            if c.is_ascii() {
+                matches!(c, 'a'..='z' | 'A'..='Z' | '0'..='9' | '_')
+            } else {
+                is_ascii = false;
+                is_xid_continue(c)
+            }
+        });
+
+        // Now the fun part - dispatch all kinds of identifiers
+        if !is_ascii {
+            // Easy case - not ASCII, just emit the identifier token
+            self.add_token(
+                TokenChannel::DEFAULT,
+                TokenType::BaseIdentifier,
+                Payload::None,
+            );
+            return;
+        }
+
+        // My guess is this should be quicker than capturing the value as we consume it
+        // avoids the allocation and copying
+        let ident = self.pending_token_text().to_ascii_uppercase();
+
+        match ident.as_str() {
+            "DATALINES" | "CARDS" | "LINES" => {
+                if !self.lex_datalines(false) {
+                    self.add_token(
+                        TokenChannel::DEFAULT,
+                        TokenType::BaseIdentifier,
+                        Payload::None,
+                    );
+                };
+            }
+            "DATALINES4" | "CARDS4" | "LINES4" => {
+                if !self.lex_datalines(true) {
+                    self.add_token(
+                        TokenChannel::DEFAULT,
+                        TokenType::BaseIdentifier,
+                        Payload::None,
+                    );
+                };
+            }
+            _ => {
+                // todo: add more keywords
+                self.add_token(
+                    TokenChannel::DEFAULT,
+                    TokenType::BaseIdentifier,
+                    Payload::None,
+                );
+            }
+        }
+    }
+
+    /// Checks whether the currently lexed token is indeed a datalines start token.
+    /// If so, then consumes not only the start, but also the body and the end of the datalines
+    /// and returns `true`. Otherwise, returns `false`.
+    #[must_use]
+    fn lex_datalines(&mut self, is_datalines4: bool) -> bool {
+        #[cfg(debug_assertions)]
+        if is_datalines4 {
+            debug_assert!(matches!(
+                self.pending_token_text().to_ascii_uppercase().as_str(),
+                "DATALINES4" | "CARDS4" | "LINES4"
+            ));
+        } else {
+            debug_assert!(matches!(
+                self.pending_token_text().to_ascii_uppercase().as_str(),
+                "DATALINES" | "CARDS" | "LINES"
+            ));
+        }
+
+        // So, datalines are pretty insane beast. First, we use heuristic to determine
+        // if it may be the start of the datalines (must preceeded by `;` on default channel),
+        // then we need to peek forward to find a `;`. Only of we find it, we can be sure
+        // that this is indeed a datalines start token.
+        if let Some(tok_info) = self
+            .buffer
+            .last_token_on_channel_info(TokenChannel::DEFAULT)
+        {
+            if tok_info.token_type() != TokenType::SEMI {
+                // the previous character is not a semicolon
+                return false;
+            };
+        }
+
+        // Now the forward check
+        let mut la_view = self.cursor.chars();
+
+        loop {
+            match la_view.next() {
+                Some(';') => break,
+                Some(c) if c.is_whitespace() => continue,
+                // Non whitespace, non semicolon character - not a datalines
+                _ => return false,
+            }
+        }
+
+        // Few! Now we now that this is indeed a datalines! TBH technically we do not
+        // as in SAS, it is context sensitive and will only trigger inside a data step
+        // but otherwise it is theoretically possible to have smth. like `datalines;` in
+        // a macro...but I refuse to support this madness. Hopefully no such code exists
+
+        // A rare case, where we emit multiple tokens and avoid state/modes
+        // Seemed too complicated to allow looping in the lexer for the sake of
+        // of this very special language construct
+
+        // Now advance to the semi-colon for real before emitting the token the datalines start token
+        loop {
+            // Have to do the loop to track line changes
+            match self.cursor.advance() {
+                Some('\n') => self.add_line(),
+                Some(c) if c.is_whitespace() => {}
+                // in reality we know it will be a semicolon
+                _ => break,
+            }
+        }
+
+        self.add_token(
+            TokenChannel::DEFAULT,
+            TokenType::DatalinesStart,
+            Payload::None,
+        );
+
+        // Start the new token
+        self.start_token();
+
+        // What are we comparing the ending against
+        let ending = if is_datalines4 { ";;;;" } else { ";" };
+        let ending_len = ending.len();
+
+        loop {
+            match self.cursor.peek() {
+                '\n' => {
+                    self.cursor.advance();
+                    self.add_line()
+                }
+                ';' => {
+                    let rem_text = self.cursor.as_str();
+
+                    if rem_text.len() < ending_len {
+                        // Not enough characters left to match the ending
+                        // Emit error, but assume that we found the ending
+                        self.emit_error(ErrorType::UnterminatedDatalines);
+                        break;
+                    }
+
+                    if self.cursor.as_str()[..ending_len] == *ending {
+                        // Found the ending. Do not consume as it will be the separate token
+                        break;
+                    }
+
+                    self.cursor.advance();
+                }
+                _ => {
+                    self.cursor.advance();
+                }
+            }
+        }
+
+        // Add the datalines data token
+        self.add_token(
+            TokenChannel::DEFAULT,
+            TokenType::DatalinesData,
+            Payload::None,
+        );
+
+        // Start the new token
+        self.start_token();
+
+        // Consume the ending
+        self.cursor.advance_by(ending_len as u32);
+
+        // Add the datalines end token
+        self.add_token(
+            TokenChannel::DEFAULT,
+            TokenType::DatalinesEnd,
+            Payload::None,
+        );
+
+        true
     }
 }
 

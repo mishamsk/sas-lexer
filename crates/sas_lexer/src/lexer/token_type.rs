@@ -5,6 +5,7 @@ use strum::Display;
 pub enum TokenType {
     EOF,
     WS,
+    SEMI,
     TermQuote,                // *'; and *" ";
     StringLiteral,            // 'string'
     BitTestingLiteral,        // 'stuff'b
@@ -24,9 +25,14 @@ pub enum TokenType {
     HexStringLiteralExprEnd,  // "&mv.stuff"x
     AMP,
     PERCENT,
+    CStyleComment,  // /* ... */
+    MacroVarExpr,   // &&mvar&another. etc.
+    DatalinesStart, // datalines/cards[4];
+    DatalinesData,  // datalines data
+    DatalinesEnd,   // the closing ;[;;;]
+    // Put pure second pass tokens after this line only
+    BaseIdentifier,
     BaseCode,
-    CStyleComment, // /* ... */
-    MacroVarExpr,  // &&mvar&another. etc.
 }
 
 #[cfg(test)]
@@ -41,7 +47,7 @@ mod tests {
 
     #[test]
     fn test_all_tokens_round_trip() {
-        const TOKEN_COUNT: u16 = 24;
+        const TOKEN_COUNT: u16 = 29;
 
         for i in 0..TOKEN_COUNT {
             let token = TokenType::from_u16(i).unwrap();
