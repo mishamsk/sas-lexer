@@ -10,8 +10,9 @@ version = { workspace = true }
 [lib]
 
 [dependencies]
-strum = { workspace = true }
+phf = { workspace = true }
 sas_lexer_macro = { workspace = true }
+strum = { workspace = true }
 unicode-ident = "1.0.12"
 
 [dev-dependencies]
