@@ -15,7 +15,7 @@ use error::{ErrorInfo, ErrorType};
 use predicate::{is_macro_amp, is_macro_percent};
 use sas_lang::is_valid_sas_name_start;
 use text::{ByteOffset, CharOffset};
-use token_type::TokenType;
+use token_type::{parse_keyword, TokenType};
 use unicode_ident::{is_xid_continue, is_xid_start};
 
 use crate::TokenIdx;
@@ -246,7 +246,7 @@ impl<'src> Lexer<'src> {
                     } else {
                         // TODO: this is not done
                         self.cursor.advance();
-                        self.add_token(TokenChannel::DEFAULT, TokenType::BaseCode, Payload::None);
+                        self.add_token(TokenChannel::DEFAULT, TokenType::FSLASH, Payload::None);
                     }
                 }
                 '&' => {
@@ -271,14 +271,161 @@ impl<'src> Lexer<'src> {
                                 Payload::None,
                             );
                         }
+                        ('*', _) => {
+                            self.cursor.advance();
+                            self.add_token(TokenChannel::DEFAULT, TokenType::STAR2, Payload::None);
+                        }
                         _ => {
+                            self.add_token(TokenChannel::DEFAULT, TokenType::STAR, Payload::None);
+                        }
+                    }
+                }
+                '(' => {
+                    self.cursor.advance();
+                    self.add_token(TokenChannel::DEFAULT, TokenType::LPAREN, Payload::None);
+                }
+                ')' => {
+                    self.cursor.advance();
+                    self.add_token(TokenChannel::DEFAULT, TokenType::RPAREN, Payload::None);
+                }
+                '!' => {
+                    self.cursor.advance();
+
+                    match self.cursor.peek() {
+                        '!' => {
+                            self.cursor.advance();
+                            self.add_token(TokenChannel::DEFAULT, TokenType::EXCL2, Payload::None);
+                        }
+                        _ => {
+                            self.add_token(TokenChannel::DEFAULT, TokenType::EXCL, Payload::None);
+                        }
+                    }
+                }
+                '¦' => {
+                    self.cursor.advance();
+
+                    match self.cursor.peek() {
+                        '!' => {
+                            self.cursor.advance();
+                            self.add_token(TokenChannel::DEFAULT, TokenType::BPIPE2, Payload::None);
+                        }
+                        _ => {
+                            self.add_token(TokenChannel::DEFAULT, TokenType::BPIPE, Payload::None);
+                        }
+                    }
+                }
+                '|' => {
+                    self.cursor.advance();
+
+                    match self.cursor.peek() {
+                        '|' => {
+                            self.cursor.advance();
+                            self.add_token(TokenChannel::DEFAULT, TokenType::PIPE2, Payload::None);
+                        }
+                        _ => {
+                            self.add_token(TokenChannel::DEFAULT, TokenType::PIPE, Payload::None);
+                        }
+                    }
+                }
+                '¬' | '^' | '~' | '∘' => {
+                    self.cursor.advance();
+
+                    match self.cursor.peek() {
+                        '=' => {
+                            self.cursor.advance();
+                            self.add_token(TokenChannel::DEFAULT, TokenType::NE, Payload::None);
+                        }
+                        _ => {
+                            self.add_token(TokenChannel::DEFAULT, TokenType::NOT, Payload::None);
+                        }
+                    }
+                }
+                '+' => {
+                    self.cursor.advance();
+                    self.add_token(TokenChannel::DEFAULT, TokenType::PLUS, Payload::None);
+                }
+                '-' => {
+                    self.cursor.advance();
+                    self.add_token(TokenChannel::DEFAULT, TokenType::MINUS, Payload::None);
+                }
+                '<' => {
+                    self.cursor.advance();
+
+                    match self.cursor.peek() {
+                        '=' => {
+                            self.cursor.advance();
+                            self.add_token(TokenChannel::DEFAULT, TokenType::LE, Payload::None);
+                        }
+                        '>' => {
+                            self.cursor.advance();
+                            self.add_token(TokenChannel::DEFAULT, TokenType::LTGT, Payload::None);
+                        }
+                        _ => {
+                            self.add_token(TokenChannel::DEFAULT, TokenType::LT, Payload::None);
+                        }
+                    }
+                }
+                '>' => {
+                    self.cursor.advance();
+
+                    match self.cursor.peek() {
+                        '=' => {
+                            self.cursor.advance();
+                            self.add_token(TokenChannel::DEFAULT, TokenType::GE, Payload::None);
+                        }
+                        '<' => {
+                            self.cursor.advance();
+                            self.add_token(TokenChannel::DEFAULT, TokenType::GTLT, Payload::None);
+                        }
+                        _ => {
+                            self.add_token(TokenChannel::DEFAULT, TokenType::GT, Payload::None);
+                        }
+                    }
+                }
+                '.' => {
+                    self.cursor.advance();
+                    self.add_token(TokenChannel::DEFAULT, TokenType::DOT, Payload::None);
+                }
+                ',' => {
+                    self.cursor.advance();
+                    self.add_token(TokenChannel::DEFAULT, TokenType::COMMA, Payload::None);
+                }
+                ':' => {
+                    self.cursor.advance();
+                    self.add_token(TokenChannel::DEFAULT, TokenType::COLON, Payload::None);
+                }
+                '=' => {
+                    self.cursor.advance();
+
+                    match self.cursor.peek() {
+                        '*' => {
+                            self.cursor.advance();
                             self.add_token(
                                 TokenChannel::DEFAULT,
-                                TokenType::BaseCode,
+                                TokenType::SoundsLike,
                                 Payload::None,
                             );
                         }
+                        _ => {
+                            self.add_token(TokenChannel::DEFAULT, TokenType::ASSIGN, Payload::None);
+                        }
                     }
+                }
+                '$' => {
+                    self.cursor.advance();
+                    self.add_token(TokenChannel::DEFAULT, TokenType::DOLLAR, Payload::None);
+                }
+                '@' => {
+                    self.cursor.advance();
+                    self.add_token(TokenChannel::DEFAULT, TokenType::AT, Payload::None);
+                }
+                '#' => {
+                    self.cursor.advance();
+                    self.add_token(TokenChannel::DEFAULT, TokenType::HASH, Payload::None);
+                }
+                '?' => {
+                    self.cursor.advance();
+                    self.add_token(TokenChannel::DEFAULT, TokenType::QUESTION, Payload::None);
                 }
                 c if c.is_ascii_alphabetic() || c == '_' => {
                     self.lex_identifier();
@@ -787,6 +934,11 @@ impl<'src> Lexer<'src> {
         // My guess is this should be quicker than capturing the value as we consume it
         // avoids the allocation and copying
         let ident = self.pending_token_text().to_ascii_uppercase();
+
+        if let Some(kw_tok_type) = parse_keyword(&ident) {
+            self.add_token(TokenChannel::DEFAULT, kw_tok_type, Payload::None);
+            return;
+        }
 
         match ident.as_str() {
             "DATALINES" | "CARDS" | "LINES" => {

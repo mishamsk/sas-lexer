@@ -271,8 +271,7 @@ fn test_not_datalines() {
     assert_lexing(
         source,
         vec![
-            // this is temporary, will fail when we add keywords
-            ("input", TokenType::BaseIdentifier),
+            ("input", TokenType::KwInput),
             (" ", TokenType::WS),
             ("datalines4", TokenType::BaseIdentifier),
             (";", TokenType::SEMI),

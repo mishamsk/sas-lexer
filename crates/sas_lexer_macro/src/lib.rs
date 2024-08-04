@@ -1,7 +1,7 @@
 extern crate proc_macro;
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, Data, DeriveInput};
+use syn::{parse_macro_input, punctuated::Punctuated, Data, DeriveInput, LitStr, Token};
 
 /// # Panics
 /// Panics if the input is not an enum.
@@ -66,6 +66,63 @@ pub fn from_u16_conversions_derive(input: TokenStream) -> TokenStream {
                 }
             }
         }
+    };
+
+    TokenStream::from(expanded)
+}
+
+#[proc_macro_derive(KeywordMap, attributes(keyword))]
+pub fn generate_keyword_map(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+
+    let name = &input.ident;
+    let variants = if let syn::Data::Enum(data_enum) = input.data {
+        data_enum.variants
+    } else {
+        panic!("generate_keyword_map can only be used on enums");
+    };
+
+    let variant_code = variants
+        .iter()
+        .filter(|variant| variant.ident.to_string().starts_with("Kw"))
+        .flat_map(|variant| {
+            let variant_ident = &variant.ident;
+            let ident = variant.ident.to_string();
+
+            let keywords = variant.attrs.iter().find_map(|attr| {
+                if attr.path().is_ident("keyword") {
+                    attr.parse_args_with(Punctuated::<LitStr, Token![,]>::parse_terminated)
+                        .ok()
+                } else {
+                    None
+                }
+            });
+
+            let default_keyword = &ident[2..].to_ascii_uppercase();
+            let keywords = keywords.map_or_else(
+                || vec![default_keyword.clone()],
+                |kws| {
+                    kws.into_iter()
+                        .map(|kw| kw.value().to_ascii_uppercase())
+                        .collect()
+                },
+            );
+
+            keywords.into_iter().map(move |keyword| {
+                quote! {
+                    #keyword => #name::#variant_ident,
+                }
+            })
+        });
+
+    if variant_code.clone().count() == 0 {
+        panic!("No variants found that start with 'Kw'");
+    }
+
+    let expanded = quote! {
+        static KEYWORDS: phf::Map<&'static str, #name> = phf_map! {
+            #(#variant_code)*
+        };
     };
 
     TokenStream::from(expanded)

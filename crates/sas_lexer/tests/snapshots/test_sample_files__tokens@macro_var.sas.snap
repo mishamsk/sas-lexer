@@ -21,7 +21,7 @@ expression: tokens
 - "[@16,37:38=\"\\n\",<WS>,L7:C7-L7:C8,chl=<H>,pl=\"<None>\"]"
 - "[@17,38:43=\"&mvar\",<MacroVarExpr>,L8:C0-L8:C5,chl=<D>,pl=\"<None>\"]"
 - "[@18,43:44=\"&\",<AMP>,L8:C5-L8:C6,chl=<D>,pl=\"<None>\"]"
-- "[@19,44:45=\".\",<BaseCode>,L8:C6-L8:C7,chl=<D>,pl=\"<None>\"]"
+- "[@19,44:45=\".\",<DOT>,L8:C6-L8:C7,chl=<D>,pl=\"<None>\"]"
 - "[@20,45:46=\"\\n\",<WS>,L8:C7-L8:C8,chl=<H>,pl=\"<None>\"]"
 - "[@21,46:52=\"&&mvar\",<MacroVarExpr>,L9:C0-L9:C6,chl=<D>,pl=\"<None>\"]"
 - "[@22,52:53=\"\\n\",<WS>,L9:C6-L9:C7,chl=<H>,pl=\"<None>\"]"
