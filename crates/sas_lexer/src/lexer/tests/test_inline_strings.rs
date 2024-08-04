@@ -256,7 +256,7 @@ fn test_datalines(#[values("", ";", ";\n\t/*comment*/  ")] prefix: &str, #[case]
                 TokenChannel::DEFAULT,
             ),
             (body, TokenType::DatalinesData, TokenChannel::DEFAULT),
-            (ending, TokenType::DatalinesEnd, TokenChannel::DEFAULT),
+            (ending, TokenType::SEMI, TokenChannel::DEFAULT),
         ]);
 
         assert_lexing(source.as_str(), expected_tokens, NO_ERRORS);
