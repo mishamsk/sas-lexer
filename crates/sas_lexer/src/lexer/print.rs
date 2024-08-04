@@ -22,6 +22,14 @@ pub fn token_to_string<S: AsRef<str>>(
 
     let payload_str = match payload {
         Payload::None => "<None>".to_string(),
+        Payload::Integer(val) => format!("{}", val),
+        Payload::Float(val) => {
+            if ((val * 1000.0).round() / 1000.0) == val {
+                format!("{val:.3}")
+            } else {
+                format!("{val:.3e}")
+            }
+        }
     };
 
     // Constructing the string representation of the token

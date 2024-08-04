@@ -348,3 +348,24 @@ fn test_all_single_keywords() {
         );
     });
 }
+
+#[rstest]
+// Decimal notation
+#[case("1", (TokenType::IntegerLiteral, 1))]
+#[case("001", (TokenType::IntegerLiteral, 1))]
+#[case("+001", (TokenType::IntegerLiteral, 1))]
+#[case("-001", (TokenType::IntegerLiteral, -1))]
+#[case("1.", (TokenType::IntegerDotLiteral, 1))]
+#[case("1.00", (TokenType::IntegerDotLiteral, 1))]
+#[case("01.", (TokenType::IntegerLiteral, 1))]
+#[case("01.00", (TokenType::IntegerLiteral, 1))]
+#[case("-1.", (TokenType::IntegerLiteral, -1))]
+#[case("-01.", (TokenType::IntegerLiteral, -1))]
+#[case("+01.00", (TokenType::IntegerLiteral, 1))]
+// Hexadecimal notation
+#[case("02Ax", (TokenType::IntegerLiteral, 42))]
+#[case("9X", (TokenType::IntegerLiteral, 9))]
+#[case("-9ffFFffFFffFFffFx", (TokenType::FloatLiteral, -1.152921504606847e19))]
+fn test_numeric_literal(#[case] contents: &str, #[case] expected_token: impl TokenTestCase) {
+    assert_lexing(contents, vec![expected_token], NO_ERRORS);
+}
