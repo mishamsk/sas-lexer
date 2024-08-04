@@ -369,3 +369,14 @@ fn test_all_single_keywords() {
 fn test_numeric_literal(#[case] contents: &str, #[case] expected_token: impl TokenTestCase) {
     assert_lexing(contents, vec![expected_token], NO_ERRORS);
 }
+
+#[rstest]
+#[case("02A", (TokenType::IntegerLiteral, 42), ErrorType::UnterminatedHexNumericLiteral)]
+#[case("-9ffFFffFFffFFffF123AFx", (TokenType::FloatLiteral, -1.152921504606847e19), ErrorType::InvalidNumericLiteral)]
+fn test_numeric_literal_error_recovery(
+    #[case] contents: &str,
+    #[case] expected_token: impl TokenTestCase,
+    #[case] expected_error: ErrorType,
+) {
+    assert_lexing(contents, vec![expected_token], vec![expected_error]);
+}

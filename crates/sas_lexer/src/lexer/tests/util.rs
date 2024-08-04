@@ -432,7 +432,7 @@ pub(crate) fn check_error(
         last_token,
         last_token_idx,
         "Expected last token index {last_token_idx:?}, got {last_token:?}.\n\
-        {} instead of {}",
+        Token {} instead of {}, for error: {}",
         if let Some(lt_idx) = last_token {
             token_to_string(lt_idx, buffer, &source)
         } else {
@@ -443,6 +443,7 @@ pub(crate) fn check_error(
         } else {
             "<no token>".to_string()
         },
+        error_to_string(error, buffer, &source)
     );
 }
 

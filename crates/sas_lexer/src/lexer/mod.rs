@@ -1177,13 +1177,12 @@ impl<'src> Lexer<'src> {
                         };
 
                         // Check length, SAS itself wil not allow more than 16 HEX digits
-                        let truncated = if truncated.len() > 16 {
+                        let (emit_error, truncated) = if truncated.len() > 16 {
                             // Emit an error, but truncate the number to parse something
-                            self.emit_error(ErrorType::InvalidNumericLiteral);
 
-                            &truncated[..16]
+                            (true, &truncated[..16])
                         } else {
-                            truncated
+                            (false, truncated)
                         };
 
                         // This must work! We truncated the number to 16 HEX digits
@@ -1202,6 +1201,10 @@ impl<'src> Lexer<'src> {
                             TokenType::FloatLiteral,
                             Payload::Float(fvalue),
                         );
+
+                        if emit_error {
+                            self.emit_error(ErrorType::InvalidNumericLiteral);
+                        }
                     }
                     _ => {
                         // This is an internal error, should not happen
