@@ -1,20 +1,24 @@
-#![allow(clippy::cast_possible_truncation, clippy::unwrap_used)]
-
-#[macro_use]
-mod util;
-
+use crate::{
+    lex,
+    print::{error_to_string, token_to_string},
+};
 use insta::assert_yaml_snapshot;
 use rstest::rstest;
-use sas_lexer::{lex, print::token_to_string};
 use std::{fs, path::PathBuf};
 
+macro_rules! set_snapshot_suffix {
+    ($($expr:expr),*) => {
+        let mut settings = insta::Settings::clone_current();
+        settings.set_snapshot_suffix(format!($($expr,)*));
+        let _guard = settings.bind_to_scope();
+    }
+}
+
 #[rstest]
-fn test_snapshots(#[files("tests/samples/**/*.sas")] path: PathBuf) {
+fn test_snapshots(#[files("src/lexer/tests/samples/**/*.sas")] path: PathBuf) {
     // Compute the absolute path of the prefix
 
-    use sas_lexer::print::error_to_string;
-
-    let prefix = fs::canonicalize("tests/samples/").unwrap();
+    let prefix = fs::canonicalize("src/lexer/tests/samples/").unwrap();
 
     let snap_name = path.strip_prefix(&prefix).unwrap();
     let snap_name_str = snap_name
@@ -49,7 +53,7 @@ fn test_snapshots(#[files("tests/samples/**/*.sas")] path: PathBuf) {
 
 /// Tests that tokens cover all offsets in the file from 0 to the end
 #[rstest]
-fn test_full_coverage(#[files("tests/samples/**/*.sas")] path: PathBuf) {
+fn test_full_coverage(#[files("src/lexer/tests/samples/**/*.sas")] path: PathBuf) {
     let contents = fs::read_to_string(&path).unwrap();
 
     let (tok_buffer, _) = lex(&contents).unwrap();

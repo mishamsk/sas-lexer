@@ -5,6 +5,8 @@ pub mod error;
 mod predicate;
 pub mod print;
 mod sas_lang;
+#[cfg(test)]
+mod tests;
 mod text;
 pub(crate) mod token_type;
 
@@ -103,7 +105,7 @@ impl<'src> Lexer<'src> {
 
     fn pop_mode(&mut self) -> LexerMode {
         self.mode_stack.pop().unwrap_or_else(|| {
-            self.emit_error(ErrorType::EmptyModeStack);
+            self.emit_error(ErrorType::InternalError("Empty mode stack"));
             self.push_mode(LexerMode::default())
         })
     }
@@ -112,7 +114,7 @@ impl<'src> Lexer<'src> {
         match self.mode_stack.last() {
             Some(&mode) => mode,
             None => {
-                self.emit_error(ErrorType::EmptyModeStack);
+                self.emit_error(ErrorType::InternalError("Empty mode stack"));
                 self.push_mode(LexerMode::default())
             }
         }
@@ -219,225 +221,63 @@ impl<'src> Lexer<'src> {
 
         let c = self.cursor.peek();
 
+        // Skip whitespace if any
         if c.is_whitespace() {
             self.lex_ws();
             return;
         }
 
-        if c.is_ascii() {
-            match c {
-                '\'' => self.lex_single_quoted_str(),
-                '"' => {
-                    self.cursor.advance();
-                    self.add_token(
-                        TokenChannel::DEFAULT,
-                        TokenType::StringExprStart,
-                        Payload::None,
-                    );
-                    self.push_mode(LexerMode::StringExpr);
-                }
-                ';' => {
-                    self.cursor.advance();
-                    self.add_token(TokenChannel::DEFAULT, TokenType::SEMI, Payload::None);
-                }
-                '/' => {
-                    if self.cursor.peek_next() == '*' {
-                        self.lex_cstyle_comment();
-                    } else {
-                        // TODO: this is not done
-                        self.cursor.advance();
-                        self.add_token(TokenChannel::DEFAULT, TokenType::FSLASH, Payload::None);
-                    }
-                }
-                '&' => {
-                    if cfg!(debug_assertions) {
-                        // In debug mode, we check if the lex_amp function added a token
-                        // in addition to just executing the logic
-                        debug_assert!(self.lex_amp());
-                    } else {
-                        self.lex_amp();
-                    }
-                }
-                '*' => {
+        // Dispatch the "big" categories
+        match c {
+            '\'' => self.lex_single_quoted_str(),
+            '"' => {
+                self.cursor.advance();
+                self.add_token(
+                    TokenChannel::DEFAULT,
+                    TokenType::StringExprStart,
+                    Payload::None,
+                );
+                self.push_mode(LexerMode::StringExpr);
+            }
+            ';' => {
+                self.cursor.advance();
+                self.add_token(TokenChannel::DEFAULT, TokenType::SEMI, Payload::None);
+            }
+            '/' => {
+                if self.cursor.peek_next() == '*' {
+                    self.lex_cstyle_comment();
+                } else {
                     // TODO: this is not done
                     self.cursor.advance();
-                    match (self.cursor.peek(), self.cursor.peek_next()) {
-                        ('\'' | '"', ';') => {
-                            self.cursor.advance();
-                            self.cursor.advance();
-                            self.add_token(
-                                TokenChannel::HIDDEN,
-                                TokenType::TermQuote,
-                                Payload::None,
-                            );
-                        }
-                        ('*', _) => {
-                            self.cursor.advance();
-                            self.add_token(TokenChannel::DEFAULT, TokenType::STAR2, Payload::None);
-                        }
-                        _ => {
-                            self.add_token(TokenChannel::DEFAULT, TokenType::STAR, Payload::None);
-                        }
-                    }
-                }
-                '(' => {
-                    self.cursor.advance();
-                    self.add_token(TokenChannel::DEFAULT, TokenType::LPAREN, Payload::None);
-                }
-                ')' => {
-                    self.cursor.advance();
-                    self.add_token(TokenChannel::DEFAULT, TokenType::RPAREN, Payload::None);
-                }
-                '!' => {
-                    self.cursor.advance();
-
-                    match self.cursor.peek() {
-                        '!' => {
-                            self.cursor.advance();
-                            self.add_token(TokenChannel::DEFAULT, TokenType::EXCL2, Payload::None);
-                        }
-                        _ => {
-                            self.add_token(TokenChannel::DEFAULT, TokenType::EXCL, Payload::None);
-                        }
-                    }
-                }
-                '¦' => {
-                    self.cursor.advance();
-
-                    match self.cursor.peek() {
-                        '!' => {
-                            self.cursor.advance();
-                            self.add_token(TokenChannel::DEFAULT, TokenType::BPIPE2, Payload::None);
-                        }
-                        _ => {
-                            self.add_token(TokenChannel::DEFAULT, TokenType::BPIPE, Payload::None);
-                        }
-                    }
-                }
-                '|' => {
-                    self.cursor.advance();
-
-                    match self.cursor.peek() {
-                        '|' => {
-                            self.cursor.advance();
-                            self.add_token(TokenChannel::DEFAULT, TokenType::PIPE2, Payload::None);
-                        }
-                        _ => {
-                            self.add_token(TokenChannel::DEFAULT, TokenType::PIPE, Payload::None);
-                        }
-                    }
-                }
-                '¬' | '^' | '~' | '∘' => {
-                    self.cursor.advance();
-
-                    match self.cursor.peek() {
-                        '=' => {
-                            self.cursor.advance();
-                            self.add_token(TokenChannel::DEFAULT, TokenType::NE, Payload::None);
-                        }
-                        _ => {
-                            self.add_token(TokenChannel::DEFAULT, TokenType::NOT, Payload::None);
-                        }
-                    }
-                }
-                '+' => {
-                    self.cursor.advance();
-                    self.add_token(TokenChannel::DEFAULT, TokenType::PLUS, Payload::None);
-                }
-                '-' => {
-                    self.cursor.advance();
-                    self.add_token(TokenChannel::DEFAULT, TokenType::MINUS, Payload::None);
-                }
-                '<' => {
-                    self.cursor.advance();
-
-                    match self.cursor.peek() {
-                        '=' => {
-                            self.cursor.advance();
-                            self.add_token(TokenChannel::DEFAULT, TokenType::LE, Payload::None);
-                        }
-                        '>' => {
-                            self.cursor.advance();
-                            self.add_token(TokenChannel::DEFAULT, TokenType::LTGT, Payload::None);
-                        }
-                        _ => {
-                            self.add_token(TokenChannel::DEFAULT, TokenType::LT, Payload::None);
-                        }
-                    }
-                }
-                '>' => {
-                    self.cursor.advance();
-
-                    match self.cursor.peek() {
-                        '=' => {
-                            self.cursor.advance();
-                            self.add_token(TokenChannel::DEFAULT, TokenType::GE, Payload::None);
-                        }
-                        '<' => {
-                            self.cursor.advance();
-                            self.add_token(TokenChannel::DEFAULT, TokenType::GTLT, Payload::None);
-                        }
-                        _ => {
-                            self.add_token(TokenChannel::DEFAULT, TokenType::GT, Payload::None);
-                        }
-                    }
-                }
-                '.' => {
-                    self.cursor.advance();
-                    self.add_token(TokenChannel::DEFAULT, TokenType::DOT, Payload::None);
-                }
-                ',' => {
-                    self.cursor.advance();
-                    self.add_token(TokenChannel::DEFAULT, TokenType::COMMA, Payload::None);
-                }
-                ':' => {
-                    self.cursor.advance();
-                    self.add_token(TokenChannel::DEFAULT, TokenType::COLON, Payload::None);
-                }
-                '=' => {
-                    self.cursor.advance();
-
-                    match self.cursor.peek() {
-                        '*' => {
-                            self.cursor.advance();
-                            self.add_token(
-                                TokenChannel::DEFAULT,
-                                TokenType::SoundsLike,
-                                Payload::None,
-                            );
-                        }
-                        _ => {
-                            self.add_token(TokenChannel::DEFAULT, TokenType::ASSIGN, Payload::None);
-                        }
-                    }
-                }
-                '$' => {
-                    self.cursor.advance();
-                    self.add_token(TokenChannel::DEFAULT, TokenType::DOLLAR, Payload::None);
-                }
-                '@' => {
-                    self.cursor.advance();
-                    self.add_token(TokenChannel::DEFAULT, TokenType::AT, Payload::None);
-                }
-                '#' => {
-                    self.cursor.advance();
-                    self.add_token(TokenChannel::DEFAULT, TokenType::HASH, Payload::None);
-                }
-                '?' => {
-                    self.cursor.advance();
-                    self.add_token(TokenChannel::DEFAULT, TokenType::QUESTION, Payload::None);
-                }
-                c if c.is_ascii_alphabetic() || c == '_' => {
-                    self.lex_identifier();
-                }
-                _ => {
-                    self.cursor.advance();
-                    self.add_token(TokenChannel::DEFAULT, TokenType::BaseCode, Payload::None);
+                    self.add_token(TokenChannel::DEFAULT, TokenType::FSLASH, Payload::None);
                 }
             }
-        } else {
-            self.cursor.advance();
-            self.add_token(TokenChannel::DEFAULT, TokenType::BaseCode, Payload::None);
+            '&' => {
+                if cfg!(debug_assertions) {
+                    // In debug mode, we check if the lex_amp function added a token
+                    // in addition to just executing the logic
+                    debug_assert!(self.lex_amp());
+                } else {
+                    self.lex_amp();
+                }
+            }
+            '%' => {
+                if is_macro_percent(self.cursor.chars()) {
+                    !todo!();
+
+                    return;
+                }
+
+                self.cursor.advance();
+                self.add_token(TokenChannel::DEFAULT, TokenType::PERCENT, Payload::None);
+            }
+            c if is_xid_start(c) || c == '_' => {
+                self.lex_identifier();
+            }
+            _ => {
+                // Something else must be a symbol or some unknown character
+                self.lex_symbols(c);
+            }
         }
     }
 
@@ -896,7 +736,7 @@ impl<'src> Lexer<'src> {
     }
 
     fn lex_identifier(&mut self) {
-        debug_assert!(is_xid_start(self.cursor.peek()));
+        debug_assert!(self.cursor.peek() == '_' || is_xid_start(self.cursor.peek()));
 
         // Eat the first character and start tracking whether the identifier is ASCII
         // It is necessary, as we neew to lower case the identifier if it is ASCII
@@ -1098,6 +938,178 @@ impl<'src> Lexer<'src> {
         );
 
         true
+    }
+
+    fn lex_symbols(&mut self, c: char) {
+        match c {
+            '*' => {
+                // TODO: this is not done
+                self.cursor.advance();
+                match (self.cursor.peek(), self.cursor.peek_next()) {
+                    ('\'' | '"', ';') => {
+                        self.cursor.advance();
+                        self.cursor.advance();
+                        self.add_token(TokenChannel::HIDDEN, TokenType::TermQuote, Payload::None);
+                    }
+                    ('*', _) => {
+                        self.cursor.advance();
+                        self.add_token(TokenChannel::DEFAULT, TokenType::STAR2, Payload::None);
+                    }
+                    _ => {
+                        self.add_token(TokenChannel::DEFAULT, TokenType::STAR, Payload::None);
+                    }
+                }
+            }
+            '(' => {
+                self.cursor.advance();
+                self.add_token(TokenChannel::DEFAULT, TokenType::LPAREN, Payload::None);
+            }
+            ')' => {
+                self.cursor.advance();
+                self.add_token(TokenChannel::DEFAULT, TokenType::RPAREN, Payload::None);
+            }
+            '!' => {
+                self.cursor.advance();
+
+                match self.cursor.peek() {
+                    '!' => {
+                        self.cursor.advance();
+                        self.add_token(TokenChannel::DEFAULT, TokenType::EXCL2, Payload::None);
+                    }
+                    _ => {
+                        self.add_token(TokenChannel::DEFAULT, TokenType::EXCL, Payload::None);
+                    }
+                }
+            }
+            '¦' => {
+                self.cursor.advance();
+
+                match self.cursor.peek() {
+                    '¦' => {
+                        self.cursor.advance();
+                        self.add_token(TokenChannel::DEFAULT, TokenType::BPIPE2, Payload::None);
+                    }
+                    _ => {
+                        self.add_token(TokenChannel::DEFAULT, TokenType::BPIPE, Payload::None);
+                    }
+                }
+            }
+            '|' => {
+                self.cursor.advance();
+
+                match self.cursor.peek() {
+                    '|' => {
+                        self.cursor.advance();
+                        self.add_token(TokenChannel::DEFAULT, TokenType::PIPE2, Payload::None);
+                    }
+                    _ => {
+                        self.add_token(TokenChannel::DEFAULT, TokenType::PIPE, Payload::None);
+                    }
+                }
+            }
+            '¬' | '^' | '~' | '∘' => {
+                self.cursor.advance();
+
+                match self.cursor.peek() {
+                    '=' => {
+                        self.cursor.advance();
+                        self.add_token(TokenChannel::DEFAULT, TokenType::NE, Payload::None);
+                    }
+                    _ => {
+                        self.add_token(TokenChannel::DEFAULT, TokenType::NOT, Payload::None);
+                    }
+                }
+            }
+            '+' => {
+                self.cursor.advance();
+                self.add_token(TokenChannel::DEFAULT, TokenType::PLUS, Payload::None);
+            }
+            '-' => {
+                self.cursor.advance();
+                self.add_token(TokenChannel::DEFAULT, TokenType::MINUS, Payload::None);
+            }
+            '<' => {
+                self.cursor.advance();
+
+                match self.cursor.peek() {
+                    '=' => {
+                        self.cursor.advance();
+                        self.add_token(TokenChannel::DEFAULT, TokenType::LE, Payload::None);
+                    }
+                    '>' => {
+                        self.cursor.advance();
+                        self.add_token(TokenChannel::DEFAULT, TokenType::LTGT, Payload::None);
+                    }
+                    _ => {
+                        self.add_token(TokenChannel::DEFAULT, TokenType::LT, Payload::None);
+                    }
+                }
+            }
+            '>' => {
+                self.cursor.advance();
+
+                match self.cursor.peek() {
+                    '=' => {
+                        self.cursor.advance();
+                        self.add_token(TokenChannel::DEFAULT, TokenType::GE, Payload::None);
+                    }
+                    '<' => {
+                        self.cursor.advance();
+                        self.add_token(TokenChannel::DEFAULT, TokenType::GTLT, Payload::None);
+                    }
+                    _ => {
+                        self.add_token(TokenChannel::DEFAULT, TokenType::GT, Payload::None);
+                    }
+                }
+            }
+            '.' => {
+                self.cursor.advance();
+                self.add_token(TokenChannel::DEFAULT, TokenType::DOT, Payload::None);
+            }
+            ',' => {
+                self.cursor.advance();
+                self.add_token(TokenChannel::DEFAULT, TokenType::COMMA, Payload::None);
+            }
+            ':' => {
+                self.cursor.advance();
+                self.add_token(TokenChannel::DEFAULT, TokenType::COLON, Payload::None);
+            }
+            '=' => {
+                self.cursor.advance();
+
+                match self.cursor.peek() {
+                    '*' => {
+                        self.cursor.advance();
+                        self.add_token(TokenChannel::DEFAULT, TokenType::SoundsLike, Payload::None);
+                    }
+                    _ => {
+                        self.add_token(TokenChannel::DEFAULT, TokenType::ASSIGN, Payload::None);
+                    }
+                }
+            }
+            '$' => {
+                self.cursor.advance();
+                self.add_token(TokenChannel::DEFAULT, TokenType::DOLLAR, Payload::None);
+            }
+            '@' => {
+                self.cursor.advance();
+                self.add_token(TokenChannel::DEFAULT, TokenType::AT, Payload::None);
+            }
+            '#' => {
+                self.cursor.advance();
+                self.add_token(TokenChannel::DEFAULT, TokenType::HASH, Payload::None);
+            }
+            '?' => {
+                self.cursor.advance();
+                self.add_token(TokenChannel::DEFAULT, TokenType::QUESTION, Payload::None);
+            }
+            _ => {
+                // Unknown something, consume the character, emit an unknown token, push error
+                self.cursor.advance();
+                self.add_token(TokenChannel::DEFAULT, TokenType::UNKNOWN, Payload::None);
+                self.emit_error(ErrorType::UnknownCharacter(c));
+            }
+        }
     }
 }
 

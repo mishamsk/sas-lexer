@@ -1,20 +1,9 @@
-#![allow(dead_code)]
-
-use sas_lexer::{
+use crate::{
     error::{ErrorInfo, ErrorType},
     lex,
     print::token_to_string,
     Payload, TokenChannel, TokenIdx, TokenType, TokenizedBuffer,
 };
-
-#[macro_export]
-macro_rules! set_snapshot_suffix {
-    ($($expr:expr),*) => {
-        let mut settings = insta::Settings::clone_current();
-        settings.set_snapshot_suffix(format!($($expr,)*));
-        let _guard = settings.bind_to_scope();
-    }
-}
 
 pub(crate) trait TokenTestCase {
     fn token_type(&self) -> TokenType;
