@@ -1069,7 +1069,7 @@ impl<'src> Lexer<'src> {
         };
 
         // See if it is an integer
-        if fvalue.fract() == 0.0 {
+        if fvalue.fract() == 0.0 && fvalue.abs() < i64::MAX as f64 {
             // For integers we need to emit different tokens, depending on
             // the presence of the dot as we use different token types.
             // The later is unfortunatelly necesasry due to SAS numeric formats
