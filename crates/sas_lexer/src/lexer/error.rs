@@ -7,6 +7,8 @@ pub enum ErrorType {
     UnterminatedStringLiteral,
     UnterminatedComment,
     UnterminatedDatalines,
+    InvalidNumericLiteral,
+    UnterminatedHexNumericLiteral,
     UnknownCharacter(char),
     InternalError(&'static str),
 }
@@ -28,6 +30,12 @@ impl Display for ErrorType {
             }
             ErrorType::InternalError(msg) => {
                 write!(f, "Internal error: {msg}")
+            }
+            ErrorType::InvalidNumericLiteral => {
+                write!(f, "Invalid numeric literal")
+            }
+            ErrorType::UnterminatedHexNumericLiteral => {
+                write!(f, "Missing `x` at the end of a hex numeric literal")
             }
         }
     }

@@ -16,6 +16,7 @@ use cursor::EOF_CHAR;
 use error::{ErrorInfo, ErrorType};
 use predicate::{is_macro_amp, is_macro_percent};
 use sas_lang::is_valid_sas_name_start;
+use std::str::FromStr;
 use text::{ByteOffset, CharOffset};
 use token_type::{parse_keyword, TokenType};
 use unicode_ident::{is_xid_continue, is_xid_start};
@@ -270,6 +271,10 @@ impl<'src> Lexer<'src> {
 
                 self.cursor.advance();
                 self.add_token(TokenChannel::DEFAULT, TokenType::PERCENT, Payload::None);
+            }
+            '0'..='9' => {
+                // Numeric literal
+                self.lex_numeric_literal();
             }
             c if is_xid_start(c) || c == '_' => {
                 self.lex_identifier();
@@ -940,6 +945,311 @@ impl<'src> Lexer<'src> {
         true
     }
 
+    fn lex_numeric_literal(&mut self) {
+        debug_assert!(matches!(self.cursor.peek(), '0'..='9'));
+        // First, SAS supports 3 notations for numeric literals:
+        // 1. Standard decimal notation (base 10)
+        // 2. Hexadecimal notation (base 16)
+        // 3. Scientific notation
+
+        // For HEX notation, the number must start with a number
+        // and can have up-to 16 total HEX digits (including the starting one)
+        // due to 8 bytes of storage for a number in SAS. It must be
+        // followed by an `x` or `X` character
+
+        // consume the first digit
+        self.cursor.advance();
+
+        // Now we need to disambiguate between the notations
+        let mut expect_hex = true;
+        let mut expect_dot = true;
+        let mut expect_exp = true;
+
+        loop {
+            match self.cursor.peek() {
+                '0'..='9' => {
+                    // can be any notation
+                    self.cursor.advance();
+                }
+                'a'..='d' | 'A'..='D' | 'f' | 'F' if expect_hex => {
+                    // must be HEX notation
+                    self.lex_numeric_hex_literal();
+                    return;
+                }
+                'x' | 'X' if expect_hex => {
+                    // complete literal in HEX notation
+                    // do not advance, such that the `x` is consumed by the HEX parser
+                    self.lex_numeric_hex_literal();
+                    return;
+                }
+                'e' | 'E' => {
+                    if !expect_hex {
+                        // If we already seen the dot and now got E => Scientific notation
+                        self.lex_numeric_exp_literal(true);
+                        return;
+                    }
+
+                    if !expect_exp {
+                        // If we already seen the E => HEX notation
+                        self.lex_numeric_hex_literal();
+                        return;
+                    }
+
+                    self.cursor.advance();
+                    // now we know it can't be standard notation and we can't have second
+                    // E for exponent. This flag helps with both
+                    expect_exp = false;
+                    // and we can't have a dot after E in neither HEX nor scientific notation
+                    expect_dot = false;
+                }
+                '-' => {
+                    // Must be Scientific notation
+                    // Do not advance, such that the `-` is consumed by the exponent parser
+                    self.lex_numeric_exp_literal(!expect_exp);
+                    return;
+                }
+                '.' => {
+                    if expect_dot {
+                        // Can be standard decimal or scientific notation
+                        // but not HEX now
+                        self.cursor.advance();
+                        expect_hex = false;
+                        continue;
+                    }
+
+                    // Second dot, or dot after E - means we looking past the literal
+                    if expect_exp {
+                        self.lex_decimal_literal();
+                    } else {
+                        // This can happen only in the case of `NNNe.` which can be considered
+                        // either a HEX missing X, or scientific notation with missing exponent.
+                        // For simplicity sake we call the scientific parser function which will
+                        // report error and recover. This way, we do not need to track the last
+                        // character
+                        self.lex_numeric_exp_literal(true);
+                    }
+
+                    return;
+                }
+                _ => {
+                    if expect_exp {
+                        // Must be a standard decimal notation, since we
+                        // haven't seen the E yet and definitely any other HEX digits
+                        // as they would immediately trigger the HEX notation
+                        self.lex_decimal_literal();
+                    } else {
+                        // This is an error, incomplete scientific notation, like `NNNe `
+                        self.lex_numeric_exp_literal(true);
+                    }
+
+                    return;
+                }
+            }
+        }
+    }
+
+    fn lex_decimal_literal(&mut self) {
+        // The way calling logic is done, for regular decimals
+        // we must have consumed the entire literal
+        debug_assert!(!matches!(self.cursor.peek(), '0'..='9'));
+
+        // Parse as f64. SAS uses 8 bytes and all numbers are stored as f64
+        // so it is impossible to have a valid literal that would overflow
+        // the f64 range.
+        let number = self.pending_token_text();
+
+        let fvalue = match f64::from_str(number) {
+            Ok(value) => value,
+            Err(_) => {
+                self.add_token(
+                    TokenChannel::DEFAULT,
+                    TokenType::IntegerLiteral,
+                    Payload::Integer(0),
+                );
+
+                self.emit_error(ErrorType::InvalidNumericLiteral);
+                return;
+            }
+        };
+
+        // See if it is an integer
+        if fvalue.fract() == 0.0 {
+            // For integers we need to emit different tokens, depending on
+            // the presence of the dot as we use different token types.
+            // The later is unfortunatelly necesasry due to SAS numeric formats
+            // context sensitivity and no way of disambiguating between a number `1.`
+            // and the same numeric format `1.`
+
+            // But leading sign or 0 - we can emit the integer token
+            match number.as_bytes()[0] {
+                b'-' | b'+' | b'0' => {
+                    self.add_token(
+                        TokenChannel::DEFAULT,
+                        TokenType::IntegerLiteral,
+                        Payload::Integer(fvalue as i64),
+                    );
+                }
+                _ => {
+                    if number.contains('.') {
+                        self.add_token(
+                            TokenChannel::DEFAULT,
+                            TokenType::IntegerDotLiteral,
+                            Payload::Integer(fvalue as i64),
+                        );
+                    } else {
+                        self.add_token(
+                            TokenChannel::DEFAULT,
+                            TokenType::IntegerLiteral,
+                            Payload::Integer(fvalue as i64),
+                        );
+                    }
+                }
+            }
+        } else {
+            // And for floats, similarly it is important whether it
+            // it was created from scientific notation or not, but
+            // this function only handles the decimal literals, so
+            // no need to check for that
+            self.add_token(
+                TokenChannel::DEFAULT,
+                TokenType::FloatLiteral,
+                Payload::Float(fvalue),
+            );
+        }
+    }
+
+    /// Consumes the remaining tail of a HEX literal and emits the token
+    fn lex_numeric_hex_literal(&mut self) {
+        #[cfg(debug_assertions)]
+        debug_assert!(matches!(self.cursor.prev_char(), '0'..='9' | 'a'..='f' | 'A'..='F'));
+
+        // Eat until the end of the literal (x or X) or identify a missing x/X
+        loop {
+            match self.cursor.peek() {
+                '0'..='9' | 'a'..='f' | 'A'..='F' => {
+                    self.cursor.advance();
+                }
+                'x' | 'X' => {
+                    // First get the text, and only then advance - the radix parser
+                    // won't like the trailing x/X
+                    let number = self.pending_token_text().to_owned();
+                    self.cursor.advance();
+
+                    self.lex_numeric_hex_str(number.as_str());
+                    return;
+                }
+                _ => {
+                    // This is an error, incomplete HEX literal
+                    // First parse the number, then emit the error
+                    let number = self.pending_token_text().to_owned();
+                    self.lex_numeric_hex_str(number.as_str());
+
+                    self.emit_error(ErrorType::UnterminatedHexNumericLiteral);
+                    return;
+                }
+            }
+        }
+    }
+
+    /// Parses a valid HEX number (sans the trailing `x` or `X`) and emits the token
+    fn lex_numeric_hex_str(&mut self, number: &str) {
+        // Try parse as i64. SAS only allows up-to 8 bytes (16 HEX digits)
+        // for HEX literals, with the first one capped at 9F, so it is
+        // slightly less then +/-(2^63 - 1), but can theoretically overflow
+        match i64::from_str_radix(number, 16) {
+            Ok(value) => self.add_token(
+                TokenChannel::DEFAULT,
+                TokenType::IntegerLiteral,
+                Payload::Integer(value),
+            ),
+            Err(e) => {
+                match e.kind() {
+                    std::num::IntErrorKind::NegOverflow | std::num::IntErrorKind::PosOverflow => {
+                        // Wow, very big number;) Ok
+
+                        // First remove leading sign if any, remember the sign
+                        let (truncated, negative) = if number.starts_with('-') {
+                            (&number[1..], true)
+                        } else if number.starts_with('+') {
+                            (&number[1..], false)
+                        } else {
+                            (number, false)
+                        };
+
+                        // Check length, SAS itself wil not allow more than 16 HEX digits
+                        let truncated = if truncated.len() > 16 {
+                            // Emit an error, but truncate the number to parse something
+                            self.emit_error(ErrorType::InvalidNumericLiteral);
+
+                            &truncated[..16]
+                        } else {
+                            truncated
+                        };
+
+                        // This must work! We truncated the number to 16 HEX digits
+                        let int_vale = u64::from_str_radix(truncated, 16)
+                            .expect("The truncated number should be valid HEX number");
+
+                        // Convert to f64 and apply the sign
+                        let fvalue = if negative {
+                            -(int_vale as f64)
+                        } else {
+                            int_vale as f64
+                        };
+
+                        self.add_token(
+                            TokenChannel::DEFAULT,
+                            TokenType::FloatLiteral,
+                            Payload::Float(fvalue),
+                        );
+                    }
+                    _ => {
+                        // This is an internal error, should not happen
+                        self.add_token(
+                            TokenChannel::DEFAULT,
+                            TokenType::IntegerLiteral,
+                            Payload::Integer(0),
+                        );
+
+                        self.emit_error(ErrorType::InternalError("Failed to parse HEX literal"));
+                    }
+                }
+            }
+        };
+    }
+
+    fn lex_numeric_exp_literal(&mut self, seen_exp: bool) {
+        #[cfg(debug_assertions)]
+        debug_assert!(matches!(self.cursor.prev_char(), 'a'..='f' | 'A'..='F'));
+
+        // Eat until the end of the literal (x or X) or identify a missing x/X
+        loop {
+            match self.cursor.peek() {
+                '0'..='9' | 'a'..='f' | 'A'..='F' => {
+                    self.cursor.advance();
+                }
+                'x' | 'X' => {
+                    // First get the text, and only then advance - the radix parser
+                    // won't like the trailing x/X
+                    let number = self.pending_token_text().to_owned();
+                    self.cursor.advance();
+
+                    self.lex_numeric_hex_str(number.as_str());
+                    return;
+                }
+                _ => {
+                    // This is an error, incomplete HEX literal
+                    // First parse the number, then emit the error
+                    let number = self.pending_token_text().to_owned();
+                    self.lex_numeric_hex_str(number.as_str());
+
+                    self.emit_error(ErrorType::UnterminatedHexNumericLiteral);
+                    return;
+                }
+            }
+        }
+    }
+
     fn lex_symbols(&mut self, c: char) {
         match c {
             '*' => {
@@ -1022,11 +1332,37 @@ impl<'src> Lexer<'src> {
             }
             '+' => {
                 self.cursor.advance();
-                self.add_token(TokenChannel::DEFAULT, TokenType::PLUS, Payload::None);
+
+                match self.cursor.peek() {
+                    '0'..='9' => {
+                        // `+N`
+                        self.lex_numeric_literal();
+                    }
+                    '.' if self.cursor.peek_next().is_ascii_digit() => {
+                        // `+.N` is a valid number, but `+. ` is not
+                        self.lex_numeric_literal();
+                    }
+                    _ => {
+                        self.add_token(TokenChannel::DEFAULT, TokenType::PLUS, Payload::None);
+                    }
+                }
             }
             '-' => {
                 self.cursor.advance();
-                self.add_token(TokenChannel::DEFAULT, TokenType::MINUS, Payload::None);
+
+                match self.cursor.peek() {
+                    '0'..='9' => {
+                        // `+N`
+                        self.lex_numeric_literal();
+                    }
+                    '.' if self.cursor.peek_next().is_ascii_digit() => {
+                        // `+.N` is a valid number, but `+. ` is not
+                        self.lex_numeric_literal();
+                    }
+                    _ => {
+                        self.add_token(TokenChannel::DEFAULT, TokenType::MINUS, Payload::None);
+                    }
+                }
             }
             '<' => {
                 self.cursor.advance();

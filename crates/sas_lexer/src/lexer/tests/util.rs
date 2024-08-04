@@ -1,7 +1,7 @@
 use crate::{
     error::{ErrorInfo, ErrorType},
     lex,
-    print::token_to_string,
+    print::{error_to_string, token_to_string},
     Payload, TokenChannel, TokenIdx, TokenType, TokenizedBuffer,
 };
 
@@ -124,6 +124,60 @@ impl TokenTestCase for TokenType {
                     Some(source.as_ref().to_owned())
                 }
             }
+        }
+    }
+}
+
+impl TokenTestCase for (TokenType, f64) {
+    fn token_type(&self) -> TokenType {
+        self.0
+    }
+
+    fn token_channel(&self) -> TokenChannel {
+        match self.0 {
+            TokenType::WS => TokenChannel::HIDDEN,
+            _ => TokenChannel::default(),
+        }
+    }
+
+    fn payload(&self) -> Payload {
+        Payload::Float(self.1)
+    }
+
+    fn text<S: AsRef<str>>(&self, source: S) -> Option<String> {
+        // If a test case doesn't provide a text, it means the whole source
+        // is the token text
+        if source.as_ref().is_empty() {
+            None
+        } else {
+            Some(source.as_ref().to_owned())
+        }
+    }
+}
+
+impl TokenTestCase for (TokenType, i64) {
+    fn token_type(&self) -> TokenType {
+        self.0
+    }
+
+    fn token_channel(&self) -> TokenChannel {
+        match self.0 {
+            TokenType::WS => TokenChannel::HIDDEN,
+            _ => TokenChannel::default(),
+        }
+    }
+
+    fn payload(&self) -> Payload {
+        Payload::Integer(self.1)
+    }
+
+    fn text<S: AsRef<str>>(&self, source: S) -> Option<String> {
+        // If a test case doesn't provide a text, it means the whole source
+        // is the token text
+        if source.as_ref().is_empty() {
+            None
+        } else {
+            Some(source.as_ref().to_owned())
         }
     }
 }
@@ -304,7 +358,21 @@ impl ErrorTestCase for ErrorType {
     }
 }
 
+fn format_errors_for_trace<'a, I, S>(errors: I, buffer: &TokenizedBuffer, source: &S) -> String
+where
+    I: IntoIterator<Item = ErrorInfo>,
+    S: AsRef<str> + 'a,
+{
+    errors
+        .into_iter()
+        .map(|error| format!("- {}", error_to_string(&error, buffer, source)))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 pub(crate) fn check_error(
+    source: &str,
+    buffer: &TokenizedBuffer,
     error: &ErrorInfo,
     error_type: ErrorType,
     at_byte_offset: u32,
@@ -316,48 +384,65 @@ pub(crate) fn check_error(
     assert_eq!(
         error.error_type(),
         error_type,
-        "Expected error type {:?}, got {:?}",
+        "Expected error type {:?}, got {:?}: {}",
         error_type,
-        error.error_type()
+        error.error_type(),
+        error_to_string(error, buffer, &source)
     );
 
     assert_eq!(
         error.at_byte_offset(),
         at_byte_offset,
-        "Expected byte offset {}, got {}",
+        "Expected byte offset {}, got {}: {}",
         at_byte_offset,
-        error.at_byte_offset()
+        error.at_byte_offset(),
+        error_to_string(error, buffer, &source)
     );
 
     assert_eq!(
         error.at_char_offset(),
         at_char_offset,
-        "Expected char offset {}, got {}",
+        "Expected char offset {}, got {}: {}",
         at_char_offset,
-        error.at_char_offset()
+        error.at_char_offset(),
+        error_to_string(error, buffer, &source)
     );
 
     assert_eq!(
         error.on_line(),
         on_line,
-        "Expected line {}, got {}",
+        "Expected line {}, got {}: {}",
         on_line,
-        error.on_line()
+        error.on_line(),
+        error_to_string(error, buffer, &source)
     );
 
     assert_eq!(
         error.at_column(),
         at_column,
-        "Expected column {}, got {}",
+        "Expected column {}, got {}: {}",
         at_column,
-        error.at_column()
+        error.at_column(),
+        error_to_string(error, buffer, &source)
     );
 
     let last_token = error.last_token();
 
     assert_eq!(
-        last_token, last_token_idx,
-        "Expected last token index {last_token_idx:?}, got {last_token:?}"
+        last_token,
+        last_token_idx,
+        "Expected last token index {last_token_idx:?}, got {last_token:?}.\n\
+        {} instead of {}",
+        if let Some(lt_idx) = last_token {
+            token_to_string(lt_idx, buffer, &source)
+        } else {
+            "<no token>".to_string()
+        },
+        if let Some(lt_idx) = last_token_idx {
+            token_to_string(lt_idx, buffer, &source)
+        } else {
+            "<no token>".to_string()
+        },
     );
 }
 
@@ -487,15 +572,18 @@ pub(crate) fn assert_lexing(
     assert_eq!(
         expected_errors.len(),
         errors.len(),
-        "Expected {} errors, got {}",
+        "Expected {} errors, got {}:\n{}",
         expected_errors.len(),
-        errors.len()
+        errors.len(),
+        format_errors_for_trace(errors, &buffer, &source)
     );
 
     for (i, expected_err) in expected_errors.iter().enumerate() {
         let lexed_err = &errors[i];
 
         check_error(
+            source,
+            &buffer,
             lexed_err,
             expected_err.error_type(),
             expected_err.at_byte_offset(cur_start_byte_offset),

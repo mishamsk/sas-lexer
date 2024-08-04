@@ -7,40 +7,47 @@ pub enum TokenType {
     EOF,
     UNKNOWN,
     WS,
-    SEMI,                     // ';'
-    AMP,                      // '&'+
-    PERCENT,                  // '%'
-    LPAREN,                   // '('
-    RPAREN,                   // ')'
-    STAR,                     // '*'
-    EXCL,                     // '!'
-    EXCL2,                    // '!!'
-    BPIPE,                    // '¦'
-    BPIPE2,                   // '¦¦'
-    PIPE2,                    // '||'
-    STAR2,                    // '**'
-    NOT,                      // '¬' | '^' | '~' | '∘'
-    FSLASH,                   // '/'
-    PLUS,                     // '+'
-    MINUS,                    // '-'
-    GTLT,                     // '><'
-    LTGT,                     // '<>'
-    LT,                       // '<'
-    LE,                       // '<='
-    NE,                       // '¬=' | '^=' | '~=' | '∘='
-    GT,                       // '>'
-    GE,                       // '>='
-    SoundsLike,               // '=*'
-    PIPE,                     // '|'
-    DOT,                      // '.'
-    COMMA,                    // ','
-    COLON,                    // ':'
-    ASSIGN,                   // '='
-    DOLLAR,                   // '$'
-    AT,                       // '@'
-    HASH,                     // '#'
-    QUESTION,                 // '?'
-    TermQuote,                // *'; and *" ";
+    SEMI,           // ';'
+    AMP,            // '&'+
+    PERCENT,        // '%'
+    LPAREN,         // '('
+    RPAREN,         // ')'
+    STAR,           // '*'
+    EXCL,           // '!'
+    EXCL2,          // '!!'
+    BPIPE,          // '¦'
+    BPIPE2,         // '¦¦'
+    PIPE2,          // '||'
+    STAR2,          // '**'
+    NOT,            // '¬' | '^' | '~' | '∘'
+    FSLASH,         // '/'
+    PLUS,           // '+'
+    MINUS,          // '-'
+    GTLT,           // '><'
+    LTGT,           // '<>'
+    LT,             // '<'
+    LE,             // '<='
+    NE,             // '¬=' | '^=' | '~=' | '∘='
+    GT,             // '>'
+    GE,             // '>='
+    SoundsLike,     // '=*'
+    PIPE,           // '|'
+    DOT,            // '.'
+    COMMA,          // ','
+    COLON,          // ':'
+    ASSIGN,         // '='
+    DOLLAR,         // '$'
+    AT,             // '@'
+    HASH,           // '#'
+    QUESTION,       // '?'
+    TermQuote,      // *'; and *" ";
+    IntegerLiteral, // 42
+    // 42., 42.000 - this is seprate due to ambiguity with numeric formats
+    // but not 042. or [-/+]42. because width in the format can't be 0 and can't be
+    // preceded by a sign
+    IntegerDotLiteral,
+    FloatLiteral,             // 42.1, .42
+    FloatExponentLiteral,     // 42.1e[+,-,]1 - separate due to ambiguity with numeric formats
     StringLiteral,            // 'string'
     BitTestingLiteral,        // 'stuff'b
     DateLiteral,              // 'stuff'd
@@ -230,7 +237,7 @@ mod tests {
 
     #[test]
     fn test_all_tokens_round_trip() {
-        const TOKEN_COUNT: u16 = 183;
+        const TOKEN_COUNT: u16 = 187;
 
         for i in 0..TOKEN_COUNT {
             let token = TokenType::from_u16(i).unwrap();

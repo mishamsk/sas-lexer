@@ -33,9 +33,11 @@ impl LineIdx {
 }
 
 /// Enum representing varios types of extra data associated with a token.
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum Payload {
     None,
+    Integer(i64),
+    Float(f64),
 }
 
 /// A struct to hold information about the lines in the tokenized buffer.
@@ -60,7 +62,7 @@ impl LineInfo {
 }
 
 /// A struct to hold information about the tokens in the tokenized buffer.
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub(super) struct TokenInfo {
     /// Channel of the token.
     channel: TokenChannel,
