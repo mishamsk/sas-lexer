@@ -936,11 +936,7 @@ impl<'src> Lexer<'src> {
         self.cursor.advance_by(ending_len as u32);
 
         // Add the datalines end token
-        self.add_token(
-            TokenChannel::DEFAULT,
-            TokenType::DatalinesEnd,
-            Payload::None,
-        );
+        self.add_token(TokenChannel::DEFAULT, TokenType::SEMI, Payload::None);
 
         true
     }
