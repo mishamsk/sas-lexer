@@ -373,20 +373,23 @@ fn test_all_single_keywords() {
 #[case::hex_max("-9ffFFffFFffFFffFx", (TokenType::FloatLiteral, -1.152921504606847e19))]
 // Scientific notation
 #[case::sci("1e3", (TokenType::FloatLiteral, 1000.0))]
-#[case::sci_plus("1e+3", (TokenType::FloatLiteral, 1000.0))]
+#[case::sci_plus("1E+3", (TokenType::FloatLiteral, 1000.0))]
 #[case::sci_minus("1e-3", (TokenType::FloatLiteral, 0.001))]
-#[case::sci_neg("-1e3", (TokenType::FloatLiteral, -1000.0))]
+#[case::sci_neg("-1E3", (TokenType::FloatLiteral, -1000.0))]
 #[case::sci_pos_plus("+1e+3", (TokenType::FloatLiteral, 1000.0))]
-#[case::sci_neg_minus("-1e-3", (TokenType::FloatLiteral, -0.001))]
+#[case::sci_neg_minus("-1E-3", (TokenType::FloatLiteral, -0.001))]
 #[case::sci_dot("4.2e3", (TokenType::FloatLiteral, 4200.0))]
-#[case::sci_dot_only(".1e3", (TokenType::FloatLiteral, 100.0))]
+#[case::sci_dot_only(".1E3", (TokenType::FloatLiteral, 100.0))]
 #[case::sci_pos_dot("+4.2e3", (TokenType::FloatLiteral, 4200.0))]
-#[case::sci_neg_dot_only("-.1e3", (TokenType::FloatLiteral, -100.0))]
+#[case::sci_neg_dot_only("-.1E3", (TokenType::FloatLiteral, -100.0))]
 fn test_numeric_literal(#[case] contents: &str, #[case] expected_token: impl TokenTestCase) {
     assert_lexing(contents, vec![expected_token], NO_ERRORS);
 }
 
 #[rstest]
+#[case(".1-", (TokenType::FloatLiteral, 0.0), ErrorType::InvalidNumericLiteral)]
+#[case(".1e", (TokenType::FloatLiteral, 0.0), ErrorType::InvalidNumericLiteral)]
+#[case(".1E", (TokenType::FloatLiteral, 0.0), ErrorType::InvalidNumericLiteral)]
 #[case("02A", (TokenType::IntegerLiteral, 42), ErrorType::UnterminatedHexNumericLiteral)]
 #[case("-9ffFFffFFffFFffF123AFx", (TokenType::FloatLiteral, -1.152921504606847e19), ErrorType::InvalidNumericLiteral)]
 fn test_numeric_literal_error_recovery(
