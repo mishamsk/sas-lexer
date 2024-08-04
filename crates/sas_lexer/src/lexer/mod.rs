@@ -1291,6 +1291,22 @@ impl<'src> Lexer<'src> {
                 self.cursor.advance();
                 self.add_token(TokenChannel::DEFAULT, TokenType::RPAREN, Payload::None);
             }
+            '{' => {
+                self.cursor.advance();
+                self.add_token(TokenChannel::DEFAULT, TokenType::LCURLY, Payload::None);
+            }
+            '}' => {
+                self.cursor.advance();
+                self.add_token(TokenChannel::DEFAULT, TokenType::RCURLY, Payload::None);
+            }
+            '[' => {
+                self.cursor.advance();
+                self.add_token(TokenChannel::DEFAULT, TokenType::LBRACK, Payload::None);
+            }
+            ']' => {
+                self.cursor.advance();
+                self.add_token(TokenChannel::DEFAULT, TokenType::RBRACK, Payload::None);
+            }
             '!' => {
                 self.cursor.advance();
 
