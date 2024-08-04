@@ -5,6 +5,7 @@ use strum::Display;
 #[derive(Debug, PartialEq, Eq, Clone, Copy, ToU16, FromU16, Display, KeywordMap)]
 pub enum TokenType {
     EOF,
+    UNKNOWN,
     WS,
     SEMI,                     // ';'
     AMP,                      // '&'+
@@ -63,7 +64,6 @@ pub enum TokenType {
     DatalinesEnd,             // the closing ;[;;;]
     // Put pure second pass tokens after this line only
     BaseIdentifier,
-    BaseCode,
     KwLT,
     KwLE,
     KwEQ,

@@ -1,12 +1,10 @@
-#![allow(clippy::cast_possible_truncation, clippy::unwrap_used)]
-mod util;
-
 use std::vec;
 
+use crate::{error::ErrorType, lex, TokenChannel, TokenType};
 use rstest::rstest;
-use sas_lexer::{error::ErrorType, lex, TokenChannel, TokenType};
 
-use util::{assert_lexing, TokenTestCase};
+use super::super::token_type::KEYWORDS;
+use super::util::{assert_lexing, TokenTestCase};
 
 const NO_ERRORS: Vec<ErrorType> = vec![];
 
@@ -278,4 +276,75 @@ fn test_not_datalines() {
         ],
         NO_ERRORS,
     );
+}
+
+#[rstest]
+#[case(";", TokenType::SEMI)]
+#[case("&", TokenType::AMP)]
+#[case("&&&", TokenType::AMP)]
+#[case("%", TokenType::PERCENT)]
+#[case("(", TokenType::LPAREN)]
+#[case(")", TokenType::RPAREN)]
+#[case("*", TokenType::STAR)]
+#[case("!", TokenType::EXCL)]
+#[case("!!", TokenType::EXCL2)]
+#[case("¦", TokenType::BPIPE)]
+#[case("¦¦", TokenType::BPIPE2)]
+#[case("||", TokenType::PIPE2)]
+#[case("**", TokenType::STAR2)]
+#[case("¬", TokenType::NOT)]
+#[case("^", TokenType::NOT)]
+#[case("~", TokenType::NOT)]
+#[case("∘", TokenType::NOT)]
+#[case("/", TokenType::FSLASH)]
+#[case("+", TokenType::PLUS)]
+#[case("-", TokenType::MINUS)]
+#[case("><", TokenType::GTLT)]
+#[case("<>", TokenType::LTGT)]
+#[case("<", TokenType::LT)]
+#[case("<=", TokenType::LE)]
+#[case("¬=", TokenType::NE)]
+#[case("^=", TokenType::NE)]
+#[case("~=", TokenType::NE)]
+#[case("∘=", TokenType::NE)]
+#[case(">", TokenType::GT)]
+#[case(">=", TokenType::GE)]
+#[case("=*", TokenType::SoundsLike)]
+#[case("|", TokenType::PIPE)]
+#[case(".", TokenType::DOT)]
+#[case(",", TokenType::COMMA)]
+#[case(":", TokenType::COLON)]
+#[case("=", TokenType::ASSIGN)]
+#[case("$", TokenType::DOLLAR)]
+#[case("@", TokenType::AT)]
+#[case("#", TokenType::HASH)]
+#[case("?", TokenType::QUESTION)]
+#[case("*';", (TokenType::TermQuote, TokenChannel::HIDDEN))]
+#[case("*\";", (TokenType::TermQuote, TokenChannel::HIDDEN))]
+fn test_all_single_symbols(#[case] contents: &str, #[case] expected_token: impl TokenTestCase) {
+    assert_lexing(contents, vec![expected_token], NO_ERRORS);
+}
+
+#[test]
+fn test_all_single_keywords() {
+    KEYWORDS.keys().for_each(|keyword| {
+        // Change every odd character to uppercase, and every even character to lowercase
+        let mangled_keyword = keyword
+            .chars()
+            .enumerate()
+            .map(|(i, c)| {
+                if i % 2 == 0 {
+                    c.to_ascii_lowercase()
+                } else {
+                    c.to_ascii_uppercase()
+                }
+            })
+            .collect::<String>();
+
+        assert_lexing(
+            mangled_keyword.as_str(),
+            vec![(KEYWORDS.get(keyword).copied().unwrap())],
+            NO_ERRORS,
+        );
+    });
 }

@@ -7,7 +7,7 @@ pub enum ErrorType {
     UnterminatedStringLiteral,
     UnterminatedComment,
     UnterminatedDatalines,
-    EmptyModeStack,
+    UnknownCharacter(char),
     InternalError(&'static str),
 }
 
@@ -23,8 +23,8 @@ impl Display for ErrorType {
             ErrorType::UnterminatedDatalines => {
                 write!(f, "Unterminated datalines")
             }
-            ErrorType::EmptyModeStack => {
-                write!(f, "Unexpected empty mode stack")
+            ErrorType::UnknownCharacter(c) => {
+                write!(f, "Unknown character: '{}'", c)
             }
             ErrorType::InternalError(msg) => {
                 write!(f, "Internal error: {msg}")

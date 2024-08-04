@@ -120,7 +120,7 @@ pub fn generate_keyword_map(input: TokenStream) -> TokenStream {
     }
 
     let expanded = quote! {
-        static KEYWORDS: phf::Map<&'static str, #name> = phf_map! {
+        pub(crate) static KEYWORDS: phf::Map<&'static str, #name> = phf_map! {
             #(#variant_code)*
         };
     };

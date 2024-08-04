@@ -1,5 +1,5 @@
 ---
-source: tests/test_sample_files.rs
+source: crates/sas_lexer/src/lexer/tests/test_sample_files.rs
 expression: tokens
 ---
 - "[@0,0:1=\"&\",<AMP>,L1:C0-L1:C1,chl=<D>,pl=\"<None>\"]"
@@ -7,7 +7,7 @@ expression: tokens
 - "[@2,2:6=\"&&&&\",<AMP>,L2:C0-L2:C4,chl=<D>,pl=\"<None>\"]"
 - "[@3,6:7=\"\\n\",<WS>,L2:C4-L2:C5,chl=<H>,pl=\"<None>\"]"
 - "[@4,7:8=\"&\",<AMP>,L3:C0-L3:C1,chl=<D>,pl=\"<None>\"]"
-- "[@5,8:9=\"9\",<BaseCode>,L3:C1-L3:C2,chl=<D>,pl=\"<None>\"]"
+- "[@5,8:9=\"9\",<UNKNOWN>,L3:C1-L3:C2,chl=<D>,pl=\"<None>\"]"
 - "[@6,9:10=\"\\n\",<WS>,L3:C2-L3:C3,chl=<H>,pl=\"<None>\"]"
 - "[@7,10:15=\"&mvar\",<MacroVarExpr>,L4:C0-L4:C5,chl=<D>,pl=\"<None>\"]"
 - "[@8,15:16=\"\\n\",<WS>,L4:C5-L4:C6,chl=<H>,pl=\"<None>\"]"
@@ -21,7 +21,7 @@ expression: tokens
 - "[@16,37:38=\"\\n\",<WS>,L7:C7-L7:C8,chl=<H>,pl=\"<None>\"]"
 - "[@17,38:43=\"&mvar\",<MacroVarExpr>,L8:C0-L8:C5,chl=<D>,pl=\"<None>\"]"
 - "[@18,43:44=\"&\",<AMP>,L8:C5-L8:C6,chl=<D>,pl=\"<None>\"]"
-- "[@19,44:45=\".\",<BaseCode>,L8:C6-L8:C7,chl=<D>,pl=\"<None>\"]"
+- "[@19,44:45=\".\",<DOT>,L8:C6-L8:C7,chl=<D>,pl=\"<None>\"]"
 - "[@20,45:46=\"\\n\",<WS>,L8:C7-L8:C8,chl=<H>,pl=\"<None>\"]"
 - "[@21,46:52=\"&&mvar\",<MacroVarExpr>,L9:C0-L9:C6,chl=<D>,pl=\"<None>\"]"
 - "[@22,52:53=\"\\n\",<WS>,L9:C6-L9:C7,chl=<H>,pl=\"<None>\"]"
@@ -35,11 +35,11 @@ expression: tokens
 - "[@30,77:78=\"\\n\",<WS>,L12:C8-L12:C9,chl=<H>,pl=\"<None>\"]"
 - "[@31,78:84=\"&&mvar\",<MacroVarExpr>,L13:C0-L13:C6,chl=<D>,pl=\"<None>\"]"
 - "[@32,84:85=\"&\",<AMP>,L13:C6-L13:C7,chl=<D>,pl=\"<None>\"]"
-- "[@33,85:86=\"9\",<BaseCode>,L13:C7-L13:C8,chl=<D>,pl=\"<None>\"]"
+- "[@33,85:86=\"9\",<UNKNOWN>,L13:C7-L13:C8,chl=<D>,pl=\"<None>\"]"
 - "[@34,86:87=\"\\n\",<WS>,L13:C8-L13:C9,chl=<H>,pl=\"<None>\"]"
 - "[@35,87:94=\"&&mvar.\",<MacroVarExpr>,L14:C0-L14:C7,chl=<D>,pl=\"<None>\"]"
 - "[@36,94:95=\"&\",<AMP>,L14:C7-L14:C8,chl=<D>,pl=\"<None>\"]"
-- "[@37,95:96=\"9\",<BaseCode>,L14:C8-L14:C9,chl=<D>,pl=\"<None>\"]"
+- "[@37,95:96=\"9\",<UNKNOWN>,L14:C8-L14:C9,chl=<D>,pl=\"<None>\"]"
 - "[@38,96:97=\"\\n\",<WS>,L14:C9-L14:C10,chl=<H>,pl=\"<None>\"]"
 - "[@39,97:108=\"&mvar&mvar2\",<MacroVarExpr>,L15:C0-L15:C11,chl=<D>,pl=\"<None>\"]"
 - "[@40,108:109=\"\\n\",<WS>,L15:C11-L15:C12,chl=<H>,pl=\"<None>\"]"
@@ -71,4 +71,4 @@ expression: tokens
 - "[@66,249:257=\"&&&mvar.\",<MacroVarExpr>,L26:C0-L26:C8,chl=<D>,pl=\"<None>\"]"
 - "[@67,257:264=\"&mvar2.\",<MacroVarExpr>,L26:C8-L26:C15,chl=<D>,pl=\"<None>\"]"
 - "[@68,264:265=\"\\n\",<WS>,L26:C15-L26:C16,chl=<H>,pl=\"<None>\"]"
-- "[@69,265:265=\"<no text>\",<EOF>,L26:C16-L26:C16,chl=<D>,pl=\"<None>\"]"
+- "[@69,265:265=\"<no text>\",<EOF>,L27:C0-L27:C0,chl=<D>,pl=\"<None>\"]"

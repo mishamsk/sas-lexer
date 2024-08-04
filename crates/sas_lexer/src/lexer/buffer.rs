@@ -541,7 +541,7 @@ mod tests {
         let line1 = buffer.add_line(ByteOffset::default(), CharOffset::default());
         let token1 = buffer.add_token(
             TokenChannel::DEFAULT,
-            TokenType::BaseCode,
+            TokenType::UNKNOWN,
             ByteOffset::default(),
             CharOffset::default(),
             line1,
@@ -550,7 +550,7 @@ mod tests {
         let line2 = buffer.add_line(ByteOffset::new(14), CharOffset::new(14));
         let token2 = buffer.add_token(
             TokenChannel::DEFAULT,
-            TokenType::BaseCode,
+            TokenType::UNKNOWN,
             ByteOffset::new(15),
             CharOffset::new(15),
             line2,
@@ -645,7 +645,7 @@ mod tests {
         let line = work_buf.add_line(ByteOffset::default(), CharOffset::default());
         let token = work_buf.add_token(
             TokenChannel::DEFAULT,
-            TokenType::BaseCode,
+            TokenType::UNKNOWN,
             ByteOffset::default(),
             CharOffset::default(),
             line,
@@ -664,7 +664,7 @@ mod tests {
 
         let buf = work_buf.into_detached().unwrap();
 
-        assert_eq!(buf.get_token_type(token), TokenType::BaseCode);
+        assert_eq!(buf.get_token_type(token), TokenType::UNKNOWN);
         assert_eq!(buf.get_token_channel(token), TokenChannel::DEFAULT);
     }
 }
