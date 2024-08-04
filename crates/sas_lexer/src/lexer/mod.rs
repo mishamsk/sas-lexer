@@ -942,7 +942,7 @@ impl<'src> Lexer<'src> {
     }
 
     fn lex_numeric_literal(&mut self) {
-        debug_assert!(matches!(self.cursor.peek(), '0'..='9'));
+        debug_assert!(matches!(self.cursor.peek(), '0'..='9' | '-' | '+' | '.'));
         // First, SAS supports 3 notations for numeric literals:
         // 1. Standard decimal notation (base 10)
         // 2. Hexadecimal notation (base 16)
@@ -953,7 +953,7 @@ impl<'src> Lexer<'src> {
         // due to 8 bytes of storage for a number in SAS. It must be
         // followed by an `x` or `X` character
 
-        // consume the first digit
+        // consume the first digit or the sign
         self.cursor.advance();
 
         // Now we need to disambiguate between the notations
@@ -981,7 +981,9 @@ impl<'src> Lexer<'src> {
                 'e' | 'E' => {
                     if !expect_hex {
                         // If we already seen the dot and now got E => Scientific notation
-                        self.lex_numeric_exp_literal(true);
+                        // consume as lex_numeric_exp_literal() assumes it is working past the E
+                        self.cursor.advance();
+                        self.lex_numeric_exp_literal();
                         return;
                     }
 
@@ -998,10 +1000,11 @@ impl<'src> Lexer<'src> {
                     // and we can't have a dot after E in neither HEX nor scientific notation
                     expect_dot = false;
                 }
-                '-' => {
+                '-' | '+' => {
                     // Must be Scientific notation
                     // Do not advance, such that the `-` is consumed by the exponent parser
-                    self.lex_numeric_exp_literal(!expect_exp);
+                    // Also the lack of exponent will be handled by the exponent parser
+                    self.lex_numeric_exp_literal();
                     return;
                 }
                 '.' => {
@@ -1018,11 +1021,10 @@ impl<'src> Lexer<'src> {
                         self.lex_decimal_literal();
                     } else {
                         // This can happen only in the case of `NNNe.` which can be considered
-                        // either a HEX missing X, or scientific notation with missing exponent.
-                        // For simplicity sake we call the scientific parser function which will
-                        // report error and recover. This way, we do not need to track the last
-                        // character
-                        self.lex_numeric_exp_literal(true);
+                        // either a HEX missing X (user intended `NNNex`), or scientific notation
+                        // with missing exponent. For simplicity sake we call the scientific parser
+                        // function which will report error and recover.
+                        self.lex_numeric_exp_literal();
                     }
 
                     return;
@@ -1034,8 +1036,8 @@ impl<'src> Lexer<'src> {
                         // as they would immediately trigger the HEX notation
                         self.lex_decimal_literal();
                     } else {
-                        // This is an error, incomplete scientific notation, like `NNNe `
-                        self.lex_numeric_exp_literal(true);
+                        // e.g. `NNNeNNN `
+                        self.lex_numeric_exp_literal();
                     }
 
                     return;
@@ -1217,36 +1219,48 @@ impl<'src> Lexer<'src> {
         };
     }
 
-    fn lex_numeric_exp_literal(&mut self, seen_exp: bool) {
+    fn lex_numeric_exp_literal(&mut self) {
         #[cfg(debug_assertions)]
-        debug_assert!(matches!(self.cursor.prev_char(), 'a'..='f' | 'A'..='F'));
+        debug_assert!(matches!(self.cursor.prev_char(), '0'..='9' | 'e' | 'E'));
 
-        // Eat until the end of the literal (x or X) or identify a missing x/X
+        let mut seen_sign = false;
+
         loop {
             match self.cursor.peek() {
-                '0'..='9' | 'a'..='f' | 'A'..='F' => {
+                '0'..='9' => {
                     self.cursor.advance();
                 }
-                'x' | 'X' => {
-                    // First get the text, and only then advance - the radix parser
-                    // won't like the trailing x/X
-                    let number = self.pending_token_text().to_owned();
+                '-' | '+' if !seen_sign => {
                     self.cursor.advance();
-
-                    self.lex_numeric_hex_str(number.as_str());
-                    return;
+                    seen_sign = true;
                 }
                 _ => {
-                    // This is an error, incomplete HEX literal
-                    // First parse the number, then emit the error
-                    let number = self.pending_token_text().to_owned();
-                    self.lex_numeric_hex_str(number.as_str());
-
-                    self.emit_error(ErrorType::UnterminatedHexNumericLiteral);
-                    return;
+                    break;
                 }
             }
         }
+
+        // Now try to parse the number
+        let number = self.pending_token_text();
+
+        match f64::from_str(number) {
+            Ok(value) => {
+                self.add_token(
+                    TokenChannel::DEFAULT,
+                    TokenType::FloatLiteral,
+                    Payload::Float(value),
+                );
+            }
+            Err(_) => {
+                self.add_token(
+                    TokenChannel::DEFAULT,
+                    TokenType::FloatLiteral,
+                    Payload::Float(0.0),
+                );
+
+                self.emit_error(ErrorType::InvalidNumericLiteral);
+            }
+        };
     }
 
     fn lex_symbols(&mut self, c: char) {
@@ -1399,7 +1413,15 @@ impl<'src> Lexer<'src> {
             }
             '.' => {
                 self.cursor.advance();
-                self.add_token(TokenChannel::DEFAULT, TokenType::DOT, Payload::None);
+                match self.cursor.peek() {
+                    '0'..='9' => {
+                        // `.N`
+                        self.lex_numeric_literal();
+                    }
+                    _ => {
+                        self.add_token(TokenChannel::DEFAULT, TokenType::DOT, Payload::None);
+                    }
+                }
             }
             ',' => {
                 self.cursor.advance();

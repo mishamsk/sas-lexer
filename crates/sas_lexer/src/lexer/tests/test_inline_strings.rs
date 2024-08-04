@@ -356,18 +356,32 @@ fn test_all_single_keywords() {
 #[case::int001_plus("+001", (TokenType::IntegerLiteral, 1))]
 #[case::int001_minus("-001", (TokenType::IntegerLiteral, -1))]
 #[case::int1_dot("1.", (TokenType::IntegerDotLiteral, 1))]
+#[case::int_dot_0(".0", (TokenType::IntegerDotLiteral, 0))]
 #[case::int1_dot00("1.00", (TokenType::IntegerDotLiteral, 1))]
 #[case::int01_dot("01.", (TokenType::IntegerLiteral, 1))]
 #[case::int01_dot00("01.00", (TokenType::IntegerLiteral, 1))]
 #[case::int1_minus_dot("-1.", (TokenType::IntegerLiteral, -1))]
 #[case::int01_minus_dot("-01.", (TokenType::IntegerLiteral, -1))]
 #[case::int01_plus_dot00("+01.00", (TokenType::IntegerLiteral, 1))]
+#[case::pos_dec_only("+.1", (TokenType::FloatLiteral, 0.1))]
+#[case::neg_dec_only("-.1", (TokenType::FloatLiteral, -0.1))]
 // one more than i64::MAX
 #[case::i64_overlow("9223372036854775808", (TokenType::FloatLiteral, 9223372036854775808.0))]
 // Hexadecimal notation
 #[case::hex("02Ax", (TokenType::IntegerLiteral, 42))]
 #[case::hex_one_digit("9X", (TokenType::IntegerLiteral, 9))]
 #[case::hex_max("-9ffFFffFFffFFffFx", (TokenType::FloatLiteral, -1.152921504606847e19))]
+// Scientific notation
+#[case::sci("1e3", (TokenType::FloatLiteral, 1000.0))]
+#[case::sci_plus("1e+3", (TokenType::FloatLiteral, 1000.0))]
+#[case::sci_minus("1e-3", (TokenType::FloatLiteral, 0.001))]
+#[case::sci_neg("-1e3", (TokenType::FloatLiteral, -1000.0))]
+#[case::sci_pos_plus("+1e+3", (TokenType::FloatLiteral, 1000.0))]
+#[case::sci_neg_minus("-1e-3", (TokenType::FloatLiteral, -0.001))]
+#[case::sci_dot("4.2e3", (TokenType::FloatLiteral, 4200.0))]
+#[case::sci_dot_only(".1e3", (TokenType::FloatLiteral, 100.0))]
+#[case::sci_pos_dot("+4.2e3", (TokenType::FloatLiteral, 4200.0))]
+#[case::sci_neg_dot_only("-.1e3", (TokenType::FloatLiteral, -100.0))]
 fn test_numeric_literal(#[case] contents: &str, #[case] expected_token: impl TokenTestCase) {
     assert_lexing(contents, vec![expected_token], NO_ERRORS);
 }
