@@ -59,6 +59,31 @@ impl TokenTestCase for (&str, TokenType) {
     }
 }
 
+impl TokenTestCase for (&str, TokenType, Payload) {
+    fn token_type(&self) -> TokenType {
+        self.1
+    }
+
+    fn token_channel(&self) -> TokenChannel {
+        match self.1 {
+            TokenType::WS => TokenChannel::HIDDEN,
+            _ => TokenChannel::default(),
+        }
+    }
+
+    fn payload(&self) -> Payload {
+        self.2
+    }
+
+    fn text<S: AsRef<str>>(&self, _source: S) -> Option<String> {
+        if self.0.is_empty() {
+            None
+        } else {
+            Some(self.0.to_owned())
+        }
+    }
+}
+
 impl TokenTestCase for (TokenType, TokenChannel) {
     fn token_type(&self) -> TokenType {
         self.0
@@ -460,7 +485,6 @@ pub(crate) fn assert_lexing(
     // Save last_non_eof_token_idx for error checking below
     let last_non_eof_token_idx = tokens
         .iter()
-        .rev()
         .filter(|&t| buffer.get_token_type(*t) != TokenType::EOF)
         .last()
         .copied();
