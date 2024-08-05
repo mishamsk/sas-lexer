@@ -29,10 +29,18 @@ pub(crate) fn is_macro_amp<I: Iterator<Item = char>>(mut chars: I) -> (bool, u32
 /// Predicate to check if an encountered percent is a start of macro expression
 /// or statement.
 ///
-/// Must be passed an iterator that starts with the percent.
-///
-/// Consumes the iterator! Pass a clone if you need to keep the original.
-pub(crate) fn is_macro_percent<I: Iterator<Item = char>>(chars: I) -> bool {
-    return false;
-    !todo!();
+/// Must be passed a char following the percent sign.
+pub(crate) fn is_macro_percent(follow_char: char) -> bool {
+    match follow_char {
+        // Macro comment
+        '*' 
+        // Expermientally shown to work! (ignores the %)
+        // e.g. `%^ 0` returned 1 (true)
+        | '~' | '^' 
+        // Expermientally shown to kinda work! makes the expression false
+        // e.g. `0 %= 0` returned 0
+        | '=' => true,
+        c if is_valid_sas_name_start(c) => true,
+        _ => false,
+    }
 }

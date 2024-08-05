@@ -248,7 +248,6 @@ impl<'src> Lexer<'src> {
                 if self.cursor.peek_next() == '*' {
                     self.lex_cstyle_comment();
                 } else {
-                    // TODO: this is not done
                     self.cursor.advance();
                     self.add_token(TokenChannel::DEFAULT, TokenType::FSLASH, Payload::None);
                 }
@@ -263,14 +262,11 @@ impl<'src> Lexer<'src> {
                 }
             }
             '%' => {
-                if is_macro_percent(self.cursor.chars()) {
-                    !todo!();
-
-                    return;
+                if !self.lex_macro() {
+                    // Not a macro, just a percent
+                    self.cursor.advance();
+                    self.add_token(TokenChannel::DEFAULT, TokenType::PERCENT, Payload::None);
                 }
-
-                self.cursor.advance();
-                self.add_token(TokenChannel::DEFAULT, TokenType::PERCENT, Payload::None);
             }
             '0'..='9' => {
                 // Numeric literal
@@ -473,25 +469,19 @@ impl<'src> Lexer<'src> {
                 self.pop_mode();
             }
             '&' => {
-                if self.lex_amp() {
-                    // we lexed a macro var expr
-                    return;
+                if !self.lex_amp() {
+                    // Not a macro var. actually a part of string text.
+                    // and we've already consumed the sequence of &
+                    // continue to lex the text
+                    self.lex_str_expr_text();
                 }
-
-                // actually a part of string text. and we've already consumed the sequence of &
-                // continue to lex the text
-                self.lex_str_expr_text();
             }
             '%' => {
-                if is_macro_percent(self.cursor.chars()) {
-                    !todo!();
-
-                    return;
+                if !self.lex_macro() {
+                    // just a percent. consume and continue
+                    self.cursor.advance();
+                    self.lex_str_expr_text();
                 }
-
-                // actually a part of string text. and we've already consumed the sequence of &
-                // continue to lex the text
-                self.lex_str_expr_text();
             }
             EOF_CHAR => {
                 // EOF reached without a closing double quote
@@ -525,7 +515,7 @@ impl<'src> Lexer<'src> {
                     self.cursor.advance_by(amp_count);
                 }
                 '%' => {
-                    if is_macro_percent(self.cursor.chars()) {
+                    if is_macro_percent(self.cursor.peek_next()) {
                         // Hit a macro var expr in the string expression => emit the text token
                         self.add_token(
                             TokenChannel::DEFAULT,
@@ -805,7 +795,7 @@ impl<'src> Lexer<'src> {
                 };
             }
             _ => {
-                // todo: add more keywords
+                // genuine user defined identifier
                 self.add_token(
                     TokenChannel::DEFAULT,
                     TokenType::BaseIdentifier,
@@ -1266,7 +1256,6 @@ impl<'src> Lexer<'src> {
     fn lex_symbols(&mut self, c: char) {
         match c {
             '*' => {
-                // TODO: this is not done
                 self.cursor.advance();
                 match (self.cursor.peek(), self.cursor.peek_next()) {
                     ('\'' | '"', ';') => {
@@ -1523,6 +1512,62 @@ impl<'src> Lexer<'src> {
 
         self.add_token(TokenChannel::DEFAULT, TokenType::CharFormat, Payload::None);
         return true;
+    }
+
+    fn lex_macro(&mut self) -> bool {
+        debug_assert_eq!(self.cursor.peek(), '%');
+
+        return match self.cursor.peek_next() {
+            '*' => {
+                self.lex_macro_comment();
+                true
+            }
+            EOF_CHAR => false,
+            _ => {
+                // todo: implement
+                false
+            }
+        };
+    }
+    fn lex_macro_comment(&mut self) {
+        debug_assert_eq!(self.cursor.peek(), '%');
+        debug_assert_eq!(self.cursor.peek_next(), '*');
+
+        // Consume the opener
+        self.cursor.advance();
+        self.cursor.advance();
+
+        // And now simply eat until first semi and semi too
+        self.cursor.advance();
+        self.cursor.advance();
+
+        loop {
+            if let Some(c) = self.cursor.advance() {
+                if c == ';' {
+                    break;
+                }
+
+                if c == '\n' {
+                    self.add_line();
+                }
+            } else {
+                // EOF reached without a closing comment
+                // Emit an error token and return
+                self.add_token(
+                    TokenChannel::COMMENT,
+                    TokenType::MacroComment,
+                    Payload::None,
+                );
+                self.emit_error(ErrorType::UnterminatedComment);
+                return;
+            }
+        }
+
+        self.add_token(
+            TokenChannel::COMMENT,
+            TokenType::MacroComment,
+            Payload::None,
+        );
     }
 }
 

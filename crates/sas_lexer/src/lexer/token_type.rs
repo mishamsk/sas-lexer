@@ -69,6 +69,7 @@ pub enum TokenType {
     TimeLiteralExprEnd,       // "&mv.stuff"t
     HexStringLiteralExprEnd,  // "&mv.stuff"x
     CStyleComment,            // /* ... */
+    MacroComment,             // %* ...;
     MacroVarExpr,             // &&mvar&another. etc.
     DatalinesStart,           // datalines/cards[4];
     DatalinesData,            // datalines data
@@ -244,7 +245,7 @@ mod tests {
 
     #[test]
     fn test_all_tokens_round_trip() {
-        const TOKEN_COUNT: u16 = 192;
+        const TOKEN_COUNT: u16 = 193;
 
         for i in 0..TOKEN_COUNT {
             let token = TokenType::from_u16(i).unwrap();

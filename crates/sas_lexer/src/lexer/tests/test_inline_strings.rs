@@ -80,6 +80,11 @@ fn test_column_count_with_bom() {
     (TokenType::CStyleComment,
     TokenChannel::COMMENT)
 )]
+#[case::cstyle_comment_multi_line(
+    "%* this is 🔥\n macro comment;",
+    (TokenType::MacroComment,
+    TokenChannel::COMMENT)
+)]
 fn test_single_comment_ws(#[case] contents: &str, #[case] expected_token: impl TokenTestCase) {
     assert_lexing(contents, vec![expected_token], NO_ERRORS);
 }
