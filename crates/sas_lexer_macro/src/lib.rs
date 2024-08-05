@@ -1,7 +1,11 @@
 extern crate proc_macro;
 use proc_macro::TokenStream;
+use proc_macro2::Span;
 use quote::quote;
-use syn::{parse_macro_input, punctuated::Punctuated, Data, DeriveInput, LitStr, Token};
+use syn::{
+    parse_macro_input, punctuated::Punctuated, Data, DeriveInput, Expr, ExprLit, Ident, Lit,
+    LitStr, Meta, MetaNameValue, Token,
+};
 
 /// # Panics
 /// Panics if the input is not an enum.
@@ -71,16 +75,43 @@ pub fn from_u16_conversions_derive(input: TokenStream) -> TokenStream {
     TokenStream::from(expanded)
 }
 
-#[proc_macro_derive(KeywordMap, attributes(keyword))]
+#[proc_macro_derive(KeywordMap, attributes(keyword, map_name))]
 pub fn generate_keyword_map(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
 
-    let name = &input.ident;
     let variants = if let syn::Data::Enum(data_enum) = input.data {
         data_enum.variants
     } else {
         panic!("generate_keyword_map can only be used on enums");
     };
+
+    // Get the name of the enum
+    let name = &input.ident;
+
+    // Get the name of the map
+    let map_name = input
+        .attrs
+        .iter()
+        .find_map(|attr| {
+            if attr.path().is_ident("map_name") {
+                if let Meta::NameValue(MetaNameValue {
+                    value:
+                        Expr::Lit(ExprLit {
+                            lit: Lit::Str(litstr),
+                            ..
+                        }),
+                    ..
+                }) = &attr.meta
+                {
+                    Some(Ident::new(litstr.value().as_str(), Span::call_site()))
+                } else {
+                    panic!("map_name attribute must be a string literal");
+                }
+            } else {
+                None
+            }
+        })
+        .unwrap_or(Ident::new("KEYWORDS", Span::call_site()));
 
     let variant_code = variants
         .iter()
@@ -120,7 +151,7 @@ pub fn generate_keyword_map(input: TokenStream) -> TokenStream {
     }
 
     let expanded = quote! {
-        pub(crate) static KEYWORDS: phf::Map<&'static str, #name> = phf_map! {
+        pub(crate) static #map_name: phf::Map<&'static str, #name> = phf_map! {
             #(#variant_code)*
         };
     };

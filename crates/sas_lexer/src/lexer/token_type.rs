@@ -3,6 +3,7 @@ use sas_lexer_macro::{FromU16, KeywordMap, ToU16};
 use strum::Display;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, ToU16, FromU16, Display, KeywordMap)]
+#[map_name = "KEYWORDS"]
 pub enum TokenType {
     EOF,
     UNKNOWN,
