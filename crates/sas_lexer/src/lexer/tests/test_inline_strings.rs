@@ -1,10 +1,11 @@
 use std::vec;
 
+use crate::Payload;
 use crate::{error::ErrorType, lex, TokenChannel, TokenType};
 use rstest::rstest;
 
 use super::super::token_type::KEYWORDS;
-use super::util::{assert_lexing, TokenTestCase};
+use super::util::{assert_lexing, ErrorTestCase, TokenTestCase};
 
 const NO_ERRORS: Vec<ErrorType> = vec![];
 
@@ -351,6 +352,33 @@ fn test_all_single_keywords() {
             NO_ERRORS,
         );
     });
+}
+
+#[rstest]
+#[case::simple("myvar", vec![TokenType::BaseIdentifier] , NO_ERRORS)]
+#[case::underscore("_myvar",vec![TokenType::BaseIdentifier], NO_ERRORS)]
+#[case::unicode("тест",vec![TokenType::BaseIdentifier], NO_ERRORS)]
+#[case::with_num("_myvar9", vec![TokenType::BaseIdentifier], NO_ERRORS)]
+#[case::err_copy("_myvar©", 
+    vec![
+        ("_myvar", TokenType::BaseIdentifier),
+        ("©", TokenType::UNKNOWN)
+        ], 
+    vec![ErrorType::UnknownCharacter('©')]
+)]
+#[case::num_start("9_9myvar", 
+    vec![
+        ("9", TokenType::IntegerLiteral, Payload::Integer(9)),
+        ("_9myvar", TokenType::BaseIdentifier, Payload::None),
+        ], 
+    NO_ERRORS
+)]
+fn test_identifier(
+    #[case] contents: &str,
+    #[case] expected_token: Vec<impl TokenTestCase>,
+    #[case] expected_error: Vec<impl ErrorTestCase>,
+) {
+    assert_lexing(contents, expected_token, expected_error);
 }
 
 #[rstest]
