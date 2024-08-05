@@ -73,6 +73,7 @@ pub enum TokenType {
     DatalinesStart,           // datalines/cards[4];
     DatalinesData,            // datalines data
     // the closing ;[;;;] after dataines is lexed as SEMI
+    CharFormat, // $charformat.
     // Put pure second pass tokens after this line only
     BaseIdentifier,
     KwLT,
@@ -243,7 +244,7 @@ mod tests {
 
     #[test]
     fn test_all_tokens_round_trip() {
-        const TOKEN_COUNT: u16 = 191;
+        const TOKEN_COUNT: u16 = 192;
 
         for i in 0..TOKEN_COUNT {
             let token = TokenType::from_u16(i).unwrap();

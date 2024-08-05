@@ -719,7 +719,7 @@ impl<'src> Lexer<'src> {
                     // we can skip the `amp_count` characters
                     self.cursor.advance_by(amp_count);
                 }
-                c if c.is_ascii_alphanumeric() || c == '_' => {
+                c if is_xid_continue(c) => {
                     // Still a name
                     self.cursor.advance();
                 }
@@ -1462,7 +1462,10 @@ impl<'src> Lexer<'src> {
             }
             '$' => {
                 self.cursor.advance();
-                self.add_token(TokenChannel::DEFAULT, TokenType::DOLLAR, Payload::None);
+
+                if !self.lex_char_format() {
+                    self.add_token(TokenChannel::DEFAULT, TokenType::DOLLAR, Payload::None);
+                }
             }
             '@' => {
                 self.cursor.advance();
@@ -1483,6 +1486,43 @@ impl<'src> Lexer<'src> {
                 self.emit_error(ErrorType::UnknownCharacter(c));
             }
         }
+    }
+
+    fn lex_char_format(&mut self) -> bool {
+        #[cfg(debug_assertions)]
+        debug_assert_eq!(self.cursor.prev_char(), '$');
+
+        // We'll need to lookahead a lot, clone the cursor
+        let mut la_cursor = self.cursor.clone();
+
+        // Start by trying to eat a possible start char of a SAS name
+        // Unicode IS allowed in custom formats...
+        if is_valid_sas_name_start(la_cursor.peek()) {
+            la_cursor.advance();
+            la_cursor.eat_while(is_xid_continue);
+        };
+
+        // Name can be followed by digits (width)
+        la_cursor.eat_while(|c| c.is_ascii_digit());
+
+        // And then it must be followed by a dot, so this is a
+        // decision point
+        if !la_cursor.eat_char('.') {
+            // Not a char format!
+            return false;
+        }
+
+        // Ok, we have a char format, consume the optional precision
+        la_cursor.eat_while(|c| c.is_ascii_digit());
+
+        // Now we need to advance the original cursor to the end of the format
+        // and emit the token
+        let advance_by = la_cursor.char_offset() - self.cursor.char_offset();
+
+        self.cursor.advance_by(advance_by);
+
+        self.add_token(TokenChannel::DEFAULT, TokenType::CharFormat, Payload::None);
+        return true;
     }
 }
 
