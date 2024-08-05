@@ -382,6 +382,34 @@ fn test_identifier(
 }
 
 #[rstest]
+#[case::char10("$CHAR10.", vec![TokenType::CharFormat])]
+#[case::wd_none("$.", vec![TokenType::CharFormat])]
+#[case::wd_width("$5.", vec![TokenType::CharFormat])]
+// This is really not valid in SAS, but whatever
+#[case::wd_prec("$.2", vec![TokenType::CharFormat])]
+#[case::wd_all("$5.2", vec![TokenType::CharFormat])]
+#[case::cust_unicode("$тест.", vec![TokenType::CharFormat])]
+#[case::cust_end_underscore("$CCM_Phys_TempT3_.", vec![TokenType::CharFormat])]
+#[case::not_format_num("$9", 
+    vec![
+        ("$", TokenType::DOLLAR, Payload::None),        
+        ("9", TokenType::IntegerLiteral, Payload::Integer(9)),
+        ]
+)]
+#[case::not_format_char("$f", 
+    vec![
+        ("$", TokenType::DOLLAR, Payload::None),        
+        ("f", TokenType::BaseIdentifier, Payload::None),
+        ]
+)]
+fn test_char_format(
+    #[case] contents: &str,
+    #[case] expected_token: Vec<impl TokenTestCase>,    
+) {
+    assert_lexing(contents, expected_token, NO_ERRORS);
+}
+
+#[rstest]
 // Decimal notation
 #[case::int1("1", (TokenType::IntegerLiteral, 1))]
 #[case::int001("001", (TokenType::IntegerLiteral, 1))]
