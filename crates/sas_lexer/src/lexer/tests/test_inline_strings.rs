@@ -366,8 +366,8 @@ fn test_all_single_keywords() {
 #[case::with_num("_myvar9", vec![TokenType::BaseIdentifier], NO_ERRORS)]
 #[case::err_copy("_myvar©", 
     vec![
-        ("_myvar", TokenType::BaseIdentifier),
-        ("©", TokenType::UNKNOWN)
+        ("_myvar", TokenType::BaseIdentifier, TokenChannel::DEFAULT),
+        ("©", TokenType::UNKNOWN, TokenChannel::HIDDEN)
         ], 
     vec![ErrorType::UnknownCharacter('©')]
 )]
