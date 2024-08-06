@@ -30,16 +30,16 @@ pub(crate) fn is_macro_amp<I: Iterator<Item = char>>(mut chars: I) -> (bool, u32
 /// or statement.
 ///
 /// Must be passed a char following the percent sign.
-pub(crate) fn is_macro_percent(follow_char: char) -> bool {
+pub(crate) fn is_macro_percent(follow_char: char, in_eval_context: bool) -> bool {
     match follow_char {
         // Macro comment
-        '*' 
+        '*' => true,
         // Expermientally shown to work! (ignores the %)
         // e.g. `%^ 0` returned 1 (true)
-        | '~' | '^' 
+        | '~' | '^'
         // Expermientally shown to kinda work! makes the expression false
-        // e.g. `0 %= 0` returned 0
-        | '=' => true,
+        // e.g. `0 %= 0` returned 0, and `%= eq %=` is false, but `%= or 1` is true
+        | '=' if in_eval_context => true,
         c if is_valid_sas_name_start(c) => true,
         _ => false,
     }

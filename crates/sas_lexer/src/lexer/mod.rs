@@ -18,7 +18,7 @@ use predicate::{is_macro_amp, is_macro_percent};
 use sas_lang::is_valid_sas_name_start;
 use std::str::FromStr;
 use text::{ByteOffset, CharOffset};
-use token_type::{parse_keyword, TokenType};
+use token_type::{parse_keyword, parse_macro_keyword, TokenType};
 use unicode_ident::{is_xid_continue, is_xid_start};
 
 use crate::TokenIdx;
@@ -28,11 +28,13 @@ const BOM: char = '\u{feff}';
 /// The lexer mode
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum LexerMode {
-    /// The default mode
+    /// Default mode aka open code (non macro)
     #[default]
     Default,
-    /// Thestring expression, aka double quoted string mode
+    /// String expression, aka double quoted string mode
     StringExpr,
+    /// Macro arithmetic/logical expression, as in `%eval(-->1+1<--)`
+    MacroEval,
 }
 
 #[derive(Debug)]
@@ -212,6 +214,7 @@ impl<'src> Lexer<'src> {
         match self.mode() {
             LexerMode::Default => self.lex_mode_default(),
             LexerMode::StringExpr => self.lex_mode_str_expr(),
+            LexerMode::MacroEval => !todo!("Macro eval mode"),
         }
     }
 
@@ -272,12 +275,29 @@ impl<'src> Lexer<'src> {
                 // Numeric literal
                 self.lex_numeric_literal();
             }
-            c if is_xid_start(c) || c == '_' => {
+            c if is_valid_sas_name_start(c) => {
                 self.lex_identifier();
             }
             _ => {
                 // Something else must be a symbol or some unknown character
                 self.lex_symbols(c);
+            }
+        }
+    }
+
+    fn eat_ws(&mut self) {
+        loop {
+            match self.cursor.peek() {
+                '\n' => {
+                    self.cursor.advance();
+                    self.add_line()
+                }
+                c if c.is_whitespace() => {
+                    self.cursor.advance();
+                }
+                _ => {
+                    return;
+                }
             }
         }
     }
@@ -515,7 +535,7 @@ impl<'src> Lexer<'src> {
                     self.cursor.advance_by(amp_count);
                 }
                 '%' => {
-                    if is_macro_percent(self.cursor.peek_next()) {
+                    if is_macro_percent(self.cursor.peek_next(), false) {
                         // Hit a macro var expr in the string expression => emit the text token
                         self.add_token(
                             TokenChannel::DEFAULT,
@@ -650,7 +670,7 @@ impl<'src> Lexer<'src> {
                     // Report we lexed a token
                     return true;
                 }
-                LexerMode::StringExpr => {
+                LexerMode::StringExpr | LexerMode::MacroEval => {
                     // Just a sequence of & in a string expression, return without adding a token
                     return false;
                 }
@@ -733,19 +753,14 @@ impl<'src> Lexer<'src> {
     fn lex_identifier(&mut self) {
         debug_assert!(self.cursor.peek() == '_' || is_xid_start(self.cursor.peek()));
 
-        // Eat the first character and start tracking whether the identifier is ASCII
-        // It is necessary, as we neew to lower case the identifier if it is ASCII
+        // Start tracking whether the identifier is ASCII
+        // It is necessary, as we neew to upper case the identifier if it is ASCII
         // for dispatching, and if it is not ASCII, we know it is not a keyword and can
         // skip the dispatching
-        let mut is_ascii = if let Some(c) = self.cursor.advance() {
-            c.is_ascii()
-        } else {
-            // This should not be possible really, but to make the production code
-            // more robust, we'll handle this case
-            true
-        };
+        let mut is_ascii = true;
 
-        // Eat the rest of the identifier
+        // Eat the identifier. We can safely use `is_xid_continue` becase the caller
+        // already checked that the first character is a valid start of an identifier
         self.cursor.eat_while(|c| {
             if c.is_ascii() {
                 matches!(c, 'a'..='z' | 'A'..='Z' | '0'..='9' | '_')
@@ -1522,13 +1537,38 @@ impl<'src> Lexer<'src> {
                 self.lex_macro_comment();
                 true
             }
+            '~' | '^' if self.mode() == LexerMode::MacroEval => {
+                // Consume both
+                self.cursor.advance();
+                self.cursor.advance();
+
+                self.add_token(TokenChannel::DEFAULT, TokenType::NE, Payload::None);
+                true
+            }
+            '=' if self.mode() == LexerMode::MacroEval => {
+                // Consume both
+                self.cursor.advance();
+                self.cursor.advance();
+
+                self.add_token(
+                    TokenChannel::DEFAULT,
+                    TokenType::MacroNeverExpr,
+                    Payload::None,
+                );
+                true
+            }
             EOF_CHAR => false,
+            c if is_valid_sas_name_start(c) => {
+                self.lex_macro_identifier();
+                true
+            }
             _ => {
                 // todo: implement
                 false
             }
         };
     }
+
     fn lex_macro_comment(&mut self) {
         debug_assert_eq!(self.cursor.peek(), '%');
         debug_assert_eq!(self.cursor.peek_next(), '*');
@@ -1568,6 +1608,114 @@ impl<'src> Lexer<'src> {
             TokenType::MacroComment,
             Payload::None,
         );
+    }
+
+    fn lex_macro_identifier(&mut self) {
+        debug_assert_eq!(self.cursor.peek(), '%');
+        debug_assert!(is_valid_sas_name_start(self.cursor.peek_next()));
+
+        // Eat the %, at this point this 100% is a macro call, statement or label
+        self.cursor.advance();
+
+        // Start tracking whether the identifier is ASCII
+        // It is necessary, as we neew to upper case the identifier if it is ASCII
+        // for dispatching, and if it is not ASCII, we know it is not a keyword and can
+        // skip the dispatching
+        let mut is_ascii = true;
+
+        // Eat the identifier. We can safely use `is_xid_continue` becase the caller
+        // already checked that the first character is a valid start of an identifier
+        self.cursor.eat_while(|c| {
+            if c.is_ascii() {
+                matches!(c, 'a'..='z' | 'A'..='Z' | '0'..='9' | '_')
+            } else {
+                is_ascii = false;
+                is_xid_continue(c)
+            }
+        });
+
+        // Now the fun part - dispatch all kinds of identifiers
+        if is_ascii {
+            // My guess is this should be quicker than capturing the value as we consume it
+            // avoids the allocation and copying
+            let ident = self.pending_token_text()[1..].to_ascii_uppercase();
+
+            if let Some(kw_tok_type) = parse_macro_keyword(&ident) {
+                match kw_tok_type {
+                    // TokenType::KwmStr => {
+                    //     self.lex_macro_str_quoted_expr();
+                    // }
+                    _ => !todo!(),
+                }
+                return;
+            } else {
+                match ident.as_str() {
+                    // Nrstr is not a keyword, but a special case of quoted literal
+                    "NRSTR" => {
+                        self.lex_macro_nrstr_quoted_literal();
+                        return;
+                    }
+                    _ => {
+                        !todo!();
+                    }
+                }
+            }
+        }
+
+        // custom macro call or label
+        !todo!();
+        return;
+    }
+
+    fn lex_macro_nrstr_quoted_literal(&mut self) {
+        debug_assert!(self.pending_token_text().to_ascii_uppercase().as_str() == "%NRSTR");
+
+        // Consume any whitespace before the opening parenthesis
+        self.eat_ws();
+
+        // Check left parenthesis
+        if !self.cursor.eat_char('(') {
+            // Emit an error but continue lexing
+            self.emit_error(ErrorType::MissingExpectedCharacter('('));
+        }
+
+        // Keep track of parens nesting
+        let mut parens = 1;
+
+        // eat until the closing parenthesis
+        while let Some(c) = self.cursor.advance() {
+            match c {
+                '(' => parens += 1,
+                ')' => {
+                    parens -= 1;
+                    if parens == 0 {
+                        self.add_token(
+                            TokenChannel::DEFAULT,
+                            TokenType::NrStrLiteral,
+                            Payload::None,
+                        );
+                        return;
+                    }
+                }
+                '%' => {
+                    // Check if this is a quote char
+                    if matches!(self.cursor.peek(), '%' | '(' | ')') {
+                        // Consume the quoted following char
+                        self.cursor.advance();
+                    }
+                }
+                '\n' => self.add_line(),
+                _ => {}
+            }
+        }
+
+        // If we reached here, the literal is unterminated
+        self.add_token(
+            TokenChannel::DEFAULT,
+            TokenType::NrStrLiteral,
+            Payload::None,
+        );
+        self.emit_error(ErrorType::MissingExpectedCharacter(')'));
     }
 }
 
