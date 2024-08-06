@@ -1486,7 +1486,7 @@ impl<'src> Lexer<'src> {
             _ => {
                 // Unknown something, consume the character, emit an unknown token, push error
                 self.cursor.advance();
-                self.add_token(TokenChannel::DEFAULT, TokenType::UNKNOWN, Payload::None);
+                self.add_token(TokenChannel::HIDDEN, TokenType::UNKNOWN, Payload::None);
                 self.emit_error(ErrorType::UnknownCharacter(c));
             }
         }
