@@ -75,7 +75,7 @@ pub fn from_u16_conversions_derive(input: TokenStream) -> TokenStream {
     TokenStream::from(expanded)
 }
 
-#[proc_macro_derive(KeywordMap, attributes(keyword, map_name))]
+#[proc_macro_derive(KeywordMap, attributes(keyword, kw_map_name))]
 pub fn generate_keyword_map(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
 
@@ -89,11 +89,11 @@ pub fn generate_keyword_map(input: TokenStream) -> TokenStream {
     let name = &input.ident;
 
     // Get the name of the map
-    let map_name = input
+    let kw_map_name = input
         .attrs
         .iter()
         .find_map(|attr| {
-            if attr.path().is_ident("map_name") {
+            if attr.path().is_ident("kw_map_name") {
                 if let Meta::NameValue(MetaNameValue {
                     value:
                         Expr::Lit(ExprLit {
@@ -105,7 +105,7 @@ pub fn generate_keyword_map(input: TokenStream) -> TokenStream {
                 {
                     Some(Ident::new(litstr.value().as_str(), Span::call_site()))
                 } else {
-                    panic!("map_name attribute must be a string literal");
+                    panic!("kw_map_name attribute must be a string literal");
                 }
             } else {
                 None
@@ -115,7 +115,10 @@ pub fn generate_keyword_map(input: TokenStream) -> TokenStream {
 
     let variant_code = variants
         .iter()
-        .filter(|variant| variant.ident.to_string().starts_with("Kw"))
+        .filter(|variant| {
+            variant.ident.to_string().starts_with("Kw")
+                && !variant.ident.to_string().starts_with("Kwm")
+        })
         .flat_map(|variant| {
             let variant_ident = &variant.ident;
             let ident = variant.ident.to_string();
@@ -151,7 +154,91 @@ pub fn generate_keyword_map(input: TokenStream) -> TokenStream {
     }
 
     let expanded = quote! {
-        pub(crate) static #map_name: phf::Map<&'static str, #name> = phf_map! {
+        pub(crate) static #kw_map_name: phf::Map<&'static str, #name> = phf_map! {
+            #(#variant_code)*
+        };
+    };
+
+    TokenStream::from(expanded)
+}
+
+#[proc_macro_derive(MacroKeywordMap, attributes(keyword, kwm_map_name))]
+pub fn generate_macro_keyword_map(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+
+    let variants = if let syn::Data::Enum(data_enum) = input.data {
+        data_enum.variants
+    } else {
+        panic!("generate_macro_keyword_map can only be used on enums");
+    };
+
+    // Get the name of the enum
+    let name = &input.ident;
+
+    // Get the name of the map
+    let kwm_map_name = input
+        .attrs
+        .iter()
+        .find_map(|attr| {
+            if attr.path().is_ident("kwm_map_name") {
+                if let Meta::NameValue(MetaNameValue {
+                    value:
+                        Expr::Lit(ExprLit {
+                            lit: Lit::Str(litstr),
+                            ..
+                        }),
+                    ..
+                }) = &attr.meta
+                {
+                    Some(Ident::new(litstr.value().as_str(), Span::call_site()))
+                } else {
+                    panic!("kwm_map_name attribute must be a string literal");
+                }
+            } else {
+                None
+            }
+        })
+        .unwrap_or(Ident::new("MACRO_KEYWORDS", Span::call_site()));
+
+    let variant_code = variants
+        .iter()
+        .filter(|variant| variant.ident.to_string().starts_with("Kwm"))
+        .flat_map(|variant| {
+            let variant_ident = &variant.ident;
+            let ident = variant.ident.to_string();
+
+            let keywords = variant.attrs.iter().find_map(|attr| {
+                if attr.path().is_ident("keyword") {
+                    attr.parse_args_with(Punctuated::<LitStr, Token![,]>::parse_terminated)
+                        .ok()
+                } else {
+                    None
+                }
+            });
+
+            let default_keyword = &ident[3..].to_ascii_uppercase();
+            let keywords = keywords.map_or_else(
+                || vec![default_keyword.clone()],
+                |kws| {
+                    kws.into_iter()
+                        .map(|kw| kw.value().to_ascii_uppercase())
+                        .collect()
+                },
+            );
+
+            keywords.into_iter().map(move |keyword| {
+                quote! {
+                    #keyword => #name::#variant_ident,
+                }
+            })
+        });
+
+    if variant_code.clone().count() == 0 {
+        panic!("No variants found that start with 'Kwm'");
+    }
+
+    let expanded = quote! {
+        pub(crate) static #kwm_map_name: phf::Map<&'static str, #name> = phf_map! {
             #(#variant_code)*
         };
     };

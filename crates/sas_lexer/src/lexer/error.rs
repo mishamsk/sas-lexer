@@ -10,6 +10,7 @@ pub enum ErrorType {
     InvalidNumericLiteral,
     UnterminatedHexNumericLiteral,
     UnknownCharacter(char),
+    MissingExpectedCharacter(char),
     InternalError(&'static str),
 }
 
@@ -27,6 +28,9 @@ impl Display for ErrorType {
             }
             ErrorType::UnknownCharacter(c) => {
                 write!(f, "Unknown character: '{}'", c)
+            }
+            ErrorType::MissingExpectedCharacter(c) => {
+                write!(f, "Missing expected character: '{}'", c)
             }
             ErrorType::InternalError(msg) => {
                 write!(f, "Internal error: {msg}")

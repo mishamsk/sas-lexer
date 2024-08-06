@@ -1,9 +1,12 @@
 use phf::phf_map;
-use sas_lexer_macro::{FromU16, KeywordMap, ToU16};
+use sas_lexer_macro::{FromU16, KeywordMap, MacroKeywordMap, ToU16};
 use strum::Display;
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy, ToU16, FromU16, Display, KeywordMap)]
-#[map_name = "KEYWORDS"]
+#[derive(
+    Debug, PartialEq, Eq, Clone, Copy, ToU16, FromU16, Display, KeywordMap, MacroKeywordMap,
+)]
+#[kw_map_name = "KEYWORDS"]
+#[kwm_map_name = "MKEYWORDS"]
 pub enum TokenType {
     EOF,
     UNKNOWN,
@@ -72,10 +75,80 @@ pub enum TokenType {
     CStyleComment,            // /* ... */
     MacroComment,             // %* ...;
     MacroVarExpr,             // &&mvar&another. etc.
+    MacroNeverExpr,           // the weird %= in eval context
     DatalinesStart,           // datalines/cards[4];
     DatalinesData,            // datalines data
     // the closing ;[;;;] after dataines is lexed as SEMI
     CharFormat, // $charformat.
+    // ----------------MACRO TOKENS----------------
+    // Macro built in function keywords
+    KwmBquote,        // BQUOTE
+    KwmEval,          // EVAL
+    KwmIndex,         // INDEX
+    KwmLength,        // LENGTH
+    KwmLowcase,       // LOWCASE
+    KwmNrBquote,      // NRBQUOTE
+    KwmNrQuote,       // NRQUOTE
+    KwmQLowcase,      // QLOWCASE
+    KwmQScan,         // QSCAN
+    KwmQSubstr,       // QSUBSTR
+    KwmQsysfunc,      // QSYSFUNC
+    KwmQuote,         // QUOTE
+    KwmQUpcase,       // QUPCASE
+    KwmScan,          // SCAN
+    KwmSubstr,        // SUBSTR
+    KwmSuperq,        // SUPERQ
+    KwmSymExist,      // SYMEXIST
+    KwmSymGlobl,      // SYMGLOBL
+    KwmSymLocal,      // SYMLOCAL
+    KwmSysevalf,      // SYSEVALF
+    KwmSysfunc,       // SYSFUNC
+    KwmSysget,        // SYSGET
+    KwmSysmacexec,    // SYSMACEXEC
+    KwmSysmacexist,   // SYSMACEXIST
+    KwmSysmexecdepth, // SYSMEXECDEPTH
+    KwmSysmexecname,  // SYSMEXECNAME
+    KwmSysprod,       // SYSPROD
+    KwmUnquote,       // UNQUOTE
+    KwmUpcase,        // UPCASE
+    // Sudo functions (compile time quoting)
+    KwmStr,       // STR
+    NrStrLiteral, // NRSTR is not a keyword, as it is lexed with the text together
+    // Statements
+    KwmAbort,          // ABORT
+    KwmCopy,           // COPY
+    KwmDisplay,        // DISPLAY
+    KwmDo,             // DO
+    KwmTo,             // TO
+    KwmBy,             // BY
+    KwmUntil,          // UNTIL
+    KwmWhile,          // WHILE
+    KwmEnd,            // END
+    KwmGlobal,         // GLOBAL
+    KwmGoto,           // GOTO
+    KwmIf,             // IF
+    KwmThen,           // THEN
+    KwmElse,           // ELSE
+    KwmInput,          // INPUT
+    KwmLet,            // LET
+    KwmLocal,          // LOCAL
+    KwmMacro,          // MACRO
+    KwmMend,           // MEND
+    KwmPut,            // PUT
+    KwmReturn,         // RETURN
+    KwmSymdel,         // SYMDEL
+    KwmSyscall,        // SYSCALL
+    KwmSysexec,        // SYSEXEC
+    KwmSyslput,        // SYSLPUT
+    KwmSysmacdelete,   // SYSMACDELETE
+    KwmSysmstoreclear, // SYSMSTORECLEAR
+    KwmSysrput,        // SYSRPUT
+    KwmWindow,         // WINDOW
+    // Special statements, that are half macro half base
+    #[keyword("INCLUDE", "INC")]
+    KwmInclude, // INCLUDE or INC
+    KwmList, // LIST
+    // ----------------MACRO TOKENS----------------
     // Put pure second pass tokens after this line only
     BaseIdentifier,
     KwLT,
@@ -224,6 +297,10 @@ pub(super) fn parse_keyword<S: AsRef<str>>(ident: S) -> Option<TokenType> {
     KEYWORDS.get(ident.as_ref()).copied()
 }
 
+pub(super) fn parse_macro_keyword<S: AsRef<str>>(ident: S) -> Option<TokenType> {
+    MKEYWORDS.get(ident.as_ref()).copied()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -236,6 +313,19 @@ mod tests {
         assert_eq!(parse_keyword("CORR"), Some(TokenType::KwCorr));
         assert_eq!(parse_keyword("CORRESPONDING"), Some(TokenType::KwCorr));
         assert_eq!(parse_keyword("ALL_"), None);
+        // Check a couple of keywords in macro map are NOT in the main map
+        assert_eq!(parse_keyword("BQUOTE"), None);
+        assert_eq!(parse_keyword("NRQUOTE"), None);
+    }
+
+    #[test]
+    fn test_macro_keyword_map() {
+        assert_eq!(parse_macro_keyword("BQUOTE"), Some(TokenType::KwmBquote));
+        assert_eq!(parse_macro_keyword("NRQUOTE"), Some(TokenType::KwmNrQuote));
+        assert_eq!(parse_macro_keyword("RANDOM"), None);
+        // Check a couple of keywords in main map are NOT in the macro map
+        assert_eq!(parse_macro_keyword("EQ"), None);
+        assert_eq!(parse_macro_keyword("_NULL_"), None);
     }
 
     #[test]
@@ -246,13 +336,18 @@ mod tests {
 
     #[test]
     fn test_all_tokens_round_trip() {
-        const TOKEN_COUNT: u16 = 193;
+        const TOKEN_COUNT: u16 = 256;
 
-        for i in 0..TOKEN_COUNT {
-            let token = TokenType::from_u16(i).unwrap();
-            assert_eq!(i, token as u16);
+        for i in 0..=u16::MAX {
+            match TokenType::from_u16(i) {
+                Some(token) => {
+                    assert_eq!(i, token as u16);
+                }
+                None => {
+                    assert_eq!(i, TOKEN_COUNT, "Unexpected number of tokens: {}", i);
+                    break;
+                }
+            };
         }
-
-        assert_eq!(TokenType::from_u16(TOKEN_COUNT), None);
     }
 }

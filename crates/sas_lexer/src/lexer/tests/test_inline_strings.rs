@@ -464,3 +464,34 @@ fn test_numeric_literal_error_recovery(
 ) {
     assert_lexing(contents, vec![expected_token], vec![expected_error]);
 }
+
+#[rstest]
+#[case::empty("%nrstr()")]
+#[case::with_ws_before_paren("%nrstr \t()")]
+#[case::two_precent("%nrstr(%%)")]
+#[case::three_precent("%nrstr(%%%))")]
+#[case::all_quote_types("%nrstr(%(%)%%)")]
+#[case::with_newline("%nrstr(some\nother)")]
+#[case::with_crlf("%nrstr(some\r\nother)")]
+#[case::with_unicode("%nrstr(some\n🔥\n)")]
+#[case::with_macro_chars("%nrstr(&9 and &&&, 9% and % )")]
+#[case::with_real_macro("%nrstr(%some() and &mvar)")]
+fn test_nrstr_quoted_string_literal(#[case] contents: &str) {
+    assert_lexing(
+        contents,
+        vec![TokenType::NrStrLiteral],
+        NO_ERRORS,
+    );
+}
+
+#[rstest]
+// TODO: the following requires adding ErrorTestCase implementation with all params
+// #[case::missing_open_paren("%nrstr  )", ErrorType::MissingExpectedCharacter('('))]
+#[case::missing_closing_paren("%nrstr(%%%)", ErrorType::MissingExpectedCharacter(')'))]
+fn test_nrstr_quoted_str_error_recovery(#[case] contents: &str, #[case] expected_error: ErrorType) {
+    assert_lexing(
+        contents,
+        vec![TokenType::NrStrLiteral],
+        vec![expected_error],
+    );
+}
