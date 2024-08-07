@@ -495,3 +495,43 @@ fn test_nrstr_quoted_str_error_recovery(#[case] contents: &str, #[case] expected
         vec![expected_error],
     );
 }
+
+#[rstest]
+#[case::not_format_num("%let a=(;", 
+    vec![
+        ("%let", TokenType::KwmLet),        
+        (" ", TokenType::WS),        
+        ("a", TokenType::Identifier),        
+        ("=", TokenType::ASSIGN),
+        ("(", TokenType::MacroString),
+        (";", TokenType::SEMI),
+        ]
+)]
+#[case::not_format_num("%let a=);", 
+    vec![
+        ("%let", TokenType::KwmLet),        
+        (" ", TokenType::WS),        
+        ("a", TokenType::Identifier),        
+        ("=", TokenType::ASSIGN),
+        (")", TokenType::MacroString),
+        (";", TokenType::SEMI),
+        ]
+)]
+#[case::not_format_num("%let a&mv=&mv.b=;", 
+    vec![
+        ("%let", TokenType::KwmLet),        
+        (" ", TokenType::WS),        
+        ("a", TokenType::Identifier),        
+        ("&mv", TokenType::MacroVarExpr),        
+        ("=", TokenType::ASSIGN),
+        ("&mv.", TokenType::MacroVarExpr),        
+        ("b=", TokenType::MacroString),
+        (";", TokenType::SEMI),
+        ]
+)]
+fn test_macro_let(
+    #[case] contents: &str,
+    #[case] expected_token: Vec<impl TokenTestCase>,    
+) {
+    assert_lexing(contents, expected_token, NO_ERRORS);
+}

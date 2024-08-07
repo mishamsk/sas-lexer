@@ -93,6 +93,7 @@ pub enum TokenType {
     MacroVarExpr,    // &&mvar&another. etc.
     MacroNeverExpr,  // the weird %= in eval context
     MacroIdentifier, // %macro_name
+    MacroString,     // %let var = macro_string;
     // Macro built in function keywords
     KwmEval,          // EVAL
     KwmIndex,         // INDEX

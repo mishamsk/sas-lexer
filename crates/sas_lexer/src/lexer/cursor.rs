@@ -53,6 +53,18 @@ impl<'a> Cursor<'a> {
         iter.next().unwrap_or(EOF_CHAR)
     }
 
+    /// Peeks the next non whitespace symbol from the input stream without consuming it.
+    pub(super) fn peek_next_non_ws(&self) -> char {
+        let mut iter = self.chars.clone();
+        while let Some(c) = iter.next() {
+            if !c.is_whitespace() {
+                return c;
+            }
+        }
+
+        EOF_CHAR
+    }
+
     /// Checks if there is nothing more to consume.
     pub(super) fn is_eof(&self) -> bool {
         self.chars.as_str().is_empty()
