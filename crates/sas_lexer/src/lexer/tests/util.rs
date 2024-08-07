@@ -355,31 +355,47 @@ pub(crate) fn check_token<S: AsRef<str>>(
 
 pub(crate) trait ErrorTestCase {
     fn error_type(&self) -> ErrorType;
-
-    fn at_byte_offset(&self, last_byte_offset: u32) -> u32 {
-        last_byte_offset
-    }
-
-    fn at_char_offset(&self, last_char_offset: u32) -> u32 {
-        last_char_offset
-    }
-
-    fn on_line(&self, last_line: u32) -> u32 {
-        last_line
-    }
-
-    fn at_column(&self, last_column: u32) -> u32 {
-        last_column
-    }
-
-    fn last_token_idx(&self, ast_non_eof_token: Option<TokenIdx>) -> Option<TokenIdx> {
-        ast_non_eof_token
-    }
+    fn at_char_offset(&self, source: &str) -> u32;
+    fn last_token_idx(&self, buffer: &TokenizedBuffer) -> Option<TokenIdx>;
 }
 
 impl ErrorTestCase for ErrorType {
     fn error_type(&self) -> ErrorType {
         *self
+    }
+
+    fn at_char_offset(&self, source: &str) -> u32 {
+        source.chars().count() as u32
+    }
+
+    fn last_token_idx(&self, buffer: &TokenizedBuffer) -> Option<TokenIdx> {
+        buffer
+            .into_iter()
+            .filter(|t| buffer.get_token_type(*t) != TokenType::EOF)
+            .last()
+    }
+}
+
+impl ErrorTestCase for (ErrorType, usize) {
+    fn error_type(&self) -> ErrorType {
+        self.0
+    }
+
+    fn at_char_offset(&self, _: &str) -> u32 {
+        self.1 as u32
+    }
+
+    fn last_token_idx(&self, buffer: &TokenizedBuffer) -> Option<TokenIdx> {
+        buffer
+            .into_iter()
+            .filter(|t| buffer.get_token_type(*t) != TokenType::EOF)
+            .find_map(|t| {
+                if buffer.get_token_end(t).get() == self.1 as u32 {
+                    Some(t)
+                } else {
+                    None
+                }
+            })
     }
 }
 
@@ -481,13 +497,6 @@ pub(crate) fn assert_lexing(
 
     // Check tokens
     let tokens: Vec<TokenIdx> = buffer.into_iter().collect();
-
-    // Save last_non_eof_token_idx for error checking below
-    let last_non_eof_token_idx = tokens
-        .iter()
-        .filter(|&t| buffer.get_token_type(*t) != TokenType::EOF)
-        .last()
-        .copied();
 
     // Check total token count
     assert_eq!(
@@ -606,16 +615,29 @@ pub(crate) fn assert_lexing(
     for (i, expected_err) in expected_errors.iter().enumerate() {
         let lexed_err = &errors[i];
 
+        let at_byte_offset = source
+            .chars()
+            .take(expected_err.at_char_offset(source) as usize)
+            .map(|c| c.len_utf8() as u32)
+            .sum::<u32>();
+        let expected_line = source[..at_byte_offset as usize].lines().count();
+        let expected_column = source[..at_byte_offset as usize]
+            .lines()
+            .last()
+            .unwrap_or("")
+            .chars()
+            .count();
+
         check_error(
             source,
             &buffer,
             lexed_err,
             expected_err.error_type(),
-            expected_err.at_byte_offset(cur_start_byte_offset),
-            expected_err.at_char_offset(cur_start_char_offset),
-            expected_err.on_line(cur_start_line),
-            expected_err.at_column(cur_start_column),
-            expected_err.last_token_idx(last_non_eof_token_idx),
+            at_byte_offset,
+            expected_err.at_char_offset(source),
+            expected_line as u32,
+            expected_column as u32,
+            expected_err.last_token_idx(&buffer),
         );
     }
 }
