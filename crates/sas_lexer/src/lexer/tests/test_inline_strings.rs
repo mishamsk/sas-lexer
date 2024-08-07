@@ -529,9 +529,45 @@ fn test_nrstr_quoted_str_error_recovery(#[case] contents: &str, #[case] expected
         (";", TokenType::SEMI),
         ]
 )]
+#[case::lead_trail_ws("%let a \n=   1 1  ;", 
+    vec![
+        ("%let", TokenType::KwmLet),        
+        (" ", TokenType::WS),        
+        ("a", TokenType::Identifier),        
+        (" \n", TokenType::WS),        
+        ("=", TokenType::ASSIGN),
+        ("   ", TokenType::WS),        
+        // Trailing whitespace is not significant in SAS, but
+        // we defer to parser to trim it          
+        ("1 1  ", TokenType::MacroString),
+        (";", TokenType::SEMI),
+        ]
+)]
 fn test_macro_let(
     #[case] contents: &str,
     #[case] expected_token: Vec<impl TokenTestCase>,    
 ) {
     assert_lexing(contents, expected_token, NO_ERRORS);
+}
+
+#[rstest]
+#[case::miss_assign("%let a b=1;", 
+    vec![
+        ("%let", TokenType::KwmLet),        
+        (" ", TokenType::WS),        
+        ("a", TokenType::Identifier),        
+        (" ", TokenType::WS),        
+        // Recovered from missing assign hence empty string
+        ("", TokenType::ASSIGN),
+        ("b=1", TokenType::MacroString),
+        (";", TokenType::SEMI),
+        ],
+    vec![(ErrorType::MissingExpected("="), 7)]
+)]
+fn test_macro_let_error_recovery(
+    #[case] contents: &str,
+    #[case] expected_token: Vec<impl TokenTestCase>,    
+    #[case] expected_error: Vec<impl ErrorTestCase>,
+) {
+    assert_lexing(contents, expected_token, expected_error);
 }
