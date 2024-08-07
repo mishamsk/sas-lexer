@@ -10,7 +10,7 @@ pub enum ErrorType {
     InvalidNumericLiteral,
     UnterminatedHexNumericLiteral,
     UnknownCharacter(char),
-    MissingExpectedCharacter(char),
+    MissingExpected(&'static str),
     InternalError(&'static str),
 }
 
@@ -27,10 +27,10 @@ impl Display for ErrorType {
                 write!(f, "Unterminated datalines")
             }
             ErrorType::UnknownCharacter(c) => {
-                write!(f, "Unknown character: '{}'", c)
+                write!(f, "Unknown character: '{c}'")
             }
-            ErrorType::MissingExpectedCharacter(c) => {
-                write!(f, "Missing expected character: '{}'", c)
+            ErrorType::MissingExpected(msg) => {
+                write!(f, "Missing expected: {msg}")
             }
             ErrorType::InternalError(msg) => {
                 write!(f, "Internal error: {msg}")

@@ -14,7 +14,7 @@ use buffer::{LineIdx, Payload, TokenizedBuffer, WorkTokenizedBuffer};
 use channel::TokenChannel;
 use cursor::EOF_CHAR;
 use error::{ErrorInfo, ErrorType};
-use predicate::{is_macro_amp, is_macro_percent};
+use predicate::{is_macro_amp, is_macro_call, is_macro_percent};
 use sas_lang::is_valid_sas_name_start;
 use std::str::FromStr;
 use text::{ByteOffset, CharOffset};
@@ -33,8 +33,19 @@ enum LexerMode {
     Default,
     /// String expression, aka double quoted string mode
     StringExpr,
+    /// WS only, this is the mode where we want to lex at most one whitespace token
+    /// and then return to the previous mode
+    WsOnly,
+    /// A special mode where only a specific sequence of characters is expected.
+    /// In this mode we also auto-recover if the expected character is not found
+    /// emitting an error but also creating the expected token
+    ///
+    /// SAFETY: The string must not contain newlines
+    ExpectToken(&'static str, TokenType),
     /// Macro arithmetic/logical expression, as in `%eval(-->1+1<--)`
     MacroEval,
+    MacroLetVarName,
+    MacroLetInitializer,
 }
 
 #[derive(Debug)]
@@ -214,8 +225,40 @@ impl<'src> Lexer<'src> {
         match self.mode() {
             LexerMode::Default => self.lex_mode_default(),
             LexerMode::StringExpr => self.lex_mode_str_expr(),
+            LexerMode::WsOnly => {
+                if self.cursor.peek().is_whitespace() {
+                    self.lex_ws();
+                }
+                self.pop_mode();
+            }
+            LexerMode::ExpectToken(content, tok_type) => self.lex_expected_token(content, tok_type),
             LexerMode::MacroEval => !todo!("Macro eval mode"),
+            LexerMode::MacroLetVarName => self.lex_mode_macro_ident_expr(),
+            LexerMode::MacroLetInitializer => !todo!("Macro let initializer mode"),
         }
+    }
+
+    fn lex_expected_token(&mut self, content: &'static str, tok_type: TokenType) {
+        debug_assert_eq!(self.mode(), LexerMode::ExpectToken(content, tok_type));
+        debug_assert!(!content.is_empty() && !content.contains('\n'));
+
+        self.start_token();
+        if (content.len() > self.cursor.remaining_len() as usize)
+            | (self.cursor.as_str()[..content.len()] != *content)
+        {
+            // Expected token not found. Emit an error which will point at previous token
+            // The token itself is emitted below
+            self.emit_error(ErrorType::MissingExpected(content));
+        } else {
+            // Consume the expected content
+            // SAFETY: content is not more than the remaining length
+            // and the length can't be more than u32::MAX
+            #[allow(clippy::cast_possible_truncation)]
+            self.cursor.advance_by(content.chars().count() as u32);
+        }
+
+        self.add_token(TokenChannel::DEFAULT, tok_type, Payload::None);
+        self.pop_mode();
     }
 
     fn lex_mode_default(&mut self) {
@@ -256,12 +299,10 @@ impl<'src> Lexer<'src> {
                 }
             }
             '&' => {
-                if cfg!(debug_assertions) {
-                    // In debug mode, we check if the lex_amp function added a token
-                    // in addition to just executing the logic
-                    debug_assert!(self.lex_amp());
-                } else {
-                    self.lex_amp();
+                if !self.lex_macro_var_expr() {
+                    // Regular AMP sequence, consume as token
+                    self.cursor.eat_while(|c| c == '&');
+                    self.add_token(TokenChannel::DEFAULT, TokenType::AMP, Payload::None);
                 }
             }
             '%' => {
@@ -285,12 +326,51 @@ impl<'src> Lexer<'src> {
         }
     }
 
+    fn lex_mode_macro_ident_expr(&mut self) {
+        debug_assert!(matches!(self.mode(), LexerMode::MacroLetVarName));
+
+        self.start_token();
+
+        // Dispatch the "big" categories
+        match self.cursor.peek() {
+            '/' if self.cursor.peek_next() == '*' => {
+                self.lex_cstyle_comment();
+            }
+            '&' => {
+                if !self.lex_macro_var_expr() {
+                    // Not a macro var. pop mode without consuming the character
+                    self.pop_mode();
+                }
+            }
+            '%' => {
+                if !self.lex_macro_call(false) {
+                    // Not a macro, just a percent. Pop mode without consuming the character
+                    self.pop_mode();
+                }
+            }
+            c if is_valid_sas_name_start(c) => {
+                // A macro string in place of macro identifier
+                // Consume as identifier, no reserved words here,
+                // so we do not need the full lex_identifier logic
+                self.cursor.eat_while(is_xid_continue);
+
+                // Add token, but do not pop the mode, as we may have a full macro text expression
+                // that generates an identifier
+                self.add_token(TokenChannel::DEFAULT, TokenType::Identifier, Payload::None);
+            }
+            _ => {
+                // Something else must. pop mode without consuming the character
+                self.pop_mode();
+            }
+        }
+    }
+
     fn eat_ws(&mut self) {
         loop {
             match self.cursor.peek() {
                 '\n' => {
                     self.cursor.advance();
-                    self.add_line()
+                    self.add_line();
                 }
                 c if c.is_whitespace() => {
                     self.cursor.advance();
@@ -489,7 +569,7 @@ impl<'src> Lexer<'src> {
                 self.pop_mode();
             }
             '&' => {
-                if !self.lex_amp() {
+                if !self.lex_macro_var_expr() {
                     // Not a macro var. actually a part of string text.
                     // and we've already consumed the sequence of &
                     // continue to lex the text
@@ -643,43 +723,29 @@ impl<'src> Lexer<'src> {
         self.pop_mode();
     }
 
-    /// Lexes an ampersand sequence of  macro variable expression
+    /// Tries lexing a macro variable expression
     ///
-    /// Modes supported:
-    /// - `Default`: generates a `MacroVarExpr` or `Amp` token
-    /// - `StringExpr`: generates a `MacroVarExpr` or consumes the sequence of `&` characters
-    ///          without generating a token if the sequence is not a macro var expr
+    /// Consumes input and generates a `MacroVarExpr` token only ig
+    /// the sequence is a valid macro var expr.
+    ///
+    /// Otherwise, retains the input and does not generate a token.
     ///
     /// Returns `true` if a token was added, `false` otherwise
-    fn lex_amp(&mut self) -> bool {
+    fn lex_macro_var_expr(&mut self) -> bool {
         debug_assert_eq!(self.cursor.peek(), '&');
 
         // Consuming leading ampersands
-        self.cursor.eat_while(|c| c == '&');
+        let (is_macro, amp_count) = is_macro_amp(self.cursor.chars());
 
-        // Check the next character
-        let c = self.cursor.peek();
-
-        if !is_valid_sas_name_start(c) {
-            // Not a macro var expr, just a 1+ sequence of &
-            // Fork based on the mode, do not consume the next character
-            match self.mode() {
-                LexerMode::Default => {
-                    self.add_token(TokenChannel::DEFAULT, TokenType::AMP, Payload::None);
-
-                    // Report we lexed a token
-                    return true;
-                }
-                LexerMode::StringExpr | LexerMode::MacroEval => {
-                    // Just a sequence of & in a string expression, return without adding a token
-                    return false;
-                }
-            }
+        // Not a macro var expr, just a 1+ sequence of &
+        if !is_macro {
+            return false;
         }
 
         // Ok, this is a macro expr for sure
         // and we got the first character of the name
-        self.cursor.advance();
+        // Consume the ampersands and the first name character
+        self.cursor.advance_by(amp_count + 1);
 
         loop {
             match self.cursor.peek() {
@@ -709,9 +775,9 @@ impl<'src> Lexer<'src> {
                     // are treated as a single one.
                     // Thus we do a lookahead predicate on a cloned iterator to avoid consuming
                     // the original
-                    let (is_macro_amp, amp_count) = is_macro_amp(self.cursor.chars());
+                    let (is_macro, amp_count) = is_macro_amp(self.cursor.chars());
 
-                    if !is_macro_amp {
+                    if !is_macro {
                         // The following & characters are not part of the macro var expr
 
                         // Add the token without consuming the following amp
@@ -754,7 +820,7 @@ impl<'src> Lexer<'src> {
         debug_assert!(self.cursor.peek() == '_' || is_xid_start(self.cursor.peek()));
 
         // Start tracking whether the identifier is ASCII
-        // It is necessary, as we neew to upper case the identifier if it is ASCII
+        // It is necessary, as we need to upper case the identifier if it is ASCII
         // for dispatching, and if it is not ASCII, we know it is not a keyword and can
         // skip the dispatching
         let mut is_ascii = true;
@@ -773,11 +839,7 @@ impl<'src> Lexer<'src> {
         // Now the fun part - dispatch all kinds of identifiers
         if !is_ascii {
             // Easy case - not ASCII, just emit the identifier token
-            self.add_token(
-                TokenChannel::DEFAULT,
-                TokenType::BaseIdentifier,
-                Payload::None,
-            );
+            self.add_token(TokenChannel::DEFAULT, TokenType::Identifier, Payload::None);
             return;
         }
 
@@ -793,29 +855,17 @@ impl<'src> Lexer<'src> {
         match ident.as_str() {
             "DATALINES" | "CARDS" | "LINES" => {
                 if !self.lex_datalines(false) {
-                    self.add_token(
-                        TokenChannel::DEFAULT,
-                        TokenType::BaseIdentifier,
-                        Payload::None,
-                    );
+                    self.add_token(TokenChannel::DEFAULT, TokenType::Identifier, Payload::None);
                 };
             }
             "DATALINES4" | "CARDS4" | "LINES4" => {
                 if !self.lex_datalines(true) {
-                    self.add_token(
-                        TokenChannel::DEFAULT,
-                        TokenType::BaseIdentifier,
-                        Payload::None,
-                    );
+                    self.add_token(TokenChannel::DEFAULT, TokenType::Identifier, Payload::None);
                 };
             }
             _ => {
                 // genuine user defined identifier
-                self.add_token(
-                    TokenChannel::DEFAULT,
-                    TokenType::BaseIdentifier,
-                    Payload::None,
-                );
+                self.add_token(TokenChannel::DEFAULT, TokenType::Identifier, Payload::None);
             }
         }
     }
@@ -1051,28 +1101,27 @@ impl<'src> Lexer<'src> {
         }
     }
 
+    #[allow(clippy::cast_precision_loss)]
+    #[allow(clippy::cast_possible_truncation)]
     fn lex_decimal_literal(&mut self) {
         // The way calling logic is done, for regular decimals
         // we must have consumed the entire literal
-        debug_assert!(!matches!(self.cursor.peek(), '0'..='9'));
+        debug_assert!(!self.cursor.peek().is_ascii_digit());
 
         // Parse as f64. SAS uses 8 bytes and all numbers are stored as f64
         // so it is impossible to have a valid literal that would overflow
         // the f64 range.
         let number = self.pending_token_text();
 
-        let fvalue = match f64::from_str(number) {
-            Ok(value) => value,
-            Err(_) => {
-                self.add_token(
-                    TokenChannel::DEFAULT,
-                    TokenType::IntegerLiteral,
-                    Payload::Integer(0),
-                );
+        let Ok(fvalue) = f64::from_str(number) else {
+            self.add_token(
+                TokenChannel::DEFAULT,
+                TokenType::IntegerLiteral,
+                Payload::Integer(0),
+            );
 
-                self.emit_error(ErrorType::InvalidNumericLiteral);
-                return;
-            }
+            self.emit_error(ErrorType::InvalidNumericLiteral);
+            return;
         };
 
         // See if it is an integer
@@ -1124,7 +1173,7 @@ impl<'src> Lexer<'src> {
     /// Consumes the remaining tail of a HEX literal and emits the token
     fn lex_numeric_hex_literal(&mut self) {
         #[cfg(debug_assertions)]
-        debug_assert!(matches!(self.cursor.prev_char(), '0'..='9' | 'a'..='f' | 'A'..='F'));
+        debug_assert!(self.cursor.prev_char().is_ascii_hexdigit());
 
         // Eat until the end of the literal (x or X) or identify a missing x/X
         loop {
@@ -1155,6 +1204,7 @@ impl<'src> Lexer<'src> {
     }
 
     /// Parses a valid HEX number (sans the trailing `x` or `X`) and emits the token
+    #[allow(clippy::cast_precision_loss)]
     fn lex_numeric_hex_str(&mut self, number: &str) {
         // Try parse as i64. SAS only allows up-to 8 bytes (16 HEX digits)
         // for HEX literals, with the first one capped at 9F, so it is
@@ -1171,10 +1221,11 @@ impl<'src> Lexer<'src> {
                         // Wow, very big number;) Ok
 
                         // First remove leading sign if any, remember the sign
-                        let (truncated, negative) = if number.starts_with('-') {
-                            (&number[1..], true)
-                        } else if number.starts_with('+') {
-                            (&number[1..], false)
+                        let (truncated, negative) = if let Some(stripped) = number.strip_prefix('-')
+                        {
+                            (stripped, true)
+                        } else if let Some(stripped) = number.strip_prefix('+') {
+                            (stripped, false)
                         } else {
                             (number, false)
                         };
@@ -1268,6 +1319,7 @@ impl<'src> Lexer<'src> {
         };
     }
 
+    #[allow(clippy::too_many_lines)]
     fn lex_symbols(&mut self, c: char) {
         match c {
             '*' => {
@@ -1526,13 +1578,13 @@ impl<'src> Lexer<'src> {
         self.cursor.advance_by(advance_by);
 
         self.add_token(TokenChannel::DEFAULT, TokenType::CharFormat, Payload::None);
-        return true;
+        true
     }
 
     fn lex_macro(&mut self) -> bool {
         debug_assert_eq!(self.cursor.peek(), '%');
 
-        return match self.cursor.peek_next() {
+        match self.cursor.peek_next() {
             '*' => {
                 self.lex_macro_comment();
                 true
@@ -1566,7 +1618,24 @@ impl<'src> Lexer<'src> {
                 // todo: implement
                 false
             }
-        };
+        }
+    }
+
+    /// Try lexing %xxx, but only allow macro call starts,
+    /// i.e any identifier after percent except for reserved statements
+    fn lex_macro_call(&mut self, allow_quote_call: bool) -> bool {
+        debug_assert_eq!(self.cursor.peek(), '%');
+
+        let (tok_type, advance_by) = is_macro_call(&self.cursor, allow_quote_call);
+
+        if let Some(tok_type) = tok_type {
+            self.cursor.advance_by(advance_by);
+
+            self.add_token(TokenChannel::DEFAULT, tok_type, Payload::None);
+            return true;
+        }
+
+        false
     }
 
     fn lex_macro_comment(&mut self) {
@@ -1645,6 +1714,24 @@ impl<'src> Lexer<'src> {
                     // TokenType::KwmStr => {
                     //     self.lex_macro_str_quoted_expr();
                     // }
+                    TokenType::KwmLet => {
+                        // Add the token
+                        self.add_token(TokenChannel::DEFAULT, kw_tok_type, Payload::None);
+
+                        // following let we must have name, equal sign and expression.
+                        // All maybe surrounded by insignificant whitespace! + the closing semi
+                        // Also, SAS happily recovers after missing equal sign, with just a note
+                        // Hence we pre-feed all the expected states to the mode stack in reverse order,
+                        // and it will unwind as we lex tokens
+                        self.push_mode(LexerMode::ExpectToken(";", TokenType::SEMI));
+                        self.push_mode(LexerMode::WsOnly);
+                        self.push_mode(LexerMode::MacroLetInitializer);
+                        self.push_mode(LexerMode::WsOnly);
+                        self.push_mode(LexerMode::ExpectToken("=", TokenType::ASSIGN));
+                        self.push_mode(LexerMode::WsOnly);
+                        self.push_mode(LexerMode::MacroLetVarName);
+                        self.push_mode(LexerMode::WsOnly);
+                    }
                     _ => !todo!(),
                 }
                 return;
@@ -1664,7 +1751,6 @@ impl<'src> Lexer<'src> {
 
         // custom macro call or label
         !todo!();
-        return;
     }
 
     fn lex_macro_nrstr_quoted_literal(&mut self) {
@@ -1676,7 +1762,7 @@ impl<'src> Lexer<'src> {
         // Check left parenthesis
         if !self.cursor.eat_char('(') {
             // Emit an error but continue lexing
-            self.emit_error(ErrorType::MissingExpectedCharacter('('));
+            self.emit_error(ErrorType::MissingExpected("("));
         }
 
         // Keep track of parens nesting
@@ -1715,7 +1801,7 @@ impl<'src> Lexer<'src> {
             TokenType::NrStrLiteral,
             Payload::None,
         );
-        self.emit_error(ErrorType::MissingExpectedCharacter(')'));
+        self.emit_error(ErrorType::MissingExpected(")"));
     }
 }
 

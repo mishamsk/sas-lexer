@@ -277,7 +277,7 @@ fn test_not_datalines() {
         vec![
             ("input", TokenType::KwInput),
             (" ", TokenType::WS),
-            ("datalines4", TokenType::BaseIdentifier),
+            ("datalines4", TokenType::Identifier),
             (";", TokenType::SEMI),
         ],
         NO_ERRORS,
@@ -360,13 +360,13 @@ fn test_all_single_keywords() {
 }
 
 #[rstest]
-#[case::simple("myvar", vec![TokenType::BaseIdentifier] , NO_ERRORS)]
-#[case::underscore("_myvar",vec![TokenType::BaseIdentifier], NO_ERRORS)]
-#[case::unicode("тест",vec![TokenType::BaseIdentifier], NO_ERRORS)]
-#[case::with_num("_myvar9", vec![TokenType::BaseIdentifier], NO_ERRORS)]
+#[case::simple("myvar", vec![TokenType::Identifier] , NO_ERRORS)]
+#[case::underscore("_myvar",vec![TokenType::Identifier], NO_ERRORS)]
+#[case::unicode("тест",vec![TokenType::Identifier], NO_ERRORS)]
+#[case::with_num("_myvar9", vec![TokenType::Identifier], NO_ERRORS)]
 #[case::err_copy("_myvar©", 
     vec![
-        ("_myvar", TokenType::BaseIdentifier, TokenChannel::DEFAULT),
+        ("_myvar", TokenType::Identifier, TokenChannel::DEFAULT),
         ("©", TokenType::UNKNOWN, TokenChannel::HIDDEN)
         ], 
     vec![ErrorType::UnknownCharacter('©')]
@@ -374,7 +374,7 @@ fn test_all_single_keywords() {
 #[case::num_start("9_9myvar", 
     vec![
         ("9", TokenType::IntegerLiteral, Payload::Integer(9)),
-        ("_9myvar", TokenType::BaseIdentifier, Payload::None),
+        ("_9myvar", TokenType::Identifier, Payload::None),
         ], 
     NO_ERRORS
 )]
@@ -404,7 +404,7 @@ fn test_identifier(
 #[case::not_format_char("$f", 
     vec![
         ("$", TokenType::DOLLAR, Payload::None),        
-        ("f", TokenType::BaseIdentifier, Payload::None),
+        ("f", TokenType::Identifier, Payload::None),
         ]
 )]
 fn test_char_format(
@@ -487,7 +487,7 @@ fn test_nrstr_quoted_string_literal(#[case] contents: &str) {
 #[rstest]
 // TODO: the following requires adding ErrorTestCase implementation with all params
 // #[case::missing_open_paren("%nrstr  )", ErrorType::MissingExpectedCharacter('('))]
-#[case::missing_closing_paren("%nrstr(%%%)", ErrorType::MissingExpectedCharacter(')'))]
+#[case::missing_closing_paren("%nrstr(%%%)", ErrorType::MissingExpected(")"))]
 fn test_nrstr_quoted_str_error_recovery(#[case] contents: &str, #[case] expected_error: ErrorType) {
     assert_lexing(
         contents,
