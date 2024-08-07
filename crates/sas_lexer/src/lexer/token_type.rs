@@ -1,9 +1,20 @@
 use phf::phf_map;
 use sas_lexer_macro::{FromU16, KeywordMap, MacroKeywordMap, ToU16};
-use strum::Display;
+use strum::{Display, EnumCount, EnumIter};
 
 #[derive(
-    Debug, PartialEq, Eq, Clone, Copy, ToU16, FromU16, Display, KeywordMap, MacroKeywordMap,
+    Debug,
+    PartialEq,
+    Eq,
+    Clone,
+    Copy,
+    EnumCount,
+    EnumIter,
+    ToU16,
+    FromU16,
+    Display,
+    KeywordMap,
+    MacroKeywordMap,
 )]
 #[kw_map_name = "KEYWORDS"]
 #[kwm_map_name = "MKEYWORDS"]
@@ -73,31 +84,27 @@ pub enum TokenType {
     TimeLiteralExprEnd,       // "&mv.stuff"t
     HexStringLiteralExprEnd,  // "&mv.stuff"x
     CStyleComment,            // /* ... */
-    MacroComment,             // %* ...;
-    MacroVarExpr,             // &&mvar&another. etc.
-    MacroNeverExpr,           // the weird %= in eval context
     DatalinesStart,           // datalines/cards[4];
     DatalinesData,            // datalines data
     // the closing ;[;;;] after dataines is lexed as SEMI
     CharFormat, // $charformat.
     // ----------------MACRO TOKENS----------------
+    MacroComment,    // %* ...;
+    MacroVarExpr,    // &&mvar&another. etc.
+    MacroNeverExpr,  // the weird %= in eval context
+    MacroIdentifier, // %macro_name
     // Macro built in function keywords
-    KwmBquote,        // BQUOTE
     KwmEval,          // EVAL
     KwmIndex,         // INDEX
     KwmLength,        // LENGTH
     KwmLowcase,       // LOWCASE
-    KwmNrBquote,      // NRBQUOTE
-    KwmNrQuote,       // NRQUOTE
     KwmQLowcase,      // QLOWCASE
     KwmQScan,         // QSCAN
     KwmQSubstr,       // QSUBSTR
     KwmQsysfunc,      // QSYSFUNC
-    KwmQuote,         // QUOTE
     KwmQUpcase,       // QUPCASE
     KwmScan,          // SCAN
     KwmSubstr,        // SUBSTR
-    KwmSuperq,        // SUPERQ
     KwmSymExist,      // SYMEXIST
     KwmSymGlobl,      // SYMGLOBL
     KwmSymLocal,      // SYMLOCAL
@@ -111,6 +118,12 @@ pub enum TokenType {
     KwmSysprod,       // SYSPROD
     KwmUnquote,       // UNQUOTE
     KwmUpcase,        // UPCASE
+    // Runtime Quoting functions
+    KwmBquote,   // BQUOTE
+    KwmNrBquote, // NRBQUOTE
+    KwmNrQuote,  // NRQUOTE
+    KwmQuote,    // QUOTE
+    KwmSuperq,   // SUPERQ
     // Sudo functions (compile time quoting)
     KwmStr,       // STR
     NrStrLiteral, // NRSTR is not a keyword, as it is lexed with the text together
@@ -150,7 +163,7 @@ pub enum TokenType {
     KwmList, // LIST
     // ----------------MACRO TOKENS----------------
     // Put pure second pass tokens after this line only
-    BaseIdentifier,
+    Identifier,
     KwLT,
     KwLE,
     KwEQ,
@@ -301,8 +314,20 @@ pub(super) fn parse_macro_keyword<S: AsRef<str>>(ident: S) -> Option<TokenType> 
     MKEYWORDS.get(ident.as_ref()).copied()
 }
 
+#[inline]
+pub(crate) fn get_macro_quote_call_token_type_range() -> std::ops::RangeInclusive<u16> {
+    TokenType::KwmBquote as u16..=TokenType::NrStrLiteral as u16
+}
+
+#[inline]
+pub(crate) fn get_macro_stat_token_type_range() -> std::ops::RangeInclusive<u16> {
+    TokenType::KwmAbort as u16..=TokenType::KwmWindow as u16
+}
+
 #[cfg(test)]
 mod tests {
+    use strum::IntoEnumIterator;
+
     use super::*;
 
     #[test]
@@ -329,6 +354,74 @@ mod tests {
     }
 
     #[test]
+    fn test_get_macro_stat_token_type_range() {
+        let range = get_macro_stat_token_type_range();
+
+        for variant in TokenType::iter() {
+            let variant_val = variant as u16;
+
+            assert_eq!(
+                range.contains(&variant_val),
+                matches!(
+                    variant,
+                    TokenType::KwmAbort
+                        | TokenType::KwmCopy
+                        | TokenType::KwmDisplay
+                        | TokenType::KwmDo
+                        | TokenType::KwmTo
+                        | TokenType::KwmBy
+                        | TokenType::KwmUntil
+                        | TokenType::KwmWhile
+                        | TokenType::KwmEnd
+                        | TokenType::KwmGlobal
+                        | TokenType::KwmGoto
+                        | TokenType::KwmIf
+                        | TokenType::KwmThen
+                        | TokenType::KwmElse
+                        | TokenType::KwmInput
+                        | TokenType::KwmLet
+                        | TokenType::KwmLocal
+                        | TokenType::KwmMacro
+                        | TokenType::KwmMend
+                        | TokenType::KwmPut
+                        | TokenType::KwmReturn
+                        | TokenType::KwmSymdel
+                        | TokenType::KwmSyscall
+                        | TokenType::KwmSysexec
+                        | TokenType::KwmSyslput
+                        | TokenType::KwmSysmacdelete
+                        | TokenType::KwmSysmstoreclear
+                        | TokenType::KwmSysrput
+                        | TokenType::KwmWindow
+                )
+            )
+        }
+    }
+
+    #[test]
+    fn test_get_macro_quote_call_token_type_range() {
+        let range = get_macro_quote_call_token_type_range();
+
+        for variant in TokenType::iter() {
+            let variant_val = variant as u16;
+
+            assert_eq!(
+                range.contains(&variant_val),
+                matches!(
+                    variant,
+                    TokenType::KwmBquote
+                        | TokenType::KwmNrBquote
+                        | TokenType::KwmNrQuote
+                        | TokenType::KwmQuote
+                        | TokenType::KwmSuperq
+                        | TokenType::KwmStr
+                        | TokenType::NrStrLiteral
+                )
+            )
+        }
+    }
+
+    #[test]
     fn test_eof_u16_conversion() {
         assert_eq!(TokenType::EOF as u16, 0);
         assert_eq!(Some(TokenType::EOF), TokenType::from_u16(0));
@@ -336,15 +429,18 @@ mod tests {
 
     #[test]
     fn test_all_tokens_round_trip() {
-        const TOKEN_COUNT: u16 = 256;
-
         for i in 0..=u16::MAX {
             match TokenType::from_u16(i) {
                 Some(token) => {
                     assert_eq!(i, token as u16);
                 }
                 None => {
-                    assert_eq!(i, TOKEN_COUNT, "Unexpected number of tokens: {}", i);
+                    assert_eq!(
+                        i as usize,
+                        TokenType::COUNT,
+                        "Unexpected number of tokens: {}",
+                        i
+                    );
                     break;
                 }
             };
