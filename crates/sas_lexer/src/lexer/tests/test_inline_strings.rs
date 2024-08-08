@@ -167,8 +167,12 @@ fn test_unterminated_string_literal(
 #[case::with_macro_chars("&9 and &&&, 9% and %%%")]
 fn test_string_expr(
     #[case] contents: &str,
-    // todo: add macro call & statement
-    #[values("&&var&c", "&var")] macro_content: &str,
+    #[values(
+        ("&&var&c", TokenType::MacroVarExpr), 
+        ("&var", TokenType::MacroVarExpr),
+        ("%mcall", TokenType::MacroIdentifier)
+    )]
+    macro_content: (&str, TokenType),
     #[values(
         TokenType::StringExprEnd,
         TokenType::BitTestingLiteralExprEnd,
@@ -195,16 +199,68 @@ fn test_string_expr(
     // Test both lowercase and uppercase suffixes
     for suffix in [suffix, suffix.to_ascii_uppercase().as_str()] {
         // Construct the source string
-        let source = format!("\"{contents} {macro_content} {contents} {macro_content}\"{suffix}");
+        let source = format!(
+            "\"{contents} {} {contents} {}\"{suffix}",
+            macro_content.0, macro_content.0
+        );
 
         assert_lexing(
             source.as_str(),
             vec![
                 ("\"", TokenType::StringExprStart),
                 (&format!("{contents} "), TokenType::StringExprText),
-                (macro_content, TokenType::MacroVarExpr),
+                macro_content,
                 (&format!(" {contents} "), TokenType::StringExprText),
-                (macro_content, TokenType::MacroVarExpr),
+                macro_content,
+                (&format!("\"{suffix}"), end_type),
+            ],
+            NO_ERRORS,
+        );
+    }
+}
+
+#[rstest]
+fn test_string_expr_with_embedded_stat(
+    #[values(
+        TokenType::StringExprEnd,
+        TokenType::BitTestingLiteralExprEnd,
+        TokenType::DateLiteralExprEnd,
+        TokenType::DateTimeLiteralExprEnd,
+        TokenType::NameLiteralExprEnd,
+        TokenType::TimeLiteralExprEnd,
+        TokenType::HexStringLiteralExprEnd
+    )]
+    end_type: TokenType,
+) {
+    // get the suffix
+    let suffix = match end_type {
+        TokenType::StringExprEnd => "",
+        TokenType::BitTestingLiteralExprEnd => "b",
+        TokenType::DateLiteralExprEnd => "d",
+        TokenType::DateTimeLiteralExprEnd => "dt",
+        TokenType::NameLiteralExprEnd => "n",
+        TokenType::TimeLiteralExprEnd => "t",
+        TokenType::HexStringLiteralExprEnd => "x",
+        _ => unreachable!(),
+    };
+
+    // Test both lowercase and uppercase suffixes
+    for suffix in [suffix, suffix.to_ascii_uppercase().as_str()] {
+        // Construct the source string
+        let source = format!("\"this %let a=1; is possible\"{suffix}");
+
+        assert_lexing(
+            source.as_str(),
+            vec![
+                ("\"", TokenType::StringExprStart),
+                ("this ", TokenType::StringExprText),
+                ("%let", TokenType::KwmLet),
+                (" ", TokenType::WS),
+                ("a", TokenType::Identifier),
+                ("=", TokenType::ASSIGN),
+                ("1", TokenType::MacroString),
+                (";", TokenType::SEMI),
+                (" is possible", TokenType::StringExprText),
                 (&format!("\"{suffix}"), end_type),
             ],
             NO_ERRORS,
@@ -368,14 +424,14 @@ fn test_all_single_keywords() {
     vec![
         ("_myvar", TokenType::Identifier, TokenChannel::DEFAULT),
         ("©", TokenType::UNKNOWN, TokenChannel::HIDDEN)
-        ], 
+        ],
     vec![ErrorType::UnknownCharacter('©')]
 )]
 #[case::num_start("9_9myvar", 
     vec![
         ("9", TokenType::IntegerLiteral, Payload::Integer(9)),
         ("_9myvar", TokenType::Identifier, Payload::None),
-        ], 
+        ],
     NO_ERRORS
 )]
 fn test_identifier(
@@ -407,10 +463,7 @@ fn test_identifier(
         ("f", TokenType::Identifier, Payload::None),
         ]
 )]
-fn test_char_format(
-    #[case] contents: &str,
-    #[case] expected_token: Vec<impl TokenTestCase>,    
-) {
+fn test_char_format(#[case] contents: &str, #[case] expected_token: Vec<impl TokenTestCase>) {
     assert_lexing(contents, expected_token, NO_ERRORS);
 }
 
@@ -477,18 +530,16 @@ fn test_numeric_literal_error_recovery(
 #[case::with_macro_chars("%nrstr(&9 and &&&, 9% and % )")]
 #[case::with_real_macro("%nrstr(%some() and &mvar)")]
 fn test_nrstr_quoted_string_literal(#[case] contents: &str) {
-    assert_lexing(
-        contents,
-        vec![TokenType::NrStrLiteral],
-        NO_ERRORS,
-    );
+    assert_lexing(contents, vec![TokenType::NrStrLiteral], NO_ERRORS);
 }
 
 #[rstest]
-// TODO: the following requires adding ErrorTestCase implementation with all params
-// #[case::missing_open_paren("%nrstr  )", ErrorType::MissingExpectedCharacter('('))]
+#[case::missing_open_paren("%nrstr  )", (ErrorType::MissingExpected("("), 8))]
 #[case::missing_closing_paren("%nrstr(%%%)", ErrorType::MissingExpected(")"))]
-fn test_nrstr_quoted_str_error_recovery(#[case] contents: &str, #[case] expected_error: ErrorType) {
+fn test_nrstr_quoted_str_error_recovery(
+    #[case] contents: &str,
+    #[case] expected_error: impl ErrorTestCase,
+) {
     assert_lexing(
         contents,
         vec![TokenType::NrStrLiteral],
@@ -497,7 +548,7 @@ fn test_nrstr_quoted_str_error_recovery(#[case] contents: &str, #[case] expected
 }
 
 #[rstest]
-#[case::not_format_num("%let a=(;", 
+#[case::open_brace_val("%let a=(;", 
     vec![
         ("%let", TokenType::KwmLet),        
         (" ", TokenType::WS),        
@@ -507,7 +558,7 @@ fn test_nrstr_quoted_str_error_recovery(#[case] contents: &str, #[case] expected
         (";", TokenType::SEMI),
         ]
 )]
-#[case::not_format_num("%let a=);", 
+#[case::close_brace_val("%let a=);", 
     vec![
         ("%let", TokenType::KwmLet),        
         (" ", TokenType::WS),        
@@ -517,7 +568,7 @@ fn test_nrstr_quoted_str_error_recovery(#[case] contents: &str, #[case] expected
         (";", TokenType::SEMI),
         ]
 )]
-#[case::not_format_num("%let a&mv=&mv.b=;", 
+#[case::text_expr_name("%let a&mv=&mv.b=;", 
     vec![
         ("%let", TokenType::KwmLet),        
         (" ", TokenType::WS),        
@@ -543,10 +594,21 @@ fn test_nrstr_quoted_str_error_recovery(#[case] contents: &str, #[case] expected
         (";", TokenType::SEMI),
         ]
 )]
-fn test_macro_let(
-    #[case] contents: &str,
-    #[case] expected_token: Vec<impl TokenTestCase>,    
-) {
+#[case::mcall_parens_trail("%let a&a1%t()=1;",
+    vec![
+        ("%let", TokenType::KwmLet),
+        (" ", TokenType::WS),
+        ("a", TokenType::Identifier),
+        ("&a1", TokenType::MacroVarExpr),
+        ("%t", TokenType::MacroIdentifier),
+        ("(", TokenType::LPAREN),
+        (")", TokenType::RPAREN),
+        ("=", TokenType::ASSIGN),
+        ("1", TokenType::MacroString),
+        (";", TokenType::SEMI),
+        ]
+)]
+fn test_macro_let(#[case] contents: &str, #[case] expected_token: Vec<impl TokenTestCase>) {
     assert_lexing(contents, expected_token, NO_ERRORS);
 }
 
@@ -564,10 +626,114 @@ fn test_macro_let(
         ],
     vec![(ErrorType::MissingExpected("="), 7)]
 )]
+#[case::miss_assign("%let a &mv=1;", 
+    vec![
+        ("%let", TokenType::KwmLet),        
+        (" ", TokenType::WS),        
+        ("a", TokenType::Identifier),        
+        (" ", TokenType::WS),        
+        // Recovered from missing assign hence empty string
+        ("", TokenType::ASSIGN),
+        ("&mv", TokenType::MacroVarExpr),
+        ("=1", TokenType::MacroString),
+        (";", TokenType::SEMI),
+        ],
+    vec![(ErrorType::MissingExpected("="), 7)]
+)]
 fn test_macro_let_error_recovery(
     #[case] contents: &str,
-    #[case] expected_token: Vec<impl TokenTestCase>,    
+    #[case] expected_token: Vec<impl TokenTestCase>,
     #[case] expected_error: Vec<impl ErrorTestCase>,
 ) {
     assert_lexing(contents, expected_token, expected_error);
+}
+
+#[rstest]
+#[case::basic_call("%t(1,2);", 
+    vec![
+        ("%t", TokenType::MacroIdentifier),
+        ("(", TokenType::LPAREN),
+        ("1", TokenType::MacroString),
+        (",", TokenType::COMMA),
+        ("2", TokenType::MacroString),
+        (")", TokenType::RPAREN),
+        (";", TokenType::SEMI),
+        ]
+)]
+#[case::nested_call("%t(some(),2);", 
+    vec![
+        ("%t", TokenType::MacroIdentifier),
+        ("(", TokenType::LPAREN),
+        ("some()", TokenType::MacroString),
+        (",", TokenType::COMMA),
+        ("2", TokenType::MacroString),
+        (")", TokenType::RPAREN),
+        (";", TokenType::SEMI),
+    ]
+)]
+#[case::bare_nested_parens("%t(some(),());", 
+    vec![
+        ("%t", TokenType::MacroIdentifier),
+        ("(", TokenType::LPAREN),
+        ("some()", TokenType::MacroString),
+        (",", TokenType::COMMA),
+        ("()", TokenType::MacroString),
+        (")", TokenType::RPAREN),
+        (";", TokenType::SEMI),
+    ]
+)]
+#[case::comma_inside_nested_parens("%t(some(,),());", 
+    vec![
+        ("%t", TokenType::MacroIdentifier),
+        ("(", TokenType::LPAREN),
+        ("some(,)", TokenType::MacroString),
+        (",", TokenType::COMMA),
+        ("()", TokenType::MacroString),
+        (")", TokenType::RPAREN),
+        (";", TokenType::SEMI),
+    ]
+)]
+#[case::kw_call("%tk(arg1=some(,));", 
+    vec![
+        ("%tk", TokenType::MacroIdentifier),
+        ("(", TokenType::LPAREN),
+        ("arg1", TokenType::MacroString),
+        ("=", TokenType::ASSIGN),
+        ("some(,)", TokenType::MacroString),
+        (")", TokenType::RPAREN),
+        (";", TokenType::SEMI),
+    ]
+)]
+#[case::comma_inside_nested_parens_in_val("%tk(arg1=some(,),arg2=());", 
+    vec![
+        ("%tk", TokenType::MacroIdentifier),
+        ("(", TokenType::LPAREN),
+        ("arg1", TokenType::MacroString),
+        ("=", TokenType::ASSIGN),
+        ("some(,)", TokenType::MacroString),
+        (",", TokenType::COMMA),
+        ("arg2", TokenType::MacroString),
+        ("=", TokenType::ASSIGN),
+        ("()", TokenType::MacroString),
+        (")", TokenType::RPAREN),
+        (";", TokenType::SEMI),
+    ]
+)]
+#[case::full_nested_call_like("%tk(arg1=some(,arg2=()),arg2=());", 
+    vec![
+        ("%tk", TokenType::MacroIdentifier),
+        ("(", TokenType::LPAREN),
+        ("arg1", TokenType::MacroString),
+        ("=", TokenType::ASSIGN),
+        ("some(,arg2=())", TokenType::MacroString),
+        (",", TokenType::COMMA),
+        ("arg2", TokenType::MacroString),
+        ("=", TokenType::ASSIGN),
+        ("()", TokenType::MacroString),
+        (")", TokenType::RPAREN),
+        (";", TokenType::SEMI),
+    ]
+)]
+fn test_macro_call(#[case] contents: &str, #[case] expected_token: Vec<impl TokenTestCase>) {
+    assert_lexing(contents, expected_token, NO_ERRORS);
 }
