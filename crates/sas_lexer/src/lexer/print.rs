@@ -8,7 +8,6 @@ pub fn token_to_string<S: AsRef<str>>(
     buffer: &TokenizedBuffer,
     source: &S,
 ) -> String {
-    let token_idx = token.get();
     let start_line = buffer.get_token_start_line(token);
     let end_line = buffer.get_token_end_line(token);
     let start_column = buffer.get_token_start_column(token);
@@ -34,7 +33,7 @@ pub fn token_to_string<S: AsRef<str>>(
 
     // Constructing the string representation of the token
     let token_repr = format!(
-        "[@{token_idx},{token_start}:{token_end}={token_text:?},<{token_type}>,\
+        "[@{token},{token_start}:{token_end}={token_text:?},<{token_type}>,\
         L{start_line}:C{start_column}-L{end_line}:C{end_column},chl={token_channel},\
         pl={payload_str:?}]"
     );
