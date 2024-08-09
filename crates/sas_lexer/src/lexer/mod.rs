@@ -123,9 +123,14 @@ impl<'src> Lexer<'src> {
     }
 
     #[inline]
-    fn pending_token_text(&self) -> &str {
-        &self.source
-            [self.cur_token_byte_offset.get() as usize..self.cur_byte_offset().get() as usize]
+    fn pending_token_text(&mut self) -> &str {
+        self.source
+            .get(self.cur_token_byte_offset.get() as usize..self.cur_byte_offset().get() as usize)
+            .unwrap_or_else(|| {
+                // This is an internal error, we should always have a token text
+                self.emit_error(ErrorType::InternalError("No token text"));
+                ""
+            })
     }
 
     #[inline]
@@ -271,7 +276,7 @@ impl<'src> Lexer<'src> {
 
         self.start_token();
         if (content.len() > self.cursor.remaining_len() as usize)
-            | (self.cursor.as_str()[..content.len()] != *content)
+            | (self.cursor.as_str().get(..content.len()) != Some(content))
         {
             // Expected token not found. Emit an error which will point at previous token
             // The token itself is emitted below
@@ -376,11 +381,11 @@ impl<'src> Lexer<'src> {
         let start_mode_index = self.mode_stack.len() - 1;
 
         let update_mode = |lexer: &mut Lexer| {
-            lexer.mode_stack.get_mut(start_mode_index).map(|m| {
-                if let LexerMode::MacroLetVarName(found_name) = m {
-                    *found_name = true;
-                }
-            });
+            if let Some(LexerMode::MacroLetVarName(found_name)) =
+                lexer.mode_stack.get_mut(start_mode_index)
+            {
+                *found_name = true;
+            };
         };
 
         // Dispatch the "big" categories
@@ -2232,17 +2237,17 @@ impl<'src> Lexer<'src> {
                     }
                 }
                 return;
-            } else {
-                match ident.as_str() {
-                    // Nrstr is not a keyword, but a special case of quoted literal
-                    "NRSTR" => {
-                        self.lex_macro_nrstr_quoted_literal();
-                        return;
-                    }
-                    _ => {
-                        // Do nothing, fall through to the custom macro call
-                        // or label handling below
-                    }
+            }
+
+            match ident.as_str() {
+                // Nrstr is not a keyword, but a special case of quoted literal
+                "NRSTR" => {
+                    self.lex_macro_nrstr_quoted_literal();
+                    return;
+                }
+                _ => {
+                    // Do nothing, fall through to the custom macro call
+                    // or label handling below
                 }
             }
         }
