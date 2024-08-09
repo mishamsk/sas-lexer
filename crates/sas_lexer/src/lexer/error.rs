@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::TokenIdx;
+use super::buffer::TokenIdx;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum ErrorType {

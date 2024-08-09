@@ -21,8 +21,6 @@ use text::{ByteOffset, CharOffset};
 use token_type::{parse_keyword, parse_macro_keyword, TokenType};
 use unicode_ident::{is_xid_continue, is_xid_start};
 
-use crate::TokenIdx;
-
 const BOM: char = '\u{feff}';
 
 /// The lexer mode
@@ -219,10 +217,7 @@ impl<'src> Lexer<'src> {
             last_char_offset,
             self.buffer.line_count(),
             last_char_offset - last_line_char_offset,
-            match self.buffer.token_count() {
-                0 => None,
-                count => Some(TokenIdx::new(count - 1)),
-            },
+            self.buffer.last_token(),
         ));
     }
 

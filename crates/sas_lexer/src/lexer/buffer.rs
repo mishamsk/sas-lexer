@@ -1,4 +1,5 @@
 #![allow(clippy::indexing_slicing)]
+use std::fmt;
 use std::ops::Range;
 
 use super::channel::TokenChannel;
@@ -13,13 +14,14 @@ pub struct TokenIdx(u32);
 
 impl TokenIdx {
     #[must_use]
-    pub fn new(val: u32) -> Self {
+    fn new(val: u32) -> Self {
         TokenIdx(val)
     }
+}
 
-    #[must_use]
-    pub fn get(self) -> u32 {
-        self.0
+impl fmt::Display for TokenIdx {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 
@@ -261,6 +263,13 @@ impl WorkTokenizedBuffer {
     // pub(super) fn iter_token_infos(&self) -> std::slice::Iter<'_, TokenInfo> {
     //     self.token_infos.iter()
     // }
+
+    pub(super) fn last_token(&self) -> Option<TokenIdx> {
+        match self.token_count() {
+            0 => None,
+            n => Some(TokenIdx::new(n - 1)),
+        }
+    }
 
     pub(super) fn last_token_info(&self) -> Option<&TokenInfo> {
         self.token_infos.last()
