@@ -395,7 +395,7 @@ mod tests {
                         | TokenType::KwmSysrput
                         | TokenType::KwmWindow
                 )
-            )
+            );
         }
     }
 
@@ -418,7 +418,7 @@ mod tests {
                         | TokenType::KwmStr
                         | TokenType::NrStrLiteral
                 )
-            )
+            );
         }
     }
 
@@ -439,8 +439,7 @@ mod tests {
                     assert_eq!(
                         i as usize,
                         TokenType::COUNT,
-                        "Unexpected number of tokens: {}",
-                        i
+                        "Unexpected number of tokens: {i}"
                     );
                     break;
                 }

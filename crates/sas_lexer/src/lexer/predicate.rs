@@ -1,6 +1,6 @@
-use unicode_ident::is_xid_continue;
-
 use crate::TokenType;
+use std::result::Result;
+use unicode_ident::is_xid_continue;
 
 use super::{
     cursor::Cursor,
@@ -79,7 +79,10 @@ fn is_macro_quote_call(tok_type: TokenType) -> bool {
 /// Returns a tuple of:
 /// - `Option<TokenType>`: `TokenType` if the current position is a macro call, None otherwise.
 /// - `u32`: number of characters to consume if it is a macro call.
-pub(super) fn is_macro_call(cursor: &Cursor, allow_quote_call: bool) -> (Option<TokenType>, u32) {
+pub(super) fn is_macro_call(
+    cursor: &Cursor,
+    allow_quote_call: bool,
+) -> Result<(Option<TokenType>, u32), &'static str> {
     debug_assert_eq!(cursor.peek(), '%');
 
     // Since in most cases it will be a macro call, we clone the cursor
@@ -109,53 +112,62 @@ pub(super) fn is_macro_call(cursor: &Cursor, allow_quote_call: bool) -> (Option<
     // If the identifier is not ASCII, we can safely return true
     // must be a macro call
     if !is_ascii {
-        return (
+        return Ok((
             Some(TokenType::MacroIdentifier),
             la_view.char_offset() - cursor.char_offset(),
-        );
+        ));
     }
 
     // Ok, ascii - check if we match a statement
 
     // My guess is this should be quicker than capturing the value as we consume it
     // avoids the allocation and copying
-    // The last -1 is to exclude the % when taking the slice below
-    let ident_bytes = cursor.remaining_len() - la_view.remaining_len() - 1;
-    let ident = cursor.as_str()[1..ident_bytes as usize].to_ascii_uppercase();
+    let ident_end_byte_offset = cursor.remaining_len() - la_view.remaining_len();
+
+    let ident = cursor
+        .as_str()
+        .get(1..ident_end_byte_offset as usize)
+        .ok_or("Unexpected error getting ident slice  in `is_macro_call` lookahead")?
+        .to_ascii_uppercase();
+
+    if ident.is_empty() {
+        // Something like %*
+        return Ok((None, 0));
+    }
 
     if let Some(kw_tok_type) = parse_macro_keyword(&ident) {
         if is_macro_stat(kw_tok_type) {
             // It is a statement, not a macro call
-            (None, 0)
+            Ok((None, 0))
         } else if is_macro_quote_call(kw_tok_type) && !allow_quote_call {
             // A quote call that is not allowed
-            (None, 0)
+            Ok((None, 0))
         } else {
             // Looks like a built macro function call
-            (
+            Ok((
                 Some(kw_tok_type),
                 la_view.char_offset() - cursor.char_offset(),
-            )
+            ))
         }
     } else {
         match ident.as_str() {
             // Nrstr is not a keyword, but a special case of quoted literal
             "NRSTR" => {
                 if !allow_quote_call {
-                    return (None, 0);
+                    return Ok((None, 0));
                 }
 
-                (
+                Ok((
                     Some(TokenType::NrStrLiteral),
                     la_view.char_offset() - cursor.char_offset(),
-                )
+                ))
             }
             _ => {
                 // Not a statement, not a quote call, must be a macro call
-                (
+                Ok((
                     Some(TokenType::MacroIdentifier),
                     la_view.char_offset() - cursor.char_offset(),
-                )
+                ))
             }
         }
     }

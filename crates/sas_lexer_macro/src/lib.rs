@@ -55,7 +55,12 @@ pub fn from_u16_conversions_derive(input: TokenStream) -> TokenStream {
 
     let from_u16_for_type = variants.iter().enumerate().map(|(i, variant)| {
         let variant_ident = &variant.ident;
-        let i = i as u16;
+        let i = u16::try_from(i).unwrap_or_else(|_| {
+            panic!(
+                "This macro doesn't support more than {} variants!",
+                u16::MAX
+            );
+        });
         quote! {
             #i => Some(#name::#variant_ident),
         }
@@ -75,6 +80,8 @@ pub fn from_u16_conversions_derive(input: TokenStream) -> TokenStream {
     TokenStream::from(expanded)
 }
 
+/// # Panics
+/// Panics if the input is not an enum.
 #[proc_macro_derive(KeywordMap, attributes(keyword, kw_map_name))]
 pub fn generate_keyword_map(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
@@ -132,6 +139,7 @@ pub fn generate_keyword_map(input: TokenStream) -> TokenStream {
                 }
             });
 
+            #[allow(clippy::indexing_slicing)]
             let default_keyword = &ident[2..].to_ascii_uppercase();
             let keywords = keywords.map_or_else(
                 || vec![default_keyword.clone()],
@@ -149,9 +157,7 @@ pub fn generate_keyword_map(input: TokenStream) -> TokenStream {
             })
         });
 
-    if variant_code.clone().count() == 0 {
-        panic!("No variants found that start with 'Kw'");
-    }
+    assert!(variant_code.clone().count() != 0, "No variants found that start with 'Kw'");
 
     let expanded = quote! {
         pub(crate) static #kw_map_name: phf::Map<&'static str, #name> = phf_map! {
@@ -162,6 +168,8 @@ pub fn generate_keyword_map(input: TokenStream) -> TokenStream {
     TokenStream::from(expanded)
 }
 
+/// # Panics
+/// Panics if the input is not an enum.
 #[proc_macro_derive(MacroKeywordMap, attributes(keyword, kwm_map_name))]
 pub fn generate_macro_keyword_map(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
@@ -216,6 +224,7 @@ pub fn generate_macro_keyword_map(input: TokenStream) -> TokenStream {
                 }
             });
 
+            #[allow(clippy::indexing_slicing)]
             let default_keyword = &ident[3..].to_ascii_uppercase();
             let keywords = keywords.map_or_else(
                 || vec![default_keyword.clone()],
@@ -233,9 +242,10 @@ pub fn generate_macro_keyword_map(input: TokenStream) -> TokenStream {
             })
         });
 
-    if variant_code.clone().count() == 0 {
-        panic!("No variants found that start with 'Kwm'");
-    }
+    assert!(
+        variant_code.clone().count() != 0,
+        "No variants found that start with 'Kwm'"
+    );
 
     let expanded = quote! {
         pub(crate) static #kwm_map_name: phf::Map<&'static str, #name> = phf_map! {

@@ -5,7 +5,7 @@ use crate::{error::ErrorType, lex, TokenChannel, TokenType};
 use rstest::rstest;
 
 use super::super::token_type::KEYWORDS;
-use super::util::{assert_lexing, ErrorTestCase, TokenTestCase};
+use super::util::{assert_lexing, mangle_case, ErrorTestCase, TokenTestCase};
 
 const NO_ERRORS: Vec<ErrorType> = vec![];
 
@@ -395,17 +395,7 @@ fn test_all_single_symbols(#[case] contents: &str, #[case] expected_token: impl 
 fn test_all_single_keywords() {
     KEYWORDS.keys().for_each(|keyword| {
         // Change every odd character to uppercase, and every even character to lowercase
-        let mangled_keyword = keyword
-            .chars()
-            .enumerate()
-            .map(|(i, c)| {
-                if i % 2 == 0 {
-                    c.to_ascii_lowercase()
-                } else {
-                    c.to_ascii_uppercase()
-                }
-            })
-            .collect::<String>();
+        let mangled_keyword = mangle_case(keyword);
 
         assert_lexing(
             mangled_keyword.as_str(),
@@ -548,9 +538,9 @@ fn test_nrstr_quoted_str_error_recovery(
 }
 
 #[rstest]
-#[case::open_brace_val("%let a=(;", 
+#[case::open_brace_val("%LeT a=(;", 
     vec![
-        ("%let", TokenType::KwmLet),        
+        ("%LeT", TokenType::KwmLet),        
         (" ", TokenType::WS),        
         ("a", TokenType::Identifier),        
         ("=", TokenType::ASSIGN),
@@ -558,9 +548,9 @@ fn test_nrstr_quoted_str_error_recovery(
         (";", TokenType::SEMI),
         ]
 )]
-#[case::close_brace_val("%let a=);", 
+#[case::close_brace_val("%lEt a=);", 
     vec![
-        ("%let", TokenType::KwmLet),        
+        ("%lEt", TokenType::KwmLet),        
         (" ", TokenType::WS),        
         ("a", TokenType::Identifier),        
         ("=", TokenType::ASSIGN),
@@ -608,6 +598,187 @@ fn test_nrstr_quoted_str_error_recovery(
         (";", TokenType::SEMI),
         ]
 )]
+#[case::macro_call_sequence("%let %t()%t()=1;", 
+    vec![
+        ("%let", TokenType::KwmLet),        
+        (" ", TokenType::WS),        
+        ("%t", TokenType::MacroIdentifier),
+        ("(", TokenType::LPAREN),
+        (")", TokenType::RPAREN),
+        ("%t", TokenType::MacroIdentifier),
+        ("(", TokenType::LPAREN),
+        (")", TokenType::RPAREN),
+        ("=", TokenType::ASSIGN),
+        ("1", TokenType::MacroString),
+        (";", TokenType::SEMI),
+        ]
+)]
+#[case::nested_macro_calls("%let a&a1%t(%t())=1;", 
+    vec![
+        ("%let", TokenType::KwmLet),        
+        (" ", TokenType::WS),        
+        ("a", TokenType::Identifier),        
+        ("&a1", TokenType::MacroVarExpr),        
+        ("%t", TokenType::MacroIdentifier),
+        ("(", TokenType::LPAREN),
+        ("%t", TokenType::MacroIdentifier),
+        ("(", TokenType::LPAREN),
+        (")", TokenType::RPAREN),
+        (")", TokenType::RPAREN),
+        ("=", TokenType::ASSIGN),
+        ("1", TokenType::MacroString),
+        (";", TokenType::SEMI),
+        ]
+)]
+#[case::tail_macro_call_no_parens("%let a&a1%t=1;", 
+    vec![
+        ("%let", TokenType::KwmLet),        
+        (" ", TokenType::WS),        
+        ("a", TokenType::Identifier),        
+        ("&a1", TokenType::MacroVarExpr),        
+        ("%t", TokenType::MacroIdentifier),
+        ("=", TokenType::ASSIGN),
+        ("1", TokenType::MacroString),
+        (";", TokenType::SEMI),
+        ]
+)]
+#[case::double_tail_macro_call_no_parens("%let a&a1%t%t=1;", 
+    vec![
+        ("%let", TokenType::KwmLet),        
+        (" ", TokenType::WS),        
+        ("a", TokenType::Identifier),        
+        ("&a1", TokenType::MacroVarExpr),        
+        ("%t", TokenType::MacroIdentifier),
+        ("%t", TokenType::MacroIdentifier),
+        ("=", TokenType::ASSIGN),
+        ("1", TokenType::MacroString),
+        (";", TokenType::SEMI),
+        ]
+)]
+#[case::macro_call_in_the_middle("%let a%t()a2=1;", 
+    vec![
+        ("%let", TokenType::KwmLet),        
+        (" ", TokenType::WS),        
+        ("a", TokenType::Identifier),        
+        ("%t", TokenType::MacroIdentifier),
+        ("(", TokenType::LPAREN),
+        (")", TokenType::RPAREN),
+        ("a2", TokenType::Identifier),
+        ("=", TokenType::ASSIGN),
+        ("1", TokenType::MacroString),
+        (";", TokenType::SEMI),
+        ]
+)]
+#[case::underscore_start("%let _9v=1;", 
+    vec![
+        ("%let", TokenType::KwmLet),        
+        (" ", TokenType::WS),        
+        ("_9v", TokenType::Identifier),        
+        ("=", TokenType::ASSIGN),
+        ("1", TokenType::MacroString),
+        (";", TokenType::SEMI),
+        ]
+)]
+#[case::leading_comment("%let /*com*/_9v=1;", 
+    vec![
+        ("%let", TokenType::KwmLet),        
+        (" ", TokenType::WS),        
+        ("/*com*/", TokenType::CStyleComment),        
+        ("_9v", TokenType::Identifier),        
+        ("=", TokenType::ASSIGN),
+        ("1", TokenType::MacroString),
+        (";", TokenType::SEMI),
+        ]
+)]
+#[case::inline_comment("%let _9/*com*/v=1;", 
+    vec![
+        ("%let", TokenType::KwmLet),        
+        (" ", TokenType::WS),        
+        ("_9", TokenType::Identifier),        
+        ("/*com*/", TokenType::CStyleComment),        
+        ("v", TokenType::Identifier),        
+        ("=", TokenType::ASSIGN),
+        ("1", TokenType::MacroString),
+        (";", TokenType::SEMI),
+        ]
+)]
+#[case::eval_macro_call("%let ev%eval(1+1)=2;", 
+    vec![
+        ("%let", TokenType::KwmLet),        
+        (" ", TokenType::WS),        
+        ("ev", TokenType::Identifier),        
+        ("%eval", TokenType::KwmEval),
+        ("(", TokenType::LPAREN),
+        ("1+1", TokenType::MacroString),
+        (")", TokenType::RPAREN),
+        ("=", TokenType::ASSIGN),
+        ("2", TokenType::MacroString),
+        (";", TokenType::SEMI),
+        ]
+)]
+#[case::symexist_macro_call("%let ev%symexist(a1)=2;", 
+    vec![
+        ("%let", TokenType::KwmLet),        
+        (" ", TokenType::WS),        
+        ("ev", TokenType::Identifier),        
+        ("%symexist", TokenType::KwmSymExist),
+        ("(", TokenType::LPAREN),
+        ("a1", TokenType::MacroString),
+        (")", TokenType::RPAREN),
+        ("=", TokenType::ASSIGN),
+        ("2", TokenType::MacroString),
+        (";", TokenType::SEMI),
+       ]
+)]
+#[case::unquote_macro_call("%let ev%unquote(%quote(&a1))=2;",
+    vec![
+       ("%let",TokenType :: KwmLet),
+       ( " " ,TokenType :: WS),
+       ( "ev" ,TokenType :: Identifier),
+       ( "%unquote" ,TokenType :: KwmUnquote),
+       ( "(" ,TokenType :: LPAREN),
+       ( "%quote" ,TokenType :: KwmQuote),
+       ( "(" ,TokenType :: LPAREN),
+       ( "&a1" ,TokenType :: MacroVarExpr),
+       ( ")" ,TokenType :: RPAREN),
+       ( ")" ,TokenType :: RPAREN),
+       ( "=" ,TokenType :: ASSIGN),
+       ( "2" ,TokenType :: MacroString),
+       ( ";" ,TokenType :: SEMI),
+       ]
+)]
+#[case::ws_in_inline_macro_call("%let pre_%t ()_post=v;",
+    vec![
+       ("%let" ,TokenType :: KwmLet),
+       ( " " ,TokenType :: WS),
+       ( "pre_" ,TokenType :: Identifier),
+       ( "%t" ,TokenType :: MacroIdentifier),
+       ( " " ,TokenType :: WS),
+       ( "(" ,TokenType :: LPAREN),
+       ( ")" ,TokenType :: RPAREN),
+       ( "_post" ,TokenType :: Identifier),
+       ( "=" ,TokenType :: ASSIGN),
+       ( "v" ,TokenType :: MacroString),
+       ( ";" ,TokenType :: SEMI),
+       ]
+)]
+#[case::complex_value("%let a='%t();' \"%t();\";",
+    vec![
+       ("%let" ,TokenType::KwmLet),
+       ( " " ,TokenType::WS),
+       ( "a" ,TokenType::Identifier),
+       ( "=" ,TokenType::ASSIGN),
+       ( "'%t();'" ,TokenType::StringLiteral),
+       ( " " ,TokenType::MacroString),
+       ( "\"" ,TokenType::StringExprStart),
+       ( "%t" ,TokenType::MacroIdentifier),
+       ( "(" ,TokenType::LPAREN),
+       ( ")" ,TokenType::RPAREN),
+       ( ";" ,TokenType::StringExprText),
+       ( "\"" ,TokenType::StringExprEnd),
+       ( ";" ,TokenType :: SEMI),
+      ]
+)]
 fn test_macro_let(#[case] contents: &str, #[case] expected_token: Vec<impl TokenTestCase>) {
     assert_lexing(contents, expected_token, NO_ERRORS);
 }
@@ -615,10 +786,10 @@ fn test_macro_let(#[case] contents: &str, #[case] expected_token: Vec<impl Token
 #[rstest]
 #[case::miss_assign("%let a b=1;", 
     vec![
-        ("%let", TokenType::KwmLet),        
-        (" ", TokenType::WS),        
-        ("a", TokenType::Identifier),        
-        (" ", TokenType::WS),        
+        ("%let", TokenType::KwmLet),
+        (" ", TokenType::WS),
+        ("a", TokenType::Identifier),
+        (" ", TokenType::WS),
         // Recovered from missing assign hence empty string
         ("", TokenType::ASSIGN),
         ("b=1", TokenType::MacroString),
@@ -626,19 +797,48 @@ fn test_macro_let(#[case] contents: &str, #[case] expected_token: Vec<impl Token
         ],
     vec![(ErrorType::MissingExpected("="), 7)]
 )]
-#[case::miss_assign("%let a &mv=1;", 
+#[case::miss_assign_2("%let a &mv=1;", 
+vec![
+    ("%let", TokenType::KwmLet),        
+    (" ", TokenType::WS),        
+    ("a", TokenType::Identifier),        
+    (" ", TokenType::WS),        
+    // Recovered from missing assign hence empty string
+    ("", TokenType::ASSIGN),
+    ("&mv", TokenType::MacroVarExpr),
+    ("=1", TokenType::MacroString),
+    (";", TokenType::SEMI),
+    ],
+    vec![(ErrorType::MissingExpected("="), 7)]
+)]
+#[case::miss_name_str_literal("%let 'v'=v;", 
     vec![
-        ("%let", TokenType::KwmLet),        
-        (" ", TokenType::WS),        
-        ("a", TokenType::Identifier),        
-        (" ", TokenType::WS),        
+        ("%let", TokenType::KwmLet),
+        (" ", TokenType::WS),
         // Recovered from missing assign hence empty string
         ("", TokenType::ASSIGN),
-        ("&mv", TokenType::MacroVarExpr),
-        ("=1", TokenType::MacroString),
+        ("'v'", TokenType::StringLiteral),
+        ("=v", TokenType::MacroString),        
         (";", TokenType::SEMI),
         ],
-    vec![(ErrorType::MissingExpected("="), 7)]
+    vec![
+        (ErrorType::MissingExpected("ERROR: Expecting a variable name after %LET."), 5),
+        (ErrorType::MissingExpected("="), 5)
+        ]
+)]
+#[case::miss_name_wrong_ident_start("%let 9v=1;", 
+    vec![
+        ("%let", TokenType::KwmLet),
+        (" ", TokenType::WS),
+        // Recovered from missing assign hence empty string
+        ("", TokenType::ASSIGN),        
+        ("9v=1", TokenType::MacroString),        
+        (";", TokenType::SEMI),
+        ],
+    vec![
+        (ErrorType::MissingExpected("ERROR: Expecting a variable name after %LET."), 5),
+        (ErrorType::MissingExpected("="), 5)
+        ]
 )]
 fn test_macro_let_error_recovery(
     #[case] contents: &str,

@@ -11,6 +11,7 @@ use sas_lexer::TokenizedBuffer;
 
 use std::fs;
 use std::io;
+use std::panic::catch_unwind;
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -51,7 +52,7 @@ where
 }
 
 fn lex_and_print(source: &String, print: bool) {
-    match lex(source) {
+    let result = catch_unwind(|| match lex(source) {
         Ok((tok_buffer, errors)) => {
             let tokens: Vec<TokenIdx> = tok_buffer.into_iter().collect();
 
@@ -69,6 +70,14 @@ fn lex_and_print(source: &String, print: bool) {
             println!("Done! Found {total_tokens} tokens. Had {total_errors} errors!");
         }
         Err(error) => eprintln!("Error: {error}"),
+    });
+
+    if let Err(err) = result {
+        if let Some(s) = err.downcast_ref::<&str>() {
+            println!("Panic occurred while lexing: {s}");
+        } else {
+            println!("Panic occurred, but can't read the message");
+        }
     }
 }
 

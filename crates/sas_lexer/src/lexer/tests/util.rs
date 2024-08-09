@@ -5,7 +5,7 @@ use crate::{
     Payload, TokenChannel, TokenIdx, TokenType, TokenizedBuffer,
 };
 
-pub(crate) trait TokenTestCase {
+pub(super) trait TokenTestCase {
     fn token_type(&self) -> TokenType;
     fn token_channel(&self) -> TokenChannel;
     fn payload(&self) -> Payload;
@@ -42,6 +42,7 @@ impl TokenTestCase for (&str, TokenType) {
     fn token_channel(&self) -> TokenChannel {
         match self.1 {
             TokenType::WS => TokenChannel::HIDDEN,
+            TokenType::CStyleComment | TokenType::MacroComment => TokenChannel::COMMENT,
             _ => TokenChannel::default(),
         }
     }
@@ -67,6 +68,7 @@ impl TokenTestCase for (&str, TokenType, Payload) {
     fn token_channel(&self) -> TokenChannel {
         match self.1 {
             TokenType::WS => TokenChannel::HIDDEN,
+            TokenType::CStyleComment | TokenType::MacroComment => TokenChannel::COMMENT,
             _ => TokenChannel::default(),
         }
     }
@@ -116,6 +118,7 @@ impl TokenTestCase for TokenType {
     fn token_channel(&self) -> TokenChannel {
         match self {
             TokenType::WS => TokenChannel::HIDDEN,
+            TokenType::CStyleComment | TokenType::MacroComment => TokenChannel::COMMENT,
             _ => TokenChannel::default(),
         }
     }
@@ -161,6 +164,7 @@ impl TokenTestCase for (TokenType, f64) {
     fn token_channel(&self) -> TokenChannel {
         match self.0 {
             TokenType::WS => TokenChannel::HIDDEN,
+            TokenType::CStyleComment | TokenType::MacroComment => TokenChannel::COMMENT,
             _ => TokenChannel::default(),
         }
     }
@@ -188,6 +192,7 @@ impl TokenTestCase for (TokenType, i64) {
     fn token_channel(&self) -> TokenChannel {
         match self.0 {
             TokenType::WS => TokenChannel::HIDDEN,
+            TokenType::CStyleComment | TokenType::MacroComment => TokenChannel::COMMENT,
             _ => TokenChannel::default(),
         }
     }
@@ -219,7 +224,7 @@ where
         .join("\n")
 }
 
-pub(crate) fn check_token<S: AsRef<str>>(
+pub(super) fn check_token<S: AsRef<str>>(
     source: &str,
     token: TokenIdx,
     buffer: &TokenizedBuffer,
@@ -342,7 +347,7 @@ pub(crate) fn check_token<S: AsRef<str>>(
         token_to_string(token, buffer, &source)
     );
 
-    let token_text = token_text.as_ref().map(|s| s.as_ref());
+    let token_text = token_text.as_ref().map(std::convert::AsRef::as_ref);
 
     assert_eq!(
         token_text,
@@ -353,7 +358,7 @@ pub(crate) fn check_token<S: AsRef<str>>(
     );
 }
 
-pub(crate) trait ErrorTestCase {
+pub(super) trait ErrorTestCase {
     fn error_type(&self) -> ErrorType;
     fn at_char_offset(&self, source: &str) -> u32;
     fn last_token_idx(&self, buffer: &TokenizedBuffer) -> Option<TokenIdx>;
@@ -411,7 +416,7 @@ where
         .join("\n")
 }
 
-pub(crate) fn check_error(
+pub(super) fn check_error(
     source: &str,
     buffer: &TokenizedBuffer,
     error: &ErrorInfo,
@@ -488,7 +493,7 @@ pub(crate) fn check_error(
     );
 }
 
-pub(crate) fn assert_lexing(
+pub(super) fn assert_lexing(
     source: &str,
     expected_tokens: Vec<impl TokenTestCase>,
     expected_errors: Vec<impl ErrorTestCase>,
@@ -640,4 +645,21 @@ pub(crate) fn assert_lexing(
             expected_err.last_token_idx(&buffer),
         );
     }
+}
+
+pub(super) fn mangle_case<S: AsRef<str>>(source: S) -> String {
+    source
+        .as_ref()
+        .chars()
+        .enumerate()
+        .map(|(i, c)| {
+            if !c.is_ascii() {
+                c
+            } else if i % 2 == 0 {
+                c.to_ascii_lowercase()
+            } else {
+                c.to_ascii_uppercase()
+            }
+        })
+        .collect::<String>()
 }
