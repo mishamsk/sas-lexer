@@ -1,3 +1,4 @@
+#![allow(clippy::indexing_slicing)]
 use std::ops::Range;
 
 use super::channel::TokenChannel;
