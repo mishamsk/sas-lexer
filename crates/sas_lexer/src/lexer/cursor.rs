@@ -55,8 +55,8 @@ impl<'a> Cursor<'a> {
 
     /// Peeks the next non whitespace symbol from the input stream without consuming it.
     pub(super) fn peek_next_non_ws(&self) -> char {
-        let mut iter = self.chars.clone();
-        while let Some(c) = iter.next() {
+        let iter = self.chars.clone();
+        for c in iter {
             if !c.is_whitespace() {
                 return c;
             }

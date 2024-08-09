@@ -44,7 +44,10 @@ enum LexerMode {
     ExpectToken(&'static str, TokenType),
     /// Macro arithmetic/logical expression, as in `%eval(-->1+1<--)`
     MacroEval,
-    MacroLetVarName,
+    /// Mode for lexing right after %let/%local/%global, where
+    /// we expect a variable name expression. Boolean flag indicates if we
+    /// have found at least one token of the variable name
+    MacroLetVarName(bool),
     MacroLetInitializer,
     // The u32 value is the current parenthesis nesting level.
     // Macro arguments allow balanced parenthesis nesting and
@@ -70,6 +73,12 @@ struct Lexer<'src> {
     mode_stack: Vec<LexerMode>,
     /// Errors encountered during lexing
     errors: Vec<ErrorInfo>,
+
+    /// Stores the last state for debug assertions to check
+    /// against infinite loops. It is the remaining input length
+    /// and the mode stack.
+    #[cfg(debug_assertions)]
+    last_state: (u32, Vec<LexerMode>),
 }
 
 impl<'src> Lexer<'src> {
@@ -98,6 +107,8 @@ impl<'src> Lexer<'src> {
             cur_token_line,
             mode_stack: vec![init_mode.unwrap_or_default()],
             errors: Vec::new(),
+            #[cfg(debug_assertions)]
+            last_state: (source_len, vec![init_mode.unwrap_or_default()]),
         })
     }
 
@@ -152,7 +163,7 @@ impl<'src> Lexer<'src> {
         self.cur_token_line = LineIdx::new(self.buffer.line_count() - 1);
     }
 
-    fn add_token(&mut self, channel: TokenChannel, token_type: TokenType, payload: Payload) {
+    fn emit_token(&mut self, channel: TokenChannel, token_type: TokenType, payload: Payload) {
         self.buffer.add_token(
             channel,
             token_type,
@@ -213,6 +224,13 @@ impl<'src> Lexer<'src> {
     fn lex(mut self) -> (WorkTokenizedBuffer, Box<[ErrorInfo]>) {
         while !self.cursor.is_eof() {
             self.lex_token();
+
+            #[cfg(debug_assertions)]
+            if cfg!(debug_assertions) {
+                let new_state = (self.cursor.remaining_len(), self.mode_stack.clone());
+                debug_assert!(self.last_state != new_state, "Infinite loop detected");
+                self.last_state = new_state;
+            }
         }
 
         self.buffer.add_token(
@@ -242,7 +260,7 @@ impl<'src> Lexer<'src> {
             LexerMode::MacroEval => !todo!("Macro eval mode"),
             LexerMode::MacroCallArgOrValue(pnl) => self.lex_macro_call_arg_or_value(pnl, true),
             LexerMode::MacroCallValue(pnl) => self.lex_macro_call_arg_or_value(pnl, false),
-            LexerMode::MacroLetVarName => self.lex_macro_ident_expr(),
+            LexerMode::MacroLetVarName(found_name) => self.lex_macro_ident_expr(!found_name),
             LexerMode::MacroLetInitializer => self.lex_macro_text_expr(),
         }
     }
@@ -266,7 +284,7 @@ impl<'src> Lexer<'src> {
             self.cursor.advance_by(content.chars().count() as u32);
         }
 
-        self.add_token(TokenChannel::DEFAULT, tok_type, Payload::None);
+        self.emit_token(TokenChannel::DEFAULT, tok_type, Payload::None);
         self.pop_mode();
     }
 
@@ -288,7 +306,7 @@ impl<'src> Lexer<'src> {
             '\'' => self.lex_single_quoted_str(),
             '"' => {
                 self.cursor.advance();
-                self.add_token(
+                self.emit_token(
                     TokenChannel::DEFAULT,
                     TokenType::StringExprStart,
                     Payload::None,
@@ -297,28 +315,28 @@ impl<'src> Lexer<'src> {
             }
             ';' => {
                 self.cursor.advance();
-                self.add_token(TokenChannel::DEFAULT, TokenType::SEMI, Payload::None);
+                self.emit_token(TokenChannel::DEFAULT, TokenType::SEMI, Payload::None);
             }
             '/' => {
                 if self.cursor.peek_next() == '*' {
                     self.lex_cstyle_comment();
                 } else {
                     self.cursor.advance();
-                    self.add_token(TokenChannel::DEFAULT, TokenType::FSLASH, Payload::None);
+                    self.emit_token(TokenChannel::DEFAULT, TokenType::FSLASH, Payload::None);
                 }
             }
             '&' => {
                 if !self.lex_macro_var_expr() {
                     // Regular AMP sequence, consume as token
                     self.cursor.eat_while(|c| c == '&');
-                    self.add_token(TokenChannel::DEFAULT, TokenType::AMP, Payload::None);
+                    self.emit_token(TokenChannel::DEFAULT, TokenType::AMP, Payload::None);
                 }
             }
             '%' => {
                 if !self.lex_macro() {
                     // Not a macro, just a percent
                     self.cursor.advance();
-                    self.add_token(TokenChannel::DEFAULT, TokenType::PERCENT, Payload::None);
+                    self.emit_token(TokenChannel::DEFAULT, TokenType::PERCENT, Payload::None);
                 }
             }
             '0'..='9' => {
@@ -335,10 +353,35 @@ impl<'src> Lexer<'src> {
         }
     }
 
-    fn lex_macro_ident_expr(&mut self) {
-        debug_assert!(matches!(self.mode(), LexerMode::MacroLetVarName));
+    fn lex_macro_ident_expr(&mut self, first: bool) {
+        debug_assert!(matches!(self.mode(), LexerMode::MacroLetVarName(_)));
 
         self.start_token();
+
+        let pop_mode_and_check = |lexer: &mut Lexer| {
+            if first {
+                // This is straight from what SAS emits
+                lexer.emit_error(ErrorType::MissingExpected(
+                    "ERROR: Expecting a variable name after %LET.",
+                ));
+            }
+
+            lexer.pop_mode();
+        };
+
+        // Helper to update the mode indicating that we have found at least one token
+        // First we need to store the index of the mode when we started lexing this,
+        // because nested calls can add more modes to the stack, but what we
+        // want to update is the mode at the start of this call
+        let start_mode_index = self.mode_stack.len() - 1;
+
+        let update_mode = |lexer: &mut Lexer| {
+            lexer.mode_stack.get_mut(start_mode_index).map(|m| {
+                if let LexerMode::MacroLetVarName(found_name) = m {
+                    *found_name = true;
+                }
+            });
+        };
 
         // Dispatch the "big" categories
         match self.cursor.peek() {
@@ -348,14 +391,20 @@ impl<'src> Lexer<'src> {
             '&' => {
                 if !self.lex_macro_var_expr() {
                     // Not a macro var. pop mode without consuming the character
-                    self.pop_mode();
+                    pop_mode_and_check(self);
+                    return;
                 }
+
+                update_mode(self);
             }
             '%' => {
                 if !self.lex_macro_call(false) {
                     // Not a macro, just a percent. Pop mode without consuming the character
-                    self.pop_mode();
+                    pop_mode_and_check(self);
+                    return;
                 }
+
+                update_mode(self);
             }
             c if is_valid_sas_name_start(c) => {
                 // A macro string in place of macro identifier
@@ -365,11 +414,13 @@ impl<'src> Lexer<'src> {
 
                 // Add token, but do not pop the mode, as we may have a full macro text expression
                 // that generates an identifier
-                self.add_token(TokenChannel::DEFAULT, TokenType::Identifier, Payload::None);
+                self.emit_token(TokenChannel::DEFAULT, TokenType::Identifier, Payload::None);
+
+                update_mode(self);
             }
             _ => {
                 // Something else. pop mode without consuming the character
-                self.pop_mode();
+                pop_mode_and_check(self);
             }
         }
     }
@@ -384,7 +435,7 @@ impl<'src> Lexer<'src> {
             '\'' => self.lex_single_quoted_str(),
             '"' => {
                 self.cursor.advance();
-                self.add_token(
+                self.emit_token(
                     TokenChannel::DEFAULT,
                     TokenType::StringExprStart,
                     Payload::None,
@@ -442,7 +493,6 @@ impl<'src> Lexer<'src> {
             ';' => {
                 // Found the terminator, pop the mode and return
                 self.pop_mode();
-                return;
             }
             _ => {
                 // Not a terminator, just a regular character in the string
@@ -461,19 +511,21 @@ impl<'src> Lexer<'src> {
                 '\'' | '"' | EOF_CHAR => {
                     // Reached the end of the section of a macro string
                     // Emit the text token and return
-                    self.add_token(TokenChannel::DEFAULT, TokenType::MacroString, Payload::None);
+                    self.emit_token(TokenChannel::DEFAULT, TokenType::MacroString, Payload::None);
+                    return;
                 }
                 '/' if self.cursor.peek_next() == '*' => {
                     // Start of a comment in a macro string
                     // Emit the text token and return
-                    self.add_token(TokenChannel::DEFAULT, TokenType::MacroString, Payload::None);
+                    self.emit_token(TokenChannel::DEFAULT, TokenType::MacroString, Payload::None);
+                    return;
                 }
                 '&' => {
                     let (is_macro_amp, amp_count) = is_macro_amp(self.cursor.chars());
 
                     if is_macro_amp {
                         // Hit a macro var expr in the string expression => emit the text token
-                        self.add_token(
+                        self.emit_token(
                             TokenChannel::DEFAULT,
                             TokenType::MacroString,
                             Payload::None,
@@ -488,7 +540,7 @@ impl<'src> Lexer<'src> {
                 '%' => {
                     if is_macro_percent(self.cursor.peek_next(), false) {
                         // Hit a macro call or statment in/after the string expression => emit the text token
-                        self.add_token(
+                        self.emit_token(
                             TokenChannel::DEFAULT,
                             TokenType::MacroString,
                             Payload::None,
@@ -506,7 +558,7 @@ impl<'src> Lexer<'src> {
                 }
                 ';' => {
                     // Found the terminator, emit the token, pop the mode and return
-                    self.add_token(TokenChannel::DEFAULT, TokenType::MacroString, Payload::None);
+                    self.emit_token(TokenChannel::DEFAULT, TokenType::MacroString, Payload::None);
                     self.pop_mode();
                     return;
                 }
@@ -537,7 +589,7 @@ impl<'src> Lexer<'src> {
             '\'' => self.lex_single_quoted_str(),
             '"' => {
                 self.cursor.advance();
-                self.add_token(
+                self.emit_token(
                     TokenChannel::DEFAULT,
                     TokenType::StringExprStart,
                     Payload::None,
@@ -600,13 +652,11 @@ impl<'src> Lexer<'src> {
                 // Leading insiginificant WS before the argument
                 self.push_mode(LexerMode::WsOnly);
                 self.push_mode(LexerMode::ExpectToken(",", TokenType::COMMA));
-                return;
             }
             ')' if parens_nesting_level == 0 => {
                 // Found the terminator of the entire macro call arguments,
                 // just pop the mode and return
                 self.pop_mode();
-                return;
             }
             '=' if terminate_on_assign && parens_nesting_level == 0 => {
                 // Found the terminator between argument name and value,
@@ -616,7 +666,6 @@ impl<'src> Lexer<'src> {
                 // Leading insiginificant WS before the argument
                 self.push_mode(LexerMode::WsOnly);
                 self.push_mode(LexerMode::ExpectToken("=", TokenType::ASSIGN));
-                return;
             }
             _ => {
                 // Not a terminator, just a regular character in the string
@@ -638,8 +687,8 @@ impl<'src> Lexer<'src> {
         ));
 
         // Helper function to emit the token and update the mode if needed
-        let emit_token = |lexer: &mut Lexer, local_parens_nesting: u32| {
-            lexer.add_token(TokenChannel::DEFAULT, TokenType::MacroString, Payload::None);
+        let emit_token_update_nesting = |lexer: &mut Lexer, local_parens_nesting: u32| {
+            lexer.emit_token(TokenChannel::DEFAULT, TokenType::MacroString, Payload::None);
 
             // If the local parens nesting has been affected, update the mode
             if local_parens_nesting != 0 {
@@ -649,19 +698,14 @@ impl<'src> Lexer<'src> {
                 // and exited the lexing of the string
                 debug_assert!(parens_nesting_level + local_parens_nesting > 0);
 
-                match lexer.pop_mode() {
-                    LexerMode::MacroCallArgOrValue(_) => {
-                        lexer.push_mode(LexerMode::MacroCallArgOrValue(
-                            parens_nesting_level + local_parens_nesting,
-                        ));
+                if let Some(m) = lexer.mode_stack.last_mut() {
+                    match m {
+                        LexerMode::MacroCallArgOrValue(pnl) | LexerMode::MacroCallValue(pnl) => {
+                            *pnl += local_parens_nesting;
+                        }
+                        _ => unreachable!(),
                     }
-                    LexerMode::MacroCallValue(_) => {
-                        lexer.push_mode(LexerMode::MacroCallValue(
-                            parens_nesting_level + local_parens_nesting,
-                        ));
-                    }
-                    _ => unreachable!(),
-                }
+                };
             }
         };
 
@@ -676,19 +720,21 @@ impl<'src> Lexer<'src> {
                 '\'' | '"' | EOF_CHAR => {
                     // Reached the end of the section of a macro string
                     // Emit the text token and return
-                    emit_token(self, local_parens_nesting);
+                    emit_token_update_nesting(self, local_parens_nesting);
+                    return;
                 }
                 '/' if self.cursor.peek_next() == '*' => {
                     // Start of a comment in a macro string
                     // Emit the text token and return
-                    emit_token(self, local_parens_nesting);
+                    emit_token_update_nesting(self, local_parens_nesting);
+                    return;
                 }
                 '&' => {
                     let (is_macro_amp, amp_count) = is_macro_amp(self.cursor.chars());
 
                     if is_macro_amp {
                         // Hit a macro var expr in the string expression => emit the text token
-                        emit_token(self, local_parens_nesting);
+                        emit_token_update_nesting(self, local_parens_nesting);
 
                         return;
                     }
@@ -699,7 +745,7 @@ impl<'src> Lexer<'src> {
                 '%' => {
                     if is_macro_percent(self.cursor.peek_next(), false) {
                         // Hit a macro call or statment in/after the string expression => emit the text token
-                        emit_token(self, local_parens_nesting);
+                        emit_token_update_nesting(self, local_parens_nesting);
 
                         return;
                     }
@@ -724,14 +770,14 @@ impl<'src> Lexer<'src> {
                 ')' if parens_nesting_level + local_parens_nesting == 0 => {
                     // Found the terminator of the entire macro call arguments,
                     // emit the token, pop the mode and return
-                    self.add_token(TokenChannel::DEFAULT, TokenType::MacroString, Payload::None);
+                    self.emit_token(TokenChannel::DEFAULT, TokenType::MacroString, Payload::None);
                     self.pop_mode();
                     return;
                 }
                 ',' if parens_nesting_level + local_parens_nesting == 0 => {
                     // Found the terminator, pop the mode and push new modes
                     // to expect stuff, emit token then return
-                    self.add_token(TokenChannel::DEFAULT, TokenType::MacroString, Payload::None);
+                    self.emit_token(TokenChannel::DEFAULT, TokenType::MacroString, Payload::None);
                     self.pop_mode();
                     self.push_mode(LexerMode::MacroCallArgOrValue(0));
                     // Leading insiginificant WS before the argument
@@ -744,7 +790,7 @@ impl<'src> Lexer<'src> {
                 {
                     // Found the terminator between argument name and value,
                     // pop the mode and push new modes to expect stuff then return
-                    self.add_token(TokenChannel::DEFAULT, TokenType::MacroString, Payload::None);
+                    self.emit_token(TokenChannel::DEFAULT, TokenType::MacroString, Payload::None);
                     // Pop the arg/value mode and push the value mode
                     self.pop_mode();
                     self.push_mode(LexerMode::MacroCallValue(0));
@@ -791,7 +837,7 @@ impl<'src> Lexer<'src> {
                 break;
             }
         }
-        self.add_token(TokenChannel::HIDDEN, TokenType::WS, Payload::None);
+        self.emit_token(TokenChannel::HIDDEN, TokenType::WS, Payload::None);
     }
 
     fn lex_cstyle_comment(&mut self) {
@@ -815,7 +861,7 @@ impl<'src> Lexer<'src> {
             } else {
                 // EOF reached without a closing comment
                 // Emit an error token and return
-                self.add_token(
+                self.emit_token(
                     TokenChannel::COMMENT,
                     TokenType::CStyleComment,
                     Payload::None,
@@ -825,7 +871,7 @@ impl<'src> Lexer<'src> {
             }
         }
 
-        self.add_token(
+        self.emit_token(
             TokenChannel::COMMENT,
             TokenType::CStyleComment,
             Payload::None,
@@ -858,7 +904,7 @@ impl<'src> Lexer<'src> {
             } else {
                 // EOF reached without a closing single quote
                 // Emit an error token and return
-                self.add_token(
+                self.emit_token(
                     TokenChannel::DEFAULT,
                     TokenType::StringLiteral,
                     Payload::None,
@@ -871,7 +917,7 @@ impl<'src> Lexer<'src> {
         // Now check if this is a single quoted string or one of the other literals
         let tok_type = self.lex_literal_ending();
 
-        self.add_token(TokenChannel::DEFAULT, tok_type, Payload::None);
+        self.emit_token(TokenChannel::DEFAULT, tok_type, Payload::None);
     }
 
     /// Lexes the ending of a literal token, returning the type
@@ -962,7 +1008,7 @@ impl<'src> Lexer<'src> {
                     self.cursor.advance();
                 }
 
-                self.add_token(TokenChannel::DEFAULT, tok_type, Payload::None);
+                self.emit_token(TokenChannel::DEFAULT, tok_type, Payload::None);
                 self.pop_mode();
             }
             '&' => {
@@ -999,7 +1045,7 @@ impl<'src> Lexer<'src> {
 
                     if is_macro_amp {
                         // Hit a macro var expr in the string expression => emit the text token
-                        self.add_token(
+                        self.emit_token(
                             TokenChannel::DEFAULT,
                             TokenType::StringExprText,
                             Payload::None,
@@ -1014,7 +1060,7 @@ impl<'src> Lexer<'src> {
                 '%' => {
                     if is_macro_percent(self.cursor.peek_next(), false) {
                         // Hit a macro var expr in the string expression => emit the text token
-                        self.add_token(
+                        self.emit_token(
                             TokenChannel::DEFAULT,
                             TokenType::StringExprText,
                             Payload::None,
@@ -1061,7 +1107,7 @@ impl<'src> Lexer<'src> {
 
                     // We are in a genuine string expression, and hit the end - emit the text token
                     // The ending quote will be handled by the caller
-                    self.add_token(
+                    self.emit_token(
                         TokenChannel::DEFAULT,
                         TokenType::StringExprText,
                         Payload::None,
@@ -1096,7 +1142,7 @@ impl<'src> Lexer<'src> {
                 Payload::None,
             );
         } else {
-            self.add_token(
+            self.emit_token(
                 TokenChannel::DEFAULT,
                 TokenType::StringExprEnd,
                 Payload::None,
@@ -1151,7 +1197,7 @@ impl<'src> Lexer<'src> {
                     self.cursor.advance();
 
                     // Add the token
-                    self.add_token(
+                    self.emit_token(
                         TokenChannel::DEFAULT,
                         TokenType::MacroVarExpr,
                         Payload::None,
@@ -1178,7 +1224,7 @@ impl<'src> Lexer<'src> {
                         // The following & characters are not part of the macro var expr
 
                         // Add the token without consuming the following amp
-                        self.add_token(
+                        self.emit_token(
                             TokenChannel::DEFAULT,
                             TokenType::MacroVarExpr,
                             Payload::None,
@@ -1200,7 +1246,7 @@ impl<'src> Lexer<'src> {
                     // Reached the end of the macro var expr
 
                     // Add the token without consuming the following character
-                    self.add_token(
+                    self.emit_token(
                         TokenChannel::DEFAULT,
                         TokenType::MacroVarExpr,
                         Payload::None,
@@ -1236,7 +1282,7 @@ impl<'src> Lexer<'src> {
         // Now the fun part - dispatch all kinds of identifiers
         if !is_ascii {
             // Easy case - not ASCII, just emit the identifier token
-            self.add_token(TokenChannel::DEFAULT, TokenType::Identifier, Payload::None);
+            self.emit_token(TokenChannel::DEFAULT, TokenType::Identifier, Payload::None);
             return;
         }
 
@@ -1245,24 +1291,24 @@ impl<'src> Lexer<'src> {
         let ident = self.pending_token_text().to_ascii_uppercase();
 
         if let Some(kw_tok_type) = parse_keyword(&ident) {
-            self.add_token(TokenChannel::DEFAULT, kw_tok_type, Payload::None);
+            self.emit_token(TokenChannel::DEFAULT, kw_tok_type, Payload::None);
             return;
         }
 
         match ident.as_str() {
             "DATALINES" | "CARDS" | "LINES" => {
                 if !self.lex_datalines(false) {
-                    self.add_token(TokenChannel::DEFAULT, TokenType::Identifier, Payload::None);
+                    self.emit_token(TokenChannel::DEFAULT, TokenType::Identifier, Payload::None);
                 };
             }
             "DATALINES4" | "CARDS4" | "LINES4" => {
                 if !self.lex_datalines(true) {
-                    self.add_token(TokenChannel::DEFAULT, TokenType::Identifier, Payload::None);
+                    self.emit_token(TokenChannel::DEFAULT, TokenType::Identifier, Payload::None);
                 };
             }
             _ => {
                 // genuine user defined identifier
-                self.add_token(TokenChannel::DEFAULT, TokenType::Identifier, Payload::None);
+                self.emit_token(TokenChannel::DEFAULT, TokenType::Identifier, Payload::None);
             }
         }
     }
@@ -1331,7 +1377,7 @@ impl<'src> Lexer<'src> {
             }
         }
 
-        self.add_token(
+        self.emit_token(
             TokenChannel::DEFAULT,
             TokenType::DatalinesStart,
             Payload::None,
@@ -1360,7 +1406,7 @@ impl<'src> Lexer<'src> {
                         break;
                     }
 
-                    if self.cursor.as_str()[..ending_len] == *ending {
+                    if self.cursor.as_str().get(..ending_len).unwrap_or("") == ending {
                         // Found the ending. Do not consume as it will be the separate token
                         break;
                     }
@@ -1374,7 +1420,7 @@ impl<'src> Lexer<'src> {
         }
 
         // Add the datalines data token
-        self.add_token(
+        self.emit_token(
             TokenChannel::DEFAULT,
             TokenType::DatalinesData,
             Payload::None,
@@ -1388,7 +1434,7 @@ impl<'src> Lexer<'src> {
         self.cursor.advance_by(ending_len as u32);
 
         // Add the datalines end token
-        self.add_token(TokenChannel::DEFAULT, TokenType::SEMI, Payload::None);
+        self.emit_token(TokenChannel::DEFAULT, TokenType::SEMI, Payload::None);
 
         true
     }
@@ -1511,7 +1557,7 @@ impl<'src> Lexer<'src> {
         let number = self.pending_token_text();
 
         let Ok(fvalue) = f64::from_str(number) else {
-            self.add_token(
+            self.emit_token(
                 TokenChannel::DEFAULT,
                 TokenType::IntegerLiteral,
                 Payload::Integer(0),
@@ -1530,9 +1576,11 @@ impl<'src> Lexer<'src> {
             // and the same numeric format `1.`
 
             // But leading sign or 0 - we can emit the integer token
-            match number.as_bytes()[0] {
+            // Unwrap here is safe, as we know the length is > 0
+            // but we still provide default value to avoid panics
+            match *number.as_bytes().first().unwrap_or(&b'_') {
                 b'-' | b'+' | b'0' => {
-                    self.add_token(
+                    self.emit_token(
                         TokenChannel::DEFAULT,
                         TokenType::IntegerLiteral,
                         Payload::Integer(fvalue as i64),
@@ -1540,13 +1588,13 @@ impl<'src> Lexer<'src> {
                 }
                 _ => {
                     if number.contains('.') {
-                        self.add_token(
+                        self.emit_token(
                             TokenChannel::DEFAULT,
                             TokenType::IntegerDotLiteral,
                             Payload::Integer(fvalue as i64),
                         );
                     } else {
-                        self.add_token(
+                        self.emit_token(
                             TokenChannel::DEFAULT,
                             TokenType::IntegerLiteral,
                             Payload::Integer(fvalue as i64),
@@ -1559,7 +1607,7 @@ impl<'src> Lexer<'src> {
             // it was created from scientific notation or not, but
             // this function only handles the decimal literals, so
             // no need to check for that
-            self.add_token(
+            self.emit_token(
                 TokenChannel::DEFAULT,
                 TokenType::FloatLiteral,
                 Payload::Float(fvalue),
@@ -1607,7 +1655,7 @@ impl<'src> Lexer<'src> {
         // for HEX literals, with the first one capped at 9F, so it is
         // slightly less then +/-(2^63 - 1), but can theoretically overflow
         match i64::from_str_radix(number, 16) {
-            Ok(value) => self.add_token(
+            Ok(value) => self.emit_token(
                 TokenChannel::DEFAULT,
                 TokenType::IntegerLiteral,
                 Payload::Integer(value),
@@ -1631,7 +1679,9 @@ impl<'src> Lexer<'src> {
                         let (emit_error, truncated) = if truncated.len() > 16 {
                             // Emit an error, but truncate the number to parse something
 
-                            (true, &truncated[..16])
+                            // Unwrap here is safe really, as we know the length is > 16
+                            // but we still provide default value to avoid panics
+                            (true, truncated.get(..16).unwrap_or(truncated))
                         } else {
                             (false, truncated)
                         };
@@ -1647,7 +1697,7 @@ impl<'src> Lexer<'src> {
                             int_vale as f64
                         };
 
-                        self.add_token(
+                        self.emit_token(
                             TokenChannel::DEFAULT,
                             TokenType::FloatLiteral,
                             Payload::Float(fvalue),
@@ -1659,7 +1709,7 @@ impl<'src> Lexer<'src> {
                     }
                     _ => {
                         // This is an internal error, should not happen
-                        self.add_token(
+                        self.emit_token(
                             TokenChannel::DEFAULT,
                             TokenType::IntegerLiteral,
                             Payload::Integer(0),
@@ -1698,14 +1748,14 @@ impl<'src> Lexer<'src> {
 
         match f64::from_str(number) {
             Ok(value) => {
-                self.add_token(
+                self.emit_token(
                     TokenChannel::DEFAULT,
                     TokenType::FloatLiteral,
                     Payload::Float(value),
                 );
             }
             Err(_) => {
-                self.add_token(
+                self.emit_token(
                     TokenChannel::DEFAULT,
                     TokenType::FloatLiteral,
                     Payload::Float(0.0),
@@ -1725,40 +1775,40 @@ impl<'src> Lexer<'src> {
                     ('\'' | '"', ';') => {
                         self.cursor.advance();
                         self.cursor.advance();
-                        self.add_token(TokenChannel::HIDDEN, TokenType::TermQuote, Payload::None);
+                        self.emit_token(TokenChannel::HIDDEN, TokenType::TermQuote, Payload::None);
                     }
                     ('*', _) => {
                         self.cursor.advance();
-                        self.add_token(TokenChannel::DEFAULT, TokenType::STAR2, Payload::None);
+                        self.emit_token(TokenChannel::DEFAULT, TokenType::STAR2, Payload::None);
                     }
                     _ => {
-                        self.add_token(TokenChannel::DEFAULT, TokenType::STAR, Payload::None);
+                        self.emit_token(TokenChannel::DEFAULT, TokenType::STAR, Payload::None);
                     }
                 }
             }
             '(' => {
                 self.cursor.advance();
-                self.add_token(TokenChannel::DEFAULT, TokenType::LPAREN, Payload::None);
+                self.emit_token(TokenChannel::DEFAULT, TokenType::LPAREN, Payload::None);
             }
             ')' => {
                 self.cursor.advance();
-                self.add_token(TokenChannel::DEFAULT, TokenType::RPAREN, Payload::None);
+                self.emit_token(TokenChannel::DEFAULT, TokenType::RPAREN, Payload::None);
             }
             '{' => {
                 self.cursor.advance();
-                self.add_token(TokenChannel::DEFAULT, TokenType::LCURLY, Payload::None);
+                self.emit_token(TokenChannel::DEFAULT, TokenType::LCURLY, Payload::None);
             }
             '}' => {
                 self.cursor.advance();
-                self.add_token(TokenChannel::DEFAULT, TokenType::RCURLY, Payload::None);
+                self.emit_token(TokenChannel::DEFAULT, TokenType::RCURLY, Payload::None);
             }
             '[' => {
                 self.cursor.advance();
-                self.add_token(TokenChannel::DEFAULT, TokenType::LBRACK, Payload::None);
+                self.emit_token(TokenChannel::DEFAULT, TokenType::LBRACK, Payload::None);
             }
             ']' => {
                 self.cursor.advance();
-                self.add_token(TokenChannel::DEFAULT, TokenType::RBRACK, Payload::None);
+                self.emit_token(TokenChannel::DEFAULT, TokenType::RBRACK, Payload::None);
             }
             '!' => {
                 self.cursor.advance();
@@ -1766,10 +1816,10 @@ impl<'src> Lexer<'src> {
                 match self.cursor.peek() {
                     '!' => {
                         self.cursor.advance();
-                        self.add_token(TokenChannel::DEFAULT, TokenType::EXCL2, Payload::None);
+                        self.emit_token(TokenChannel::DEFAULT, TokenType::EXCL2, Payload::None);
                     }
                     _ => {
-                        self.add_token(TokenChannel::DEFAULT, TokenType::EXCL, Payload::None);
+                        self.emit_token(TokenChannel::DEFAULT, TokenType::EXCL, Payload::None);
                     }
                 }
             }
@@ -1779,10 +1829,10 @@ impl<'src> Lexer<'src> {
                 match self.cursor.peek() {
                     '¦' => {
                         self.cursor.advance();
-                        self.add_token(TokenChannel::DEFAULT, TokenType::BPIPE2, Payload::None);
+                        self.emit_token(TokenChannel::DEFAULT, TokenType::BPIPE2, Payload::None);
                     }
                     _ => {
-                        self.add_token(TokenChannel::DEFAULT, TokenType::BPIPE, Payload::None);
+                        self.emit_token(TokenChannel::DEFAULT, TokenType::BPIPE, Payload::None);
                     }
                 }
             }
@@ -1792,10 +1842,10 @@ impl<'src> Lexer<'src> {
                 match self.cursor.peek() {
                     '|' => {
                         self.cursor.advance();
-                        self.add_token(TokenChannel::DEFAULT, TokenType::PIPE2, Payload::None);
+                        self.emit_token(TokenChannel::DEFAULT, TokenType::PIPE2, Payload::None);
                     }
                     _ => {
-                        self.add_token(TokenChannel::DEFAULT, TokenType::PIPE, Payload::None);
+                        self.emit_token(TokenChannel::DEFAULT, TokenType::PIPE, Payload::None);
                     }
                 }
             }
@@ -1805,10 +1855,10 @@ impl<'src> Lexer<'src> {
                 match self.cursor.peek() {
                     '=' => {
                         self.cursor.advance();
-                        self.add_token(TokenChannel::DEFAULT, TokenType::NE, Payload::None);
+                        self.emit_token(TokenChannel::DEFAULT, TokenType::NE, Payload::None);
                     }
                     _ => {
-                        self.add_token(TokenChannel::DEFAULT, TokenType::NOT, Payload::None);
+                        self.emit_token(TokenChannel::DEFAULT, TokenType::NOT, Payload::None);
                     }
                 }
             }
@@ -1825,7 +1875,7 @@ impl<'src> Lexer<'src> {
                         self.lex_numeric_literal();
                     }
                     _ => {
-                        self.add_token(TokenChannel::DEFAULT, TokenType::PLUS, Payload::None);
+                        self.emit_token(TokenChannel::DEFAULT, TokenType::PLUS, Payload::None);
                     }
                 }
             }
@@ -1842,7 +1892,7 @@ impl<'src> Lexer<'src> {
                         self.lex_numeric_literal();
                     }
                     _ => {
-                        self.add_token(TokenChannel::DEFAULT, TokenType::MINUS, Payload::None);
+                        self.emit_token(TokenChannel::DEFAULT, TokenType::MINUS, Payload::None);
                     }
                 }
             }
@@ -1852,14 +1902,14 @@ impl<'src> Lexer<'src> {
                 match self.cursor.peek() {
                     '=' => {
                         self.cursor.advance();
-                        self.add_token(TokenChannel::DEFAULT, TokenType::LE, Payload::None);
+                        self.emit_token(TokenChannel::DEFAULT, TokenType::LE, Payload::None);
                     }
                     '>' => {
                         self.cursor.advance();
-                        self.add_token(TokenChannel::DEFAULT, TokenType::LTGT, Payload::None);
+                        self.emit_token(TokenChannel::DEFAULT, TokenType::LTGT, Payload::None);
                     }
                     _ => {
-                        self.add_token(TokenChannel::DEFAULT, TokenType::LT, Payload::None);
+                        self.emit_token(TokenChannel::DEFAULT, TokenType::LT, Payload::None);
                     }
                 }
             }
@@ -1869,14 +1919,14 @@ impl<'src> Lexer<'src> {
                 match self.cursor.peek() {
                     '=' => {
                         self.cursor.advance();
-                        self.add_token(TokenChannel::DEFAULT, TokenType::GE, Payload::None);
+                        self.emit_token(TokenChannel::DEFAULT, TokenType::GE, Payload::None);
                     }
                     '<' => {
                         self.cursor.advance();
-                        self.add_token(TokenChannel::DEFAULT, TokenType::GTLT, Payload::None);
+                        self.emit_token(TokenChannel::DEFAULT, TokenType::GTLT, Payload::None);
                     }
                     _ => {
-                        self.add_token(TokenChannel::DEFAULT, TokenType::GT, Payload::None);
+                        self.emit_token(TokenChannel::DEFAULT, TokenType::GT, Payload::None);
                     }
                 }
             }
@@ -1888,17 +1938,17 @@ impl<'src> Lexer<'src> {
                         self.lex_numeric_literal();
                     }
                     _ => {
-                        self.add_token(TokenChannel::DEFAULT, TokenType::DOT, Payload::None);
+                        self.emit_token(TokenChannel::DEFAULT, TokenType::DOT, Payload::None);
                     }
                 }
             }
             ',' => {
                 self.cursor.advance();
-                self.add_token(TokenChannel::DEFAULT, TokenType::COMMA, Payload::None);
+                self.emit_token(TokenChannel::DEFAULT, TokenType::COMMA, Payload::None);
             }
             ':' => {
                 self.cursor.advance();
-                self.add_token(TokenChannel::DEFAULT, TokenType::COLON, Payload::None);
+                self.emit_token(TokenChannel::DEFAULT, TokenType::COLON, Payload::None);
             }
             '=' => {
                 self.cursor.advance();
@@ -1906,10 +1956,14 @@ impl<'src> Lexer<'src> {
                 match self.cursor.peek() {
                     '*' => {
                         self.cursor.advance();
-                        self.add_token(TokenChannel::DEFAULT, TokenType::SoundsLike, Payload::None);
+                        self.emit_token(
+                            TokenChannel::DEFAULT,
+                            TokenType::SoundsLike,
+                            Payload::None,
+                        );
                     }
                     _ => {
-                        self.add_token(TokenChannel::DEFAULT, TokenType::ASSIGN, Payload::None);
+                        self.emit_token(TokenChannel::DEFAULT, TokenType::ASSIGN, Payload::None);
                     }
                 }
             }
@@ -1917,25 +1971,25 @@ impl<'src> Lexer<'src> {
                 self.cursor.advance();
 
                 if !self.lex_char_format() {
-                    self.add_token(TokenChannel::DEFAULT, TokenType::DOLLAR, Payload::None);
+                    self.emit_token(TokenChannel::DEFAULT, TokenType::DOLLAR, Payload::None);
                 }
             }
             '@' => {
                 self.cursor.advance();
-                self.add_token(TokenChannel::DEFAULT, TokenType::AT, Payload::None);
+                self.emit_token(TokenChannel::DEFAULT, TokenType::AT, Payload::None);
             }
             '#' => {
                 self.cursor.advance();
-                self.add_token(TokenChannel::DEFAULT, TokenType::HASH, Payload::None);
+                self.emit_token(TokenChannel::DEFAULT, TokenType::HASH, Payload::None);
             }
             '?' => {
                 self.cursor.advance();
-                self.add_token(TokenChannel::DEFAULT, TokenType::QUESTION, Payload::None);
+                self.emit_token(TokenChannel::DEFAULT, TokenType::QUESTION, Payload::None);
             }
             _ => {
                 // Unknown something, consume the character, emit an unknown token, push error
                 self.cursor.advance();
-                self.add_token(TokenChannel::HIDDEN, TokenType::UNKNOWN, Payload::None);
+                self.emit_token(TokenChannel::HIDDEN, TokenType::UNKNOWN, Payload::None);
                 self.emit_error(ErrorType::UnknownCharacter(c));
             }
         }
@@ -1974,7 +2028,7 @@ impl<'src> Lexer<'src> {
 
         self.cursor.advance_by(advance_by);
 
-        self.add_token(TokenChannel::DEFAULT, TokenType::CharFormat, Payload::None);
+        self.emit_token(TokenChannel::DEFAULT, TokenType::CharFormat, Payload::None);
         true
     }
 
@@ -1991,7 +2045,7 @@ impl<'src> Lexer<'src> {
                 self.cursor.advance();
                 self.cursor.advance();
 
-                self.add_token(TokenChannel::DEFAULT, TokenType::NE, Payload::None);
+                self.emit_token(TokenChannel::DEFAULT, TokenType::NE, Payload::None);
                 true
             }
             '=' if self.mode() == LexerMode::MacroEval => {
@@ -1999,7 +2053,7 @@ impl<'src> Lexer<'src> {
                 self.cursor.advance();
                 self.cursor.advance();
 
-                self.add_token(
+                self.emit_token(
                     TokenChannel::DEFAULT,
                     TokenType::MacroNeverExpr,
                     Payload::None,
@@ -2023,12 +2077,16 @@ impl<'src> Lexer<'src> {
     fn lex_macro_call(&mut self, allow_quote_call: bool) -> bool {
         debug_assert_eq!(self.cursor.peek(), '%');
 
-        let (tok_type, advance_by) = is_macro_call(&self.cursor, allow_quote_call);
+        let (tok_type, advance_by) =
+            is_macro_call(&self.cursor, allow_quote_call).unwrap_or_else(|err| {
+                self.emit_error(ErrorType::InternalError(err));
+                (None, 0)
+            });
 
         if let Some(tok_type) = tok_type {
             self.cursor.advance_by(advance_by);
 
-            self.add_token(TokenChannel::DEFAULT, tok_type, Payload::None);
+            self.emit_token(TokenChannel::DEFAULT, tok_type, Payload::None);
 
             // Check if this is a call with parameters
             self.check_macro_call_with_args();
@@ -2084,7 +2142,7 @@ impl<'src> Lexer<'src> {
             } else {
                 // EOF reached without a closing comment
                 // Emit an error token and return
-                self.add_token(
+                self.emit_token(
                     TokenChannel::COMMENT,
                     TokenType::MacroComment,
                     Payload::None,
@@ -2094,7 +2152,7 @@ impl<'src> Lexer<'src> {
             }
         }
 
-        self.add_token(
+        self.emit_token(
             TokenChannel::COMMENT,
             TokenType::MacroComment,
             Payload::None,
@@ -2129,7 +2187,20 @@ impl<'src> Lexer<'src> {
         if is_ascii {
             // My guess is this should be quicker than capturing the value as we consume it
             // avoids the allocation and copying
-            let ident = self.pending_token_text()[1..].to_ascii_uppercase();
+            let mut has_error = false;
+
+            let ident = self
+                .pending_token_text()
+                .get(1..)
+                .unwrap_or_else(|| {
+                    has_error = true;
+                    ""
+                })
+                .to_ascii_uppercase();
+
+            if has_error {
+                self.emit_error(ErrorType::InternalError("Failed to get macro identifier"));
+            }
 
             if let Some(kw_tok_type) = parse_macro_keyword(&ident) {
                 match kw_tok_type {
@@ -2138,7 +2209,7 @@ impl<'src> Lexer<'src> {
                     // }
                     TokenType::KwmLet => {
                         // Add the token
-                        self.add_token(TokenChannel::DEFAULT, kw_tok_type, Payload::None);
+                        self.emit_token(TokenChannel::DEFAULT, kw_tok_type, Payload::None);
 
                         // following let we must have name, equal sign and expression.
                         // All maybe surrounded by insignificant whitespace! + the closing semi
@@ -2152,12 +2223,12 @@ impl<'src> Lexer<'src> {
                         self.push_mode(LexerMode::WsOnly);
                         self.push_mode(LexerMode::ExpectToken("=", TokenType::ASSIGN));
                         self.push_mode(LexerMode::WsOnly);
-                        self.push_mode(LexerMode::MacroLetVarName);
+                        self.push_mode(LexerMode::MacroLetVarName(false));
                         self.push_mode(LexerMode::WsOnly);
                     }
                     _ => {
                         // TODO!!!!!! PLACEHOLDER
-                        self.add_token(TokenChannel::DEFAULT, kw_tok_type, Payload::None);
+                        self.emit_token(TokenChannel::DEFAULT, kw_tok_type, Payload::None);
                     }
                 }
                 return;
@@ -2177,7 +2248,7 @@ impl<'src> Lexer<'src> {
         }
 
         // custom macro call or label
-        self.add_token(
+        self.emit_token(
             TokenChannel::DEFAULT,
             TokenType::MacroIdentifier,
             Payload::None,
@@ -2209,7 +2280,7 @@ impl<'src> Lexer<'src> {
                 ')' => {
                     parens -= 1;
                     if parens == 0 {
-                        self.add_token(
+                        self.emit_token(
                             TokenChannel::DEFAULT,
                             TokenType::NrStrLiteral,
                             Payload::None,
@@ -2230,7 +2301,7 @@ impl<'src> Lexer<'src> {
         }
 
         // If we reached here, the literal is unterminated
-        self.add_token(
+        self.emit_token(
             TokenChannel::DEFAULT,
             TokenType::NrStrLiteral,
             Payload::None,
