@@ -31,15 +31,24 @@ enum LexerMode {
     Default,
     /// String expression, aka double quoted string mode
     StringExpr,
-    /// WS only, this is the mode where we want to lex at most one whitespace token
+    /// Insignificant WS/comment space. E.g. between macro name and parens in a call
+    /// this is the mode where we want to lex all consecutive whitespace and comments
     /// and then return to the previous mode
-    WsOnly,
+    WsOrCStyleCommentOnly,
     /// A special mode where only a specific sequence of characters is expected.
     /// In this mode we also auto-recover if the expected character is not found
     /// emitting an error but also creating the expected token
     ///
     /// SAFETY: The string must not contain newlines
     ExpectToken(&'static str, TokenType),
+    /// A special mode that goes after non-statement macro identifiers
+    /// that checks if the first NON-ws or cstyle follower is (.
+    /// If found, adds necessary mode stack to parse the macro call args
+    ///
+    /// Note - it should alwys be preceded by the WsOrCStyleCommentOnly mode!
+    MaybeMacroCallArgs,
+    /// The state for inner macro expressions, as in `%str(-->1+1<--)`
+    MacroStrQuotedExpr,
     /// Macro arithmetic/logical expression, as in `%eval(-->1+1<--)`
     MacroEval,
     /// Mode for lexing right after %let/%local/%global, where
@@ -247,17 +256,45 @@ impl<'src> Lexer<'src> {
 
     fn lex_token(&mut self) {
         match self.mode() {
-            LexerMode::WsOnly => {
-                if self.cursor.peek().is_whitespace() {
+            LexerMode::WsOrCStyleCommentOnly => match self.cursor.peek() {
+                '/' if self.cursor.peek_next() == '*' => {
+                    self.start_token();
+                    self.lex_cstyle_comment();
+                }
+                c if c.is_whitespace() => {
                     self.start_token();
                     self.lex_ws();
                 }
-                self.pop_mode();
+                _ => {
+                    self.pop_mode();
+                }
+            },
+            LexerMode::MaybeMacroCallArgs => {
+                if self.cursor.peek() == '(' {
+                    // Add the LPAREN token
+                    self.start_token();
+                    self.cursor.advance();
+
+                    self.emit_token(TokenChannel::DEFAULT, TokenType::LPAREN, Payload::None);
+
+                    // Pop the MaybeMacroCallArgs mode
+                    self.pop_mode();
+
+                    // Populate the remaining expected states for the macro call
+                    self.push_mode(LexerMode::ExpectToken(")", TokenType::RPAREN));
+                    // The handler fo arguments will push the mode for the comma, etc.
+                    self.push_mode(LexerMode::MacroCallArgOrValue(0));
+                    // Leading insiginificant WS before the first argument
+                    self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+                } else {
+                    self.pop_mode();
+                }
             }
             LexerMode::ExpectToken(content, tok_type) => self.lex_expected_token(content, tok_type),
             LexerMode::Default => self.lex_mode_default(),
             LexerMode::StringExpr => self.lex_mode_str_expr(),
             LexerMode::MacroEval => !todo!("Macro eval mode"),
+            LexerMode::MacroStrQuotedExpr => self.lex_macro_str_quoted_expr(),
             LexerMode::MacroCallArgOrValue(pnl) => self.lex_macro_call_arg_or_value(pnl, true),
             LexerMode::MacroCallValue(pnl) => self.lex_macro_call_arg_or_value(pnl, false),
             LexerMode::MacroLetVarName(found_name) => self.lex_macro_ident_expr(!found_name),
@@ -650,7 +687,7 @@ impl<'src> Lexer<'src> {
                 self.pop_mode();
                 self.push_mode(LexerMode::MacroCallArgOrValue(0));
                 // Leading insiginificant WS before the argument
-                self.push_mode(LexerMode::WsOnly);
+                self.push_mode(LexerMode::WsOrCStyleCommentOnly);
                 self.push_mode(LexerMode::ExpectToken(",", TokenType::COMMA));
             }
             ')' if parens_nesting_level == 0 => {
@@ -664,7 +701,7 @@ impl<'src> Lexer<'src> {
                 self.pop_mode();
                 self.push_mode(LexerMode::MacroCallValue(0));
                 // Leading insiginificant WS before the argument
-                self.push_mode(LexerMode::WsOnly);
+                self.push_mode(LexerMode::WsOrCStyleCommentOnly);
                 self.push_mode(LexerMode::ExpectToken("=", TokenType::ASSIGN));
             }
             _ => {
@@ -781,7 +818,7 @@ impl<'src> Lexer<'src> {
                     self.pop_mode();
                     self.push_mode(LexerMode::MacroCallArgOrValue(0));
                     // Leading insiginificant WS before the argument
-                    self.push_mode(LexerMode::WsOnly);
+                    self.push_mode(LexerMode::WsOrCStyleCommentOnly);
                     self.push_mode(LexerMode::ExpectToken(",", TokenType::COMMA));
                     return;
                 }
@@ -795,9 +832,188 @@ impl<'src> Lexer<'src> {
                     self.pop_mode();
                     self.push_mode(LexerMode::MacroCallValue(0));
                     // Leading insiginificant WS before the argument
-                    self.push_mode(LexerMode::WsOnly);
+                    self.push_mode(LexerMode::WsOrCStyleCommentOnly);
                     self.push_mode(LexerMode::ExpectToken("=", TokenType::ASSIGN));
                     return;
+                }
+                _ => {
+                    // Not a terminator, just a regular character in the string
+                    // consume and continue lexing the string
+                    self.cursor.advance();
+                }
+            }
+        }
+    }
+
+    fn lex_macro_str_quoted_expr(&mut self) {
+        debug_assert!(matches!(self.mode(), LexerMode::MacroStrQuotedExpr));
+
+        self.start_token();
+
+        // Dispatch the "big" categories
+        match self.cursor.peek() {
+            '\'' => self.lex_single_quoted_str(),
+            '"' => {
+                self.cursor.advance();
+                self.emit_token(
+                    TokenChannel::DEFAULT,
+                    TokenType::StringExprStart,
+                    Payload::None,
+                );
+                self.push_mode(LexerMode::StringExpr);
+            }
+            '/' => {
+                if self.cursor.peek_next() == '*' {
+                    self.lex_cstyle_comment();
+                } else {
+                    // not a comment, a slash in a macro string
+                    // consume the character and lex the string.
+                    // We could have not consumed it and let the
+                    // string lexing handle it, but this way we
+                    // we avoid one extra check
+                    self.cursor.advance();
+                    self.lex_macro_string_in_str_call();
+                }
+            }
+            '&' => {
+                if !self.lex_macro_var_expr() {
+                    // Not a macro var, just a sequence of ampersands
+                    // consume the sequence and continue lexing the string
+                    self.cursor.eat_while(|c| c == '&');
+                    self.lex_macro_string_in_str_call();
+                }
+            }
+            '%' => {
+                // Check if this is a quote char
+                if matches!(self.cursor.peek_next(), '"' | '\'' | '%' | '(' | ')') {
+                    self.lex_macro_string_in_str_call();
+                    return;
+                }
+
+                if !self.lex_macro_call(true) {
+                    // Not a macro, but possibly a macro statement
+                    if self.cursor.peek_next().is_ascii_alphabetic() {
+                        // Hit a following macro statement => pop mode and exit
+                        // without consuming the character
+
+                        // This would lead to breaking SAS session with:
+                        // ERROR: Open code statement recursion detected.
+                        // so we emit an error here in addition to missing )
+                        // that will emit during mode stack pop
+                        self.emit_error(ErrorType::SASSessionUnrecoverableError(
+                            "ERROR: Open code statement recursion detected.",
+                        ));
+                        self.pop_mode();
+                        return;
+                    }
+
+                    // Just a percent, consume and continue lexing the string
+                    // We could have not consumed it and let the
+                    // string lexing handle it, but this way we
+                    // we avoid one extra check
+                    self.cursor.advance();
+                    self.lex_macro_string_in_str_call();
+                }
+            }
+            '\n' => {
+                // Special case to catch newline
+                // We could have not consumed it and let the
+                // string lexing handle it, but this way we
+                // we avoid one extra check
+                self.cursor.advance();
+                self.add_line();
+                self.lex_macro_string_in_str_call();
+            }
+            ')' => {
+                // Found the terminator, pop the mode and return
+                self.pop_mode();
+            }
+            _ => {
+                // Not a terminator, just a regular character in the string.
+                // Do not consume in case it is an opening parens,
+                // just continue lexing the string
+                self.lex_macro_string_in_str_call();
+            }
+        }
+    }
+
+    fn lex_macro_string_in_str_call(&mut self) {
+        debug_assert!(matches!(self.mode(), LexerMode::MacroStrQuotedExpr));
+
+        // Keep track of parens nesting
+        let mut parens = 0u32;
+
+        loop {
+            match self.cursor.peek() {
+                '\'' | '"' | EOF_CHAR => {
+                    // Reached the end of the section of a macro string
+                    // Emit the text token and return
+                    self.emit_token(TokenChannel::DEFAULT, TokenType::MacroString, Payload::None);
+                    return;
+                }
+                '/' if self.cursor.peek_next() == '*' => {
+                    // Start of a comment in a macro string
+                    // Emit the text token and return
+                    self.emit_token(TokenChannel::DEFAULT, TokenType::MacroString, Payload::None);
+                    return;
+                }
+                '&' => {
+                    let (is_macro_amp, amp_count) = is_macro_amp(self.cursor.chars());
+
+                    if is_macro_amp {
+                        // Hit a macro var expr in the string expression => emit the text token
+                        self.emit_token(
+                            TokenChannel::DEFAULT,
+                            TokenType::MacroString,
+                            Payload::None,
+                        );
+
+                        return;
+                    }
+
+                    // Just amps in the text, consume and continue
+                    self.cursor.advance_by(amp_count);
+                }
+                '%' => {
+                    // Check if this is a quote char
+                    if matches!(self.cursor.peek_next(), '"' | '\'' | '%' | '(' | ')') {
+                        // Quoted char, consume both % and the quoted one and continue
+                        self.cursor.advance();
+                        self.cursor.advance();
+                        continue;
+                    }
+
+                    if is_macro_percent(self.cursor.peek_next(), false) {
+                        // Hit a macro call or statment in/after the string expression => emit the text token
+                        self.emit_token(
+                            TokenChannel::DEFAULT,
+                            TokenType::MacroString,
+                            Payload::None,
+                        );
+
+                        return;
+                    }
+
+                    // Just percent in the text, consume and continue
+                    self.cursor.advance();
+                }
+                '\n' => {
+                    self.cursor.advance();
+                    self.add_line();
+                }
+                ')' if parens == 0 => {
+                    // Found the terminator, emit the token, pop the mode and return
+                    self.emit_token(TokenChannel::DEFAULT, TokenType::MacroString, Payload::None);
+                    self.pop_mode();
+                    return;
+                }
+                '(' => {
+                    self.cursor.advance();
+                    parens += 1
+                }
+                ')' => {
+                    self.cursor.advance();
+                    parens -= 1
                 }
                 _ => {
                     // Not a terminator, just a regular character in the string
@@ -2083,38 +2299,30 @@ impl<'src> Lexer<'src> {
                 (None, 0)
             });
 
-        if let Some(tok_type) = tok_type {
-            self.cursor.advance_by(advance_by);
+        match tok_type {
+            Some(TokenType::NrStrLiteral) => {
+                self.cursor.advance_by(advance_by);
 
-            self.emit_token(TokenChannel::DEFAULT, tok_type, Payload::None);
+                // This one has special handling
+                self.lex_macro_nrstr_quoted_literal();
 
-            // Check if this is a call with parameters
-            self.check_macro_call_with_args();
+                true
+            }
+            Some(tok_type) => {
+                self.cursor.advance_by(advance_by);
 
-            return true;
-        }
+                self.emit_token(TokenChannel::DEFAULT, tok_type, Payload::None);
 
-        false
-    }
+                // Push the mode to check if this is a call with parameters
+                self.push_mode(LexerMode::MaybeMacroCallArgs);
+                self.push_mode(LexerMode::WsOrCStyleCommentOnly);
 
-    /// Performs a lookahead after a macro identifier to determine if it is a macro call
-    /// with arguments. If it is, it will push the necessary modes to the stack
-    /// to handle the arguments.
-    fn check_macro_call_with_args(&mut self) {
-        // Check if this is a call with parameters
-        // Yet another lookahead...
-        if self.cursor.peek_next_non_ws() == '(' {
-            // Populate the expected states for the macro call
-            // in reverse order, as the lexer will unwind the stack
-            // as it lexes the tokens
-            self.push_mode(LexerMode::ExpectToken(")", TokenType::RPAREN));
-            // The handler fo arguments will push the mode for the comma, etc.
-            self.push_mode(LexerMode::MacroCallArgOrValue(0));
-            // Leading insiginificant WS before the first argument
-            self.push_mode(LexerMode::WsOnly);
-            self.push_mode(LexerMode::ExpectToken("(", TokenType::LPAREN));
-            // Leading insiginificant WS before opening parenthesis
-            self.push_mode(LexerMode::WsOnly);
+                true
+            }
+            None => {
+                // Not a macro call
+                false
+            }
         }
     }
 
@@ -2204,9 +2412,20 @@ impl<'src> Lexer<'src> {
 
             if let Some(kw_tok_type) = parse_macro_keyword(&ident) {
                 match kw_tok_type {
-                    // TokenType::KwmStr => {
-                    //     self.lex_macro_str_quoted_expr();
-                    // }
+                    TokenType::KwmStr => {
+                        // Add the token
+                        self.emit_token(TokenChannel::DEFAULT, kw_tok_type, Payload::None);
+
+                        // Populate the expected states for the %str() call
+                        // in reverse order, as the lexer will unwind the stack
+                        // as it lexes the tokens
+                        self.push_mode(LexerMode::ExpectToken(")", TokenType::RPAREN));
+                        // The handler fo arguments will push the mode for the comma, etc.
+                        self.push_mode(LexerMode::MacroStrQuotedExpr);
+                        self.push_mode(LexerMode::ExpectToken("(", TokenType::LPAREN));
+                        // Leading insiginificant WS before opening parenthesis
+                        self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+                    }
                     TokenType::KwmLet => {
                         // Add the token
                         self.emit_token(TokenChannel::DEFAULT, kw_tok_type, Payload::None);
@@ -2220,11 +2439,11 @@ impl<'src> Lexer<'src> {
                         // parser, to avoid excessive lookahead
                         self.push_mode(LexerMode::ExpectToken(";", TokenType::SEMI));
                         self.push_mode(LexerMode::MacroLetInitializer);
-                        self.push_mode(LexerMode::WsOnly);
+                        self.push_mode(LexerMode::WsOrCStyleCommentOnly);
                         self.push_mode(LexerMode::ExpectToken("=", TokenType::ASSIGN));
-                        self.push_mode(LexerMode::WsOnly);
+                        self.push_mode(LexerMode::WsOrCStyleCommentOnly);
                         self.push_mode(LexerMode::MacroLetVarName(false));
-                        self.push_mode(LexerMode::WsOnly);
+                        self.push_mode(LexerMode::WsOrCStyleCommentOnly);
                     }
                     _ => {
                         // TODO!!!!!! PLACEHOLDER
@@ -2254,8 +2473,9 @@ impl<'src> Lexer<'src> {
             Payload::None,
         );
 
-        // Check if this is a call with parameters
-        self.check_macro_call_with_args();
+        // Push the mode to check if this is a call with parameters
+        self.push_mode(LexerMode::MaybeMacroCallArgs);
+        self.push_mode(LexerMode::WsOrCStyleCommentOnly);
     }
 
     fn lex_macro_nrstr_quoted_literal(&mut self) {
