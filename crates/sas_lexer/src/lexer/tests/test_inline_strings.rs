@@ -579,6 +579,18 @@ fn test_nrstr_quoted_str_error_recovery(
         (";", TokenType::SEMI),
         ]
 )]
+#[case::dot_delim_mvar_in_name("%let a&b.c=2;", 
+    vec![
+        ("%let", TokenType::KwmLet),        
+        (" ", TokenType::WS),        
+        ("a", TokenType::Identifier),        
+        ("&b.", TokenType::MacroVarExpr),        
+        ("c", TokenType::Identifier),        
+        ("=", TokenType::ASSIGN),
+        ("2", TokenType::MacroString),
+        (";", TokenType::SEMI),
+        ]
+)]
 #[case::lead_trail_ws("%let a \n=   1 1  ;", 
     vec![
         ("%let", TokenType::KwmLet),        
@@ -793,6 +805,21 @@ fn test_macro_let(#[case] contents: &str, #[case] expected_token: Vec<impl Token
 }
 
 #[rstest]
+#[case::dot_delim_macro_call("%let a%m.b=1;", 
+    vec![
+        ("%let", TokenType::KwmLet),
+        (" ", TokenType::WS),
+        ("a", TokenType::Identifier),
+        ("%m", TokenType::MacroIdentifier),
+        // Recovered from missing assign hence empty string
+        ("", TokenType::ASSIGN),
+        (".b=1", TokenType::MacroString),
+        (";", TokenType::SEMI),
+        ],
+    // Real SAS error will be: 
+    // /* ERROR: Symbolic variable name a[resolved %m call].b must contain only letters, digits, and underscores. */
+    vec![(ErrorType::MissingExpected("="), 8)]
+)]
 #[case::miss_assign("%let a b=1;", 
     vec![
         ("%let", TokenType::KwmLet),
@@ -849,6 +876,57 @@ vec![
         (ErrorType::MissingExpected("="), 5)
         ]
 )]
+// For the following tests, the real SAS error is something like:
+// /* ERROR: Symbolic variable name a must contain only letters, digits, and underscores. */
+// The underlying reason is that all quote calls add invisible characters to the name
+// which are not allowed in SAS variable names
+#[case::quote_call_in_name_1("%let a%nrstr(a)=2;", 
+vec![
+    ("%let", TokenType::KwmLet),        
+    (" ", TokenType::WS),        
+    ("a", TokenType::Identifier),        
+    // Recovered from missing assign hence empty string
+    ("", TokenType::ASSIGN),
+    ("%nrstr(a)", TokenType::NrStrLiteral),        
+    ("=2", TokenType::MacroString),
+    (";", TokenType::SEMI),
+    ],
+    vec![(ErrorType::MissingExpected("="), 6)]
+)]
+#[case::quote_call_in_name_2("%let a%quote(a)=2;", 
+vec![
+    ("%let", TokenType::KwmLet),
+    (" ", TokenType::WS),
+    ("a", TokenType::Identifier),
+    // Recovered from missing assign hence empty string
+    ("", TokenType::ASSIGN),
+    ("%quote", TokenType::KwmQuote),
+    ("(", TokenType::LPAREN),
+    ("a", TokenType::MacroString),
+    (")", TokenType::RPAREN),
+    ("=2", TokenType::MacroString),
+    (";", TokenType::SEMI)
+    ],
+    vec![(ErrorType::MissingExpected("="), 6)]
+)]
+#[case::quote_call_in_name_3("%let a%str(%inner())=2;", 
+vec![
+    ("%let", TokenType::KwmLet),
+    (" ", TokenType::WS),
+    ("a", TokenType::Identifier),
+    // Recovered from missing assign hence empty string
+    ("", TokenType::ASSIGN),
+    ("%str", TokenType::KwmStr),
+    ("(", TokenType::LPAREN),
+    ("%inner", TokenType::MacroIdentifier),
+    ("(", TokenType::LPAREN),
+    (")", TokenType::RPAREN),
+    (")", TokenType::RPAREN),
+    ("=2", TokenType::MacroString),
+    (";", TokenType::SEMI)
+    ],
+    vec![(ErrorType::MissingExpected("="), 6)]
+)]
 fn test_macro_let_error_recovery(
     #[case] contents: &str,
     #[case] expected_token: Vec<impl TokenTestCase>,
@@ -877,6 +955,23 @@ fn test_macro_let_error_recovery(
         (",", TokenType::COMMA),
         ("2", TokenType::MacroString),
         (")", TokenType::RPAREN),
+        (";", TokenType::SEMI),
+    ]
+)]
+#[case::nested_call_with_comment("%t/*c*/(/*c*/some()/*c*/,/*c*/2/*c*/)/*c*/;", 
+    vec![
+        ("%t", TokenType::MacroIdentifier),
+        ("/*c*/", TokenType::CStyleComment),
+        ("(", TokenType::LPAREN),
+        ("/*c*/", TokenType::CStyleComment),
+        ("some()", TokenType::MacroString),
+        ("/*c*/", TokenType::CStyleComment),
+        (",", TokenType::COMMA),
+        ("/*c*/", TokenType::CStyleComment),
+        ("2", TokenType::MacroString),
+        ("/*c*/", TokenType::CStyleComment),
+        (")", TokenType::RPAREN),
+        ("/*c*/", TokenType::CStyleComment),
         (";", TokenType::SEMI),
     ]
 )]
@@ -945,4 +1040,132 @@ fn test_macro_let_error_recovery(
 )]
 fn test_macro_call(#[case] contents: &str, #[case] expected_token: Vec<impl TokenTestCase>) {
     assert_lexing(contents, expected_token, NO_ERRORS);
+}
+
+#[rstest]
+#[case::basic_call("%sTr( );", 
+    vec![
+        ("%sTr", TokenType::KwmStr),
+        ("(", TokenType::LPAREN),
+        (" ", TokenType::MacroString),
+        (")", TokenType::RPAREN),
+        (";", TokenType::SEMI),
+        ]
+)]
+#[case::all_quotes("%sTr(%\"v %'v %%call %( %) );", 
+    vec![
+        ("%sTr", TokenType::KwmStr),
+        ("(", TokenType::LPAREN),
+        ("%\"v %'v %%call %( %) ", TokenType::MacroString),
+        (")", TokenType::RPAREN),
+        (";", TokenType::SEMI),
+        ]
+)]
+#[case::nested_parens("%sTr((1(2)3));", 
+    vec![
+        ("%sTr", TokenType::KwmStr),
+        ("(", TokenType::LPAREN),
+        ("(1(2)3)", TokenType::MacroString),
+        (")", TokenType::RPAREN),
+        (";", TokenType::SEMI),
+        ]
+)]
+#[case::inline_str_expr("%StR(\");%t()\")", 
+    vec![
+        ("%StR", TokenType::KwmStr),
+        ("(", TokenType::LPAREN),
+        ("\"", TokenType::StringExprStart),
+        (");", TokenType::StringExprText),
+        ("%t", TokenType::MacroIdentifier),
+        ("(", TokenType::LPAREN),
+        (")", TokenType::RPAREN),
+        ("\"", TokenType::StringExprEnd),        
+        (")", TokenType::RPAREN),
+        ]
+)]
+#[case::inline_str_expr_with_comment("%str(/*c*/\");/*c*/%t()\" a/*c*/a)", 
+    vec![
+        ("%str", TokenType::KwmStr),
+        ("(", TokenType::LPAREN),
+        ("/*c*/", TokenType::CStyleComment),
+        ("\"", TokenType::StringExprStart),
+        (");/*c*/", TokenType::StringExprText),        
+        ("%t", TokenType::MacroIdentifier),
+        ("(", TokenType::LPAREN),
+        (")", TokenType::RPAREN),
+        ("\"", TokenType::StringExprEnd),        
+        (" a", TokenType::MacroString),        
+        ("/*c*/", TokenType::CStyleComment),
+        ("a", TokenType::MacroString),
+        (")", TokenType::RPAREN),
+        ]
+)]
+#[case::inline_str_lit_with_comment("%str(');/*c*/%t()' a)", 
+    vec![
+        ("%str", TokenType::KwmStr),
+        ("(", TokenType::LPAREN),        
+        ("');/*c*/%t()'", TokenType::StringLiteral),
+        (" a", TokenType::MacroString),        
+        (")", TokenType::RPAREN),
+        ]
+)]
+#[case::nested_call_with_ws_comment("%str(pre;%t /*c*/ ()post)", 
+    vec![
+        ("%str", TokenType::KwmStr),
+        ("(", TokenType::LPAREN),        
+        ("pre;", TokenType::MacroString),
+        ("%t", TokenType::MacroIdentifier),
+        (" ", TokenType::WS),
+        ("/*c*/", TokenType::CStyleComment),
+        (" ", TokenType::WS),
+        ("(", TokenType::LPAREN),
+        (")", TokenType::RPAREN),
+        ("post", TokenType::MacroString),
+        (")", TokenType::RPAREN),
+        ]
+)]
+#[case::nested_call_with_ws_comment_no_paren("%str(pre;%t /*c*/ post)", 
+    vec![
+        ("%str", TokenType::KwmStr),
+        ("(", TokenType::LPAREN),        
+        ("pre;", TokenType::MacroString),
+        ("%t", TokenType::MacroIdentifier),
+        (" ", TokenType::MacroString),
+        ("/*c*/", TokenType::CStyleComment),        
+        (" post", TokenType::MacroString),
+        (")", TokenType::RPAREN),
+        ]
+)]
+fn test_macro_str_call(#[case] contents: &str, #[case] expected_token: Vec<impl TokenTestCase>) {
+    assert_lexing(contents, expected_token, NO_ERRORS);
+}
+
+#[rstest]
+#[case::macro_stat_inside("%str( %let v=1;);", 
+    vec![
+        ("%str", TokenType::KwmStr),
+        ("(", TokenType::LPAREN),
+        (" ", TokenType::MacroString),
+        // Recovered from missing hence empty string        
+        ("", TokenType::RPAREN),
+        ("%let", TokenType::KwmLet),
+        (" ", TokenType::WS),
+        ("v", TokenType::Identifier),
+        ("=", TokenType::ASSIGN),
+        ("1", TokenType::MacroString),
+        (";", TokenType::SEMI),
+        (")", TokenType::RPAREN),
+        (";", TokenType::SEMI),
+        ],
+    vec![
+        (ErrorType::SASSessionUnrecoverableError("ERROR: Open code statement recursion detected."), 6),
+        (ErrorType::MissingExpected(")"), 6)
+        ]
+)]
+fn test_macro_str_call_error_recovery(
+    #[case] contents: &str,
+    #[case] expected_token: Vec<impl TokenTestCase>,
+    #[case] expected_error: Vec<impl ErrorTestCase>,
+) {
+    assert_lexing(contents, expected_token, expected_error);
 }
