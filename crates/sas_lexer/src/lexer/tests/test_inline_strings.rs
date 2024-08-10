@@ -19,18 +19,24 @@ fn test_unicode_char_offset() {
     let token = buffer.into_iter().next().unwrap();
 
     assert_eq!(
-        buffer.get_token_end(token).get(),
+        buffer.get_token_end(token).expect("wrong token").get(),
         3,
         "Expected a char offset of 3, got {}",
-        buffer.get_token_end(token).get()
+        buffer.get_token_end(token).expect("wrong token").get()
     );
 
     assert_eq!(
-        buffer.get_token_end_byte_offset(token).get(),
+        buffer
+            .get_token_end_byte_offset(token)
+            .expect("wrong token")
+            .get(),
         source.len() as u32,
         "Expected a byte offset of {}, got {}",
         source.len(),
-        buffer.get_token_end_byte_offset(token).get()
+        buffer
+            .get_token_end_byte_offset(token)
+            .expect("wrong token")
+            .get()
     );
 
     // Now test the ubiquotous Hoe many characters is 🤦🏼‍♂️ case.
@@ -43,10 +49,10 @@ fn test_unicode_char_offset() {
     let token = buffer.into_iter().next().unwrap();
 
     assert_eq!(
-        buffer.get_token_end(token).get(),
+        buffer.get_token_end(token).expect("wrong token").get(),
         7, // 5 characters + 2 quotes
         "Expected a char offset of 7, got {}",
-        buffer.get_token_end(token).get()
+        buffer.get_token_end(token).expect("wrong token").get()
     );
 }
 
@@ -61,10 +67,10 @@ fn test_column_count_with_bom() {
     let token = buffer.into_iter().next().unwrap();
 
     assert_eq!(
-        buffer.get_token_start_column(token),
+        buffer.get_token_start_column(token).expect("wrong token"),
         0,
         "Expected a start column 0, got {}",
-        buffer.get_token_start_column(token)
+        buffer.get_token_start_column(token).expect("wrong token")
     );
 }
 
@@ -292,12 +298,15 @@ fn test_datalines(#[values("", ";", ";\n\t/*comment*/  ")] prefix: &str, #[case]
     } else {
         buffer
             .into_iter()
-            .filter(|t| buffer.get_token_type(*t) != TokenType::EOF)
+            .filter(|t| buffer.get_token_type(*t).expect("wrong token") != TokenType::EOF)
             .map(|t| {
                 (
-                    buffer.get_token_text(t, &prefix).unwrap(),
-                    buffer.get_token_type(t),
-                    buffer.get_token_channel(t),
+                    buffer
+                        .get_token_text(t, &prefix)
+                        .expect("wrong token")
+                        .unwrap(),
+                    buffer.get_token_type(t).expect("wrong token"),
+                    buffer.get_token_channel(t).expect("wrong token"),
                 )
             })
             .collect()

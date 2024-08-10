@@ -2,22 +2,21 @@ use crate::error::ErrorInfo;
 /// Functions to print the token
 use crate::lexer::buffer::{Payload, TokenIdx, TokenizedBuffer};
 
-#[must_use]
-pub fn token_to_string<S: AsRef<str>>(
+fn token_to_string_inner<S: AsRef<str>>(
     token: TokenIdx,
     buffer: &TokenizedBuffer,
     source: &S,
-) -> String {
-    let start_line = buffer.get_token_start_line(token);
-    let end_line = buffer.get_token_end_line(token);
-    let start_column = buffer.get_token_start_column(token);
-    let end_column = buffer.get_token_end_column(token);
-    let token_start = buffer.get_token_start(token).get();
-    let token_end = buffer.get_token_end(token).get();
-    let token_text = buffer.get_token_text(token, source).unwrap_or("<no text>");
-    let token_type = buffer.get_token_type(token);
-    let token_channel = buffer.get_token_channel(token);
-    let payload = buffer.get_token_payload(token);
+) -> Result<String, &'static str> {
+    let start_line = buffer.get_token_start_line(token)?;
+    let end_line = buffer.get_token_end_line(token)?;
+    let start_column = buffer.get_token_start_column(token)?;
+    let end_column = buffer.get_token_end_column(token)?;
+    let token_start = buffer.get_token_start(token)?.get();
+    let token_end = buffer.get_token_end(token)?.get();
+    let token_text = buffer.get_token_text(token, source)?.unwrap_or("<no text>");
+    let token_type = buffer.get_token_type(token)?;
+    let token_channel = buffer.get_token_channel(token)?;
+    let payload = buffer.get_token_payload(token)?;
 
     let payload_str = match payload {
         Payload::None => "<None>".to_string(),
@@ -38,7 +37,16 @@ pub fn token_to_string<S: AsRef<str>>(
         pl={payload_str:?}]"
     );
 
-    token_repr
+    Ok(token_repr)
+}
+
+#[must_use]
+pub fn token_to_string<S: AsRef<str>>(
+    token: TokenIdx,
+    buffer: &TokenizedBuffer,
+    source: &S,
+) -> String {
+    token_to_string_inner(token, buffer, source).unwrap_or_else(std::string::ToString::to_string)
 }
 
 pub fn error_to_string<S: AsRef<str>>(

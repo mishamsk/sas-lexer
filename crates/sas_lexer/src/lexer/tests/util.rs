@@ -246,47 +246,53 @@ pub(super) fn check_token<S: AsRef<str>>(
     // Byte offsets
     assert_eq!(
         start_byte_offset,
-        buffer.get_token_start_byte_offset(token).get(),
+        buffer
+            .get_token_start_byte_offset(token)
+            .expect("wrong token")
+            .get(),
         "Expected start byte offset {}, got {}: {}",
         start_byte_offset,
-        buffer.get_token_start(token).get(),
+        buffer.get_token_start(token).expect("wrong token").get(),
         token_to_string(token, buffer, &source)
     );
 
     assert_eq!(
         end_byte_offset,
-        buffer.get_token_end_byte_offset(token).get(),
+        buffer
+            .get_token_end_byte_offset(token)
+            .expect("wrong token")
+            .get(),
         "Expected end byte offset {}, got {}: {}",
         end_byte_offset,
-        buffer.get_token_end(token).get(),
+        buffer.get_token_end(token).expect("wrong token").get(),
         token_to_string(token, buffer, &source)
     );
 
     // Char offsets
     assert_eq!(
         start_char_offset,
-        buffer.get_token_start(token).get(),
+        buffer.get_token_start(token).expect("wrong token").get(),
         "Expected start char offset {}, got {}: {}",
         start_char_offset,
-        buffer.get_token_start(token).get(),
+        buffer.get_token_start(token).expect("wrong token").get(),
         token_to_string(token, buffer, &source)
     );
     assert_eq!(
         end_char_offset,
-        buffer.get_token_end(token).get(),
+        buffer.get_token_end(token).expect("wrong token").get(),
         "Expected end char offset {}, got {}: {}",
         end_char_offset,
-        buffer.get_token_end(token).get(),
+        buffer.get_token_end(token).expect("wrong token").get(),
         token_to_string(token, buffer, &source)
     );
 
     // Line and column
     assert_eq!(
         start_line,
-        buffer.get_token_start_line(token),
+        buffer.get_token_start_line(token).expect("wrong token"),
         "Expected start line {}, got {}: {}",
         start_line,
-        buffer.get_token_start_line(token),
+        buffer.get_token_start_line(token).expect("wrong token"),
         token_to_string(token, buffer, &source)
     );
 
@@ -294,35 +300,35 @@ pub(super) fn check_token<S: AsRef<str>>(
 
     assert_eq!(
         end_line,
-        buffer.get_token_end_line(token),
+        buffer.get_token_end_line(token).expect("wrong token"),
         "Expected end line {}, got {}: {}",
         end_line,
-        buffer.get_token_end_line(token),
+        buffer.get_token_end_line(token).expect("wrong token"),
         token_to_string(token, buffer, &source)
     );
 
     assert_eq!(
         start_column,
-        buffer.get_token_start_column(token),
+        buffer.get_token_start_column(token).expect("wrong token"),
         "Expected start column {}, got {}: {}",
         start_column,
-        buffer.get_token_start_column(token),
+        buffer.get_token_start_column(token).expect("wrong token"),
         token_to_string(token, buffer, &source)
     );
 
     assert_eq!(
         end_column,
-        buffer.get_token_end_column(token),
+        buffer.get_token_end_column(token).expect("wrong token"),
         "Expected end column {}, got {}: {}",
         end_column,
-        buffer.get_token_end_column(token),
+        buffer.get_token_end_column(token).expect("wrong token"),
         token_to_string(token, buffer, &source)
     );
 
     // Token type, channel, payload and text
     assert_eq!(
         token_type,
-        buffer.get_token_type(token),
+        buffer.get_token_type(token).expect("wrong token"),
         "Expected token type {:?}, got {:?}: {}",
         token_type,
         buffer.get_token_type(token),
@@ -331,7 +337,7 @@ pub(super) fn check_token<S: AsRef<str>>(
 
     assert_eq!(
         token_channel,
-        buffer.get_token_channel(token),
+        buffer.get_token_channel(token).expect("wrong token"),
         "Expected token channel {:?}, got {:?}: {}",
         token_channel,
         buffer.get_token_channel(token),
@@ -340,7 +346,7 @@ pub(super) fn check_token<S: AsRef<str>>(
 
     assert_eq!(
         payload,
-        buffer.get_token_payload(token),
+        buffer.get_token_payload(token).expect("wrong token"),
         "Expected token payload {:?}, got {:?}: {}",
         payload,
         buffer.get_token_payload(token),
@@ -351,7 +357,7 @@ pub(super) fn check_token<S: AsRef<str>>(
 
     assert_eq!(
         token_text,
-        buffer.get_token_text(token, &source),
+        buffer.get_token_text(token, &source).unwrap(),
         "Expected text {:?}, got {:?}",
         token_text,
         buffer.get_token_text(token, &source)
@@ -376,7 +382,7 @@ impl ErrorTestCase for ErrorType {
     fn last_token_idx(&self, buffer: &TokenizedBuffer) -> Option<TokenIdx> {
         buffer
             .into_iter()
-            .filter(|t| buffer.get_token_type(*t) != TokenType::EOF)
+            .filter(|t| buffer.get_token_type(*t).expect("wrong token") != TokenType::EOF)
             .last()
     }
 }
@@ -393,9 +399,9 @@ impl ErrorTestCase for (ErrorType, usize) {
     fn last_token_idx(&self, buffer: &TokenizedBuffer) -> Option<TokenIdx> {
         buffer
             .into_iter()
-            .filter(|t| buffer.get_token_type(*t) != TokenType::EOF)
+            .filter(|t| buffer.get_token_type(*t).expect("wrong token") != TokenType::EOF)
             .find_map(|t| {
-                if buffer.get_token_end(t).get() == self.1 as u32 {
+                if buffer.get_token_end(t).expect("wrong token").get() == self.1 as u32 {
                     Some(t)
                 } else {
                     None
