@@ -63,18 +63,24 @@ fn test_full_coverage(#[files("src/lexer/tests/samples/**/*.sas")] path: PathBuf
     for token in &tok_buffer {
         // Check that the token starts where the previous token ended
         assert_eq!(
-            tok_buffer.get_token_start(token).get(),
+            tok_buffer
+                .get_token_start(token)
+                .expect("wrong token")
+                .get(),
             end,
             "Token <{}> does not start where the previous token ended",
             token_to_string(token, &tok_buffer, &contents)
         );
 
         // Set the new end
-        end = tok_buffer.get_token_end(token).get();
+        end = tok_buffer.get_token_end(token).expect("wrong token").get();
 
         // Check that the end is greater than the start
         assert!(
-            end >= tok_buffer.get_token_start(token).get(),
+            end >= tok_buffer
+                .get_token_start(token)
+                .expect("wrong token")
+                .get(),
             "Token <{}> has an end before the start",
             token_to_string(token, &tok_buffer, &contents)
         );
