@@ -9,7 +9,10 @@ pub(super) trait TokenTestCase {
     fn token_type(&self) -> TokenType;
     fn token_channel(&self) -> TokenChannel;
     fn payload(&self) -> Payload;
-    fn text<S: AsRef<str>>(&self, source: S) -> Option<String>;
+    fn raw_text<S: AsRef<str>>(&self, source: S) -> Option<String>;
+    fn text<S: AsRef<str>>(&self, source: S) -> Option<String> {
+        self.raw_text(source)
+    }
 }
 
 impl TokenTestCase for (&str, TokenType, TokenChannel) {
@@ -25,7 +28,7 @@ impl TokenTestCase for (&str, TokenType, TokenChannel) {
         Payload::None
     }
 
-    fn text<S: AsRef<str>>(&self, _source: S) -> Option<String> {
+    fn raw_text<S: AsRef<str>>(&self, _source: S) -> Option<String> {
         if self.0.is_empty() {
             None
         } else {
@@ -51,7 +54,7 @@ impl TokenTestCase for (&str, TokenType) {
         Payload::None
     }
 
-    fn text<S: AsRef<str>>(&self, _source: S) -> Option<String> {
+    fn raw_text<S: AsRef<str>>(&self, _source: S) -> Option<String> {
         if self.0.is_empty() {
             None
         } else {
@@ -77,12 +80,92 @@ impl TokenTestCase for (&str, TokenType, Payload) {
         self.2
     }
 
-    fn text<S: AsRef<str>>(&self, _source: S) -> Option<String> {
+    fn raw_text<S: AsRef<str>>(&self, _source: S) -> Option<String> {
         if self.0.is_empty() {
             None
         } else {
             Some(self.0.to_owned())
         }
+    }
+}
+
+impl TokenTestCase for (&str, TokenType, Payload, &str) {
+    fn token_type(&self) -> TokenType {
+        self.1
+    }
+
+    fn token_channel(&self) -> TokenChannel {
+        match self.1 {
+            TokenType::WS => TokenChannel::HIDDEN,
+            TokenType::CStyleComment | TokenType::MacroComment => TokenChannel::COMMENT,
+            _ => TokenChannel::default(),
+        }
+    }
+
+    fn payload(&self) -> Payload {
+        self.2
+    }
+
+    fn raw_text<S: AsRef<str>>(&self, _source: S) -> Option<String> {
+        if self.0.is_empty() {
+            None
+        } else {
+            Some(self.0.to_owned())
+        }
+    }
+
+    fn text<S: AsRef<str>>(&self, _source: S) -> Option<String> {
+        self.3.to_owned().into()
+    }
+}
+
+impl TokenTestCase for (TokenType, Payload, &str) {
+    fn token_type(&self) -> TokenType {
+        self.0
+    }
+
+    fn token_channel(&self) -> TokenChannel {
+        match self.0 {
+            TokenType::WS => TokenChannel::HIDDEN,
+            TokenType::CStyleComment | TokenType::MacroComment => TokenChannel::COMMENT,
+            _ => TokenChannel::default(),
+        }
+    }
+
+    fn payload(&self) -> Payload {
+        self.1
+    }
+
+    fn raw_text<S: AsRef<str>>(&self, source: S) -> Option<String> {
+        // If a test case doesn't provide a text, it means the whole source
+        // is the token text
+        match self.0 {
+            TokenType::EOF => None,
+            TokenType::WS => {
+                // Special case for automatic whitespace token text
+                // Just find the first non-whitespace character
+                let text = source.as_ref();
+                let end = text
+                    .find(|c: char| !c.is_whitespace())
+                    .unwrap_or(source.as_ref().len());
+
+                // This is a bug in the test case
+                assert_ne!(end, 0, "Whitespace token text is empty");
+
+                Some(text[..end].to_owned())
+            }
+            _ => {
+                if source.as_ref().is_empty() {
+                    None
+                } else {
+                    Some(source.as_ref().to_owned())
+                }
+            }
+        }
+    }
+
+    fn text<S: AsRef<str>>(&self, _source: S) -> Option<String> {
+        self.2.to_owned().into()
     }
 }
 
@@ -99,7 +182,7 @@ impl TokenTestCase for (TokenType, TokenChannel) {
         Payload::None
     }
 
-    fn text<S: AsRef<str>>(&self, source: S) -> Option<String> {
+    fn raw_text<S: AsRef<str>>(&self, source: S) -> Option<String> {
         // If a test case doesn't provide a text, it means the whole source
         // is the token text
         if source.as_ref().is_empty() {
@@ -127,7 +210,7 @@ impl TokenTestCase for TokenType {
         Payload::None
     }
 
-    fn text<S: AsRef<str>>(&self, source: S) -> Option<String> {
+    fn raw_text<S: AsRef<str>>(&self, source: S) -> Option<String> {
         // If a test case doesn't provide a text, it means the whole source
         // is the token text
         match self {
@@ -173,7 +256,7 @@ impl TokenTestCase for (TokenType, f64) {
         Payload::Float(self.1)
     }
 
-    fn text<S: AsRef<str>>(&self, source: S) -> Option<String> {
+    fn raw_text<S: AsRef<str>>(&self, source: S) -> Option<String> {
         // If a test case doesn't provide a text, it means the whole source
         // is the token text
         if source.as_ref().is_empty() {
@@ -201,7 +284,7 @@ impl TokenTestCase for (TokenType, i64) {
         Payload::Integer(self.1)
     }
 
-    fn text<S: AsRef<str>>(&self, source: S) -> Option<String> {
+    fn raw_text<S: AsRef<str>>(&self, source: S) -> Option<String> {
         // If a test case doesn't provide a text, it means the whole source
         // is the token text
         if source.as_ref().is_empty() {
@@ -353,14 +436,22 @@ pub(super) fn check_token<S: AsRef<str>>(
         token_to_string(token, buffer, &source)
     );
 
-    let token_text = token_text.as_ref().map(std::convert::AsRef::as_ref);
+    let expected_token_text = token_text.as_ref().map(std::convert::AsRef::as_ref);
+
+    let actual_token_text = if let Payload::StringLiteral(start, stop) = payload {
+        Some(
+            buffer
+                .get_string_literal(start, stop)
+                .expect("provided string literal range in the payload is incorrect"),
+        )
+    } else {
+        buffer.get_token_raw_text(token, &source).unwrap()
+    };
 
     assert_eq!(
-        token_text,
-        buffer.get_token_text(token, &source).unwrap(),
+        expected_token_text, actual_token_text,
         "Expected text {:?}, got {:?}",
-        token_text,
-        buffer.get_token_text(token, &source)
+        expected_token_text, actual_token_text
     );
 }
 
@@ -534,31 +625,31 @@ pub(super) fn assert_lexing(
         let rem_source = &source[cur_start_byte_offset as usize..];
 
         // Get the expected token text
-        let expected_tok_text = expected_tok.text(rem_source);
+        let expected_tok_raw_text = expected_tok.raw_text(rem_source);
 
         // Calculate various offsets
         let cur_end_byte_offset = cur_start_byte_offset
-            + expected_tok_text
+            + expected_tok_raw_text
                 .as_ref()
                 .map_or(0, |text| text.len() as u32);
 
-        let text_tok_chars = expected_tok_text
+        let text_tok_chars = expected_tok_raw_text
             .as_ref()
             .map_or(0, |text| text.chars().count() as u32);
 
         let cur_end_char_offset = cur_start_char_offset + text_tok_chars;
 
-        let line_count = expected_tok_text
+        let line_count = expected_tok_raw_text
             .as_ref()
             .map_or(1, |text| text.lines().count() as u32);
 
-        let ends_with_newline = expected_tok_text
+        let ends_with_newline = expected_tok_raw_text
             .as_ref()
             .map_or(false, |text| text.ends_with('\n'));
 
         let cur_end_line = cur_start_line + line_count - 1;
 
-        let cur_end_column = match expected_tok_text.as_ref() {
+        let cur_end_column = match expected_tok_raw_text.as_ref() {
             Some(text) => {
                 if line_count > 1 {
                     text.lines().last().unwrap().chars().count() as u32
@@ -585,7 +676,7 @@ pub(super) fn assert_lexing(
             expected_tok.token_type(),
             expected_tok.token_channel(),
             expected_tok.payload(),
-            expected_tok_text.as_ref(),
+            expected_tok.text(source).as_ref(),
         );
 
         cur_start_line = cur_end_line + u32::from(ends_with_newline);

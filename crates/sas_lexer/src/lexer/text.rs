@@ -1,3 +1,5 @@
+use std::ops::{Add, Sub};
+
 /// Various text-related types
 
 /// A byte offset in the input text. We limit the input text to 4GB => 32 bits
@@ -25,6 +27,22 @@ impl From<ByteOffset> for u32 {
 impl From<ByteOffset> for usize {
     fn from(offset: ByteOffset) -> Self {
         offset.0 as usize
+    }
+}
+
+impl Add<u32> for ByteOffset {
+    type Output = ByteOffset;
+
+    fn add(self, rhs: u32) -> Self::Output {
+        ByteOffset(self.0 + rhs)
+    }
+}
+
+impl Sub<u32> for ByteOffset {
+    type Output = ByteOffset;
+
+    fn sub(self, rhs: u32) -> Self::Output {
+        ByteOffset(self.0 - rhs)
     }
 }
 

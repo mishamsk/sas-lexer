@@ -42,9 +42,10 @@ pub enum Payload {
     Integer(i64),
     /// Stores parsed float value
     Float(f64),
-    /// Stored the range in buffer.unquoted_string_literals with the
-    /// properly unquoted value of a lexed quoted/escaped string
-    UnquotedStringLiteral(u32, u32),
+    /// Stores the range in buffer.string_literals with the
+    /// properly unescaped value of a lexed string with escaped
+    /// (quoted in SAS parlance) characters.
+    StringLiteral(u32, u32),
 }
 
 /// A struct to hold information about the lines in the tokenized buffer.
@@ -136,11 +137,11 @@ const LINE_INFO_CAPACITY_DIVISOR: usize = 88;
 /// Heursitic for determining an optimal initial capactiy for token_infos vector
 const TOKEN_INFO_CAPACITY_DIVISOR: usize = 4;
 
-/// Heursitic for determining an optimal initial capactiy for unquoted string literals vector
+/// Heursitic for determining an optimal initial capactiy for unescaped string literals vector
 /// I didn't do a scientific test of the frequency of quote usage, but between
 /// %nrstr, %str, 'string with '' quote', "string with "" quote" and the fact
 /// that one occurence of smth. like %% inside %nrstr will put the whole contents
-/// into our buffer - thought ewe may afford overallocating. Let it be 5%
+/// into our buffer - thought we may afford overallocating. Let it be 5%
 const STR_LIT_CAPACITY_DIVISOR: usize = 20;
 
 const TOKEN_IDX_OUT_OF_BOUNDS: &str = "Token index out of bounds";
@@ -156,7 +157,10 @@ pub(crate) struct WorkTokenizedBuffer {
     source_len: ByteOffset,
     line_infos: Vec<LineInfo>,
     token_infos: Vec<TokenInfo>,
-    unquoted_string_literals: String,
+    /// Stores unescaped string literals as a single continous string
+    /// Payloads of tokens that repsent strings with escaped characters
+    /// store the range of the literal within this string.
+    string_literals_buffer: String,
 }
 
 impl WorkTokenizedBuffer {
@@ -170,7 +174,7 @@ impl WorkTokenizedBuffer {
                 source_len,
                 line_infos: Vec::new(),
                 token_infos: Vec::new(),
-                unquoted_string_literals: String::new(),
+                string_literals_buffer: String::new(),
             },
             len => WorkTokenizedBuffer {
                 source_len,
@@ -182,7 +186,7 @@ impl WorkTokenizedBuffer {
                     len / TOKEN_INFO_CAPACITY_DIVISOR,
                     MIN_CAPACITY,
                 )),
-                unquoted_string_literals: String::with_capacity(std::cmp::max(
+                string_literals_buffer: String::with_capacity(std::cmp::max(
                     len / STR_LIT_CAPACITY_DIVISOR,
                     MIN_CAPACITY,
                 )),
@@ -208,7 +212,7 @@ impl WorkTokenizedBuffer {
         Ok(TokenizedBuffer {
             line_infos: self.line_infos.into_boxed_slice(),
             token_infos: self.token_infos.into_boxed_slice(),
-            unquoted_string_literals: self.unquoted_string_literals,
+            string_literals_buffer: self.string_literals_buffer,
         })
     }
 
@@ -273,14 +277,25 @@ impl WorkTokenizedBuffer {
         TokenIdx::new(self.token_count() - 1)
     }
 
-    /// Stores the unquoted string literal in the buffer.
+    /// Adds an unescaped string to the buffer.
+    ///
+    /// # Returns
+    ///
+    /// Returns a tuple of the start and end index of the string in the buffer.string_literals.
+    ///
+    /// Use it to generate a `Payload::StringLiteral` for a token.
     #[allow(clippy::cast_possible_truncation)]
-    pub(super) fn add_unquoted_string_literal<S: AsRef<str>>(&mut self, literal: S) -> Payload {
+    pub(super) fn add_string_literal<S: AsRef<str>>(&mut self, literal: S) -> (u32, u32) {
         // SAFETY: This can only be created from lexer, which restricts the length of the source
-        let start = self.unquoted_string_literals.len() as u32;
-        self.unquoted_string_literals.push_str(literal.as_ref());
+        let start = self.string_literals_buffer.len() as u32;
+        self.string_literals_buffer.push_str(literal.as_ref());
 
-        Payload::UnquotedStringLiteral(start, self.unquoted_string_literals.len() as u32)
+        (start, self.string_literals_buffer.len() as u32)
+    }
+
+    #[inline]
+    pub(super) fn next_string_literal_start(&self) -> u32 {
+        self.string_literals_buffer.len() as u32
     }
 
     pub(super) fn update_last_token(
@@ -365,7 +380,7 @@ impl WorkTokenizedBuffer {
 pub struct TokenizedBuffer {
     line_infos: Box<[LineInfo]>,
     token_infos: Box<[TokenInfo]>,
-    unquoted_string_literals: String,
+    string_literals_buffer: String,
 }
 
 impl TokenizedBuffer {
@@ -599,7 +614,7 @@ impl TokenizedBuffer {
     /// # Errors
     ///
     /// Returns an error if the token index is out of bounds.
-    pub fn get_token_text<'a, S: AsRef<str> + 'a>(
+    pub fn get_token_raw_text<'a, S: AsRef<str> + 'a>(
         &'a self,
         token: TokenIdx,
         source: &'a S,
@@ -647,22 +662,20 @@ impl TokenizedBuffer {
             .map_or(Err(TOKEN_IDX_OUT_OF_BOUNDS), |t| Ok(t.payload))
     }
 
-    /// Returns the unquoted string literal associated with the token if any.
+    /// Returns the string literal from range defined by start and stop.
+    ///
+    /// The range is supposed to come from the `Payload::StringLiteral` of a token.
     ///
     /// # Errors
     ///
-    /// Returns an error if the token has unquoted string payload but it is out of bounds.
-    pub fn get_token_unquoted_string_literal(
-        &self,
-        start: u32,
-        end: u32,
-    ) -> Result<&str, &'static str> {
+    /// Returns an error if the range is out of bounds.
+    pub fn get_string_literal(&self, start: u32, stop: u32) -> Result<&str, &'static str> {
         let start = start as usize;
-        let end = end as usize;
+        let stop = stop as usize;
 
-        self.unquoted_string_literals
-            .get(start..end)
-            .map_or(Err("Unquoted string literal out of bounds"), |s| Ok(s))
+        self.string_literals_buffer
+            .get(start..stop)
+            .map_or(Err("String literal range out of bounds"), |s| Ok(s))
     }
 }
 
@@ -747,14 +760,14 @@ mod tests {
 
         assert_eq!(
             buffer
-                .get_token_text(token1, &"Hello, world!\nThis is a test.")
+                .get_token_raw_text(token1, &"Hello, world!\nThis is a test.")
                 .unwrap()
                 .unwrap(),
             "Hello, world!\nT"
         );
         assert_eq!(
             buffer
-                .get_token_text(token2, &"Hello, world!\nThis is a test.")
+                .get_token_raw_text(token2, &"Hello, world!\nThis is a test.")
                 .unwrap()
                 .unwrap(),
             "his is a test."

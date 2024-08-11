@@ -13,7 +13,9 @@ fn token_to_string_inner<S: AsRef<str>>(
     let end_column = buffer.get_token_end_column(token)?;
     let token_start = buffer.get_token_start(token)?.get();
     let token_end = buffer.get_token_end(token)?.get();
-    let token_text = buffer.get_token_text(token, source)?.unwrap_or("<no text>");
+    let token_text = buffer
+        .get_token_raw_text(token, source)?
+        .unwrap_or("<no text>");
     let token_type = buffer.get_token_type(token)?;
     let token_channel = buffer.get_token_channel(token)?;
     let payload = buffer.get_token_payload(token)?;
@@ -28,9 +30,7 @@ fn token_to_string_inner<S: AsRef<str>>(
                 format!("{val:.3e}")
             }
         }
-        Payload::UnquotedStringLiteral(start, end) => buffer
-            .get_token_unquoted_string_literal(start, end)?
-            .to_string(),
+        Payload::StringLiteral(start, end) => buffer.get_string_literal(start, end)?.to_string(),
     };
 
     // Constructing the string representation of the token
