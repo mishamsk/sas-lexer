@@ -24,6 +24,8 @@ use text::{ByteOffset, CharOffset};
 use token_type::{parse_keyword, parse_macro_keyword, TokenType};
 use unicode_ident::{is_xid_continue, is_xid_start};
 
+use crate::TokenIdx;
+
 const BOM: char = '\u{feff}';
 
 /// The lexer mode
@@ -46,9 +48,12 @@ enum LexerMode {
     ExpectToken(&'static str, TokenType),
     /// A special mode that goes after non-statement macro identifiers
     /// that checks if the first NON-ws or cstyle follower is (.
-    /// If found, adds necessary mode stack to parse the macro call args
+    /// If found, adds necessary mode stack to parse the macro call args.
+    /// If not, perorms roll back, so that ws/cstyle comments can be
+    /// relexed in different mode.
     ///
-    /// Note - it should alwys be preceded by the WsOrCStyleCommentOnly mode!
+    /// Note - it should alwys be preceded by the WsOrCStyleCommentOnly mode
+    /// and a checkpoint created!
     MaybeMacroCallArgs,
     /// The state for inner macro expressions, as in `%str(-->1+1<--)`
     MacroStrQuotedExpr,
@@ -68,6 +73,16 @@ enum LexerMode {
 }
 
 #[derive(Debug)]
+struct LexerCheckpoint<'src> {
+    cursor: cursor::Cursor<'src>,
+    cur_token_byte_offset: ByteOffset,
+    cur_token_start: CharOffset,
+    cur_token_line: LineIdx,
+    mode_stack_len: usize,
+    last_token_idx: Option<TokenIdx>,
+}
+
+#[derive(Debug)]
 struct Lexer<'src> {
     source: &'src str,
     source_len: u32,
@@ -83,6 +98,8 @@ struct Lexer<'src> {
     mode_stack: Vec<LexerMode>,
     /// Errors encountered during lexing
     errors: Vec<ErrorInfo>,
+    /// Checkpoint for the lexer to rollback to
+    checkpoint: Option<LexerCheckpoint<'src>>,
 
     /// Stores the last state for debug assertions to check
     /// against infinite loops. It is the remaining input length
@@ -117,9 +134,39 @@ impl<'src> Lexer<'src> {
             cur_token_line,
             mode_stack: vec![init_mode.unwrap_or_default()],
             errors: Vec::new(),
+            checkpoint: None,
             #[cfg(debug_assertions)]
             last_state: (source_len, vec![init_mode.unwrap_or_default()]),
         })
+    }
+
+    fn checkpoint(&mut self) {
+        self.checkpoint = Some(LexerCheckpoint {
+            cursor: self.cursor.clone(),
+            cur_token_byte_offset: self.cur_token_byte_offset,
+            cur_token_start: self.cur_token_start,
+            cur_token_line: self.cur_token_line,
+            mode_stack_len: self.mode_stack.len(),
+            last_token_idx: self.buffer.last_token(),
+        });
+    }
+
+    fn rollback(&mut self) {
+        if let Some(checkpoint) = self.checkpoint.take() {
+            self.cursor = checkpoint.cursor;
+            self.cur_token_byte_offset = checkpoint.cur_token_byte_offset;
+            self.cur_token_start = checkpoint.cur_token_start;
+            self.cur_token_line = checkpoint.cur_token_line;
+            self.mode_stack.truncate(checkpoint.mode_stack_len);
+
+            if let Err(e) = self.buffer.rollback(checkpoint.last_token_idx) {
+                // This is an internal error, we should always be able to correctly rollback
+                self.emit_error(ErrorType::InternalError(e));
+            }
+        } else {
+            // Emit an error, we should not be here
+            self.emit_error(ErrorType::InternalError("No checkpoint to rollback"));
+        }
     }
 
     #[inline]
@@ -316,7 +363,12 @@ impl<'src> Lexer<'src> {
                     // Leading insiginificant WS before the first argument
                     self.push_mode(LexerMode::WsOrCStyleCommentOnly);
                 } else {
-                    self.pop_mode();
+                    // Not a macro call with arguments, rollback (which will implicitly pop the mode)
+                    debug_assert!(self.checkpoint.is_some());
+
+                    // Rollback to the checkpoint, which should be before any WS and comments
+                    // and right after macro identifier
+                    self.rollback();
                 }
             }
             LexerMode::ExpectToken(content, tok_type) => self.lex_expected_token(content, tok_type),
@@ -2403,9 +2455,7 @@ impl<'src> Lexer<'src> {
 
                 self.emit_token(TokenChannel::DEFAULT, tok_type, Payload::None);
 
-                // Push the mode to check if this is a call with parameters
-                self.push_mode(LexerMode::MaybeMacroCallArgs);
-                self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+                self.expect_macro_call_args();
 
                 true
             }
@@ -2414,6 +2464,34 @@ impl<'src> Lexer<'src> {
                 false
             }
         }
+    }
+
+    /// A special helper that allows us to do a complex "parsing" look-ahead
+    /// to distinguish between an argument-less macro call and the one
+    /// with arguments.
+    ///
+    /// E.g. in `"&m /*comment*/ ()suffix"` `&m /*comment*/ ()` is a macro call
+    /// with arguments. Notice that there is WS & comment between the macro identifier
+    /// and the opening parenthesis. It is insignificant and should be lexed as such.
+    /// Whie in `"&m /*comment*/ suffix"` `&m` is a macro call without arguments,
+    /// and ` /*comment*/ suffix` is a single token of remaing text!
+    ///
+    /// In reality, in SAS, this is even more complex and impossible to statically
+    /// determine, as SAS looks for () only if the macro was defined with parameters!
+    /// So in theory, in `"&m /*comment*/ ()suffix"`, the entire ` /*comment*/ ()suffix`
+    /// may be text!
+    ///
+    /// We obviously can't do that, so we will assume that the macro call is with arguments.
+    fn expect_macro_call_args(&mut self) {
+        // Checkpoint the current state
+        self.checkpoint();
+
+        // Push the mode to check if this is a call with parameters.
+        // This is as usual in reverse order, first any ws/comments,
+        // and then our special mode that will check for the opening parenthesis
+        // and possibly rollback to the checkpoint
+        self.push_mode(LexerMode::MaybeMacroCallArgs);
+        self.push_mode(LexerMode::WsOrCStyleCommentOnly);
     }
 
     fn lex_macro_comment(&mut self) {
@@ -2566,9 +2644,7 @@ impl<'src> Lexer<'src> {
             Payload::None,
         );
 
-        // Push the mode to check if this is a call with parameters
-        self.push_mode(LexerMode::MaybeMacroCallArgs);
-        self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+        self.expect_macro_call_args();
     }
 
     fn lex_macro_nrstr_quoted_literal(&mut self) {
