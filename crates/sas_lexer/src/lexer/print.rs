@@ -20,7 +20,7 @@ fn token_to_string_inner<S: AsRef<str>>(
 
     let payload_str = match payload {
         Payload::None => "<None>".to_string(),
-        Payload::Integer(val) => format!("{val}"),
+        Payload::Integer(val) => val.to_string(),
         Payload::Float(val) => {
             if ((val * 1000.0).round() / 1000.0 - val).abs() < f64::EPSILON {
                 format!("{val:.3}")
@@ -28,6 +28,9 @@ fn token_to_string_inner<S: AsRef<str>>(
                 format!("{val:.3e}")
             }
         }
+        Payload::UnquotedStringLiteral(start, end) => buffer
+            .get_token_unquoted_string_literal(start, end)?
+            .to_string(),
     };
 
     // Constructing the string representation of the token

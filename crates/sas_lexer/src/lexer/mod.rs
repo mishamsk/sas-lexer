@@ -164,15 +164,18 @@ impl<'src> Lexer<'src> {
     }
 
     #[inline]
-    fn add_line(&mut self) {
+    fn add_line(&mut self) -> LineIdx {
         self.buffer
-            .add_line(self.cur_byte_offset(), self.cur_char_offset());
+            .add_line(self.cur_byte_offset(), self.cur_char_offset())
     }
 
     fn start_token(&mut self) {
         self.cur_token_byte_offset = self.cur_byte_offset();
         self.cur_token_start = self.cur_char_offset();
-        self.cur_token_line = LineIdx::new(self.buffer.line_count() - 1);
+        self.cur_token_line = self.buffer.last_line().unwrap_or_else(||
+            // Should not be possible, since we add the first line when creating
+            // the lexer, but whatever
+            self.add_line())
     }
 
     fn emit_token(&mut self, channel: TokenChannel, token_type: TokenType, payload: Payload) {
@@ -186,17 +189,13 @@ impl<'src> Lexer<'src> {
         );
     }
 
-    fn replace_token(&mut self, channel: TokenChannel, token_type: TokenType, payload: Payload) {
-        if let Some(last_token) = self.buffer.pop_token() {
-            self.buffer.add_token(
-                channel,
-                token_type,
-                last_token.byte_offset(),
-                last_token.start(),
-                last_token.line(),
-                payload,
-            );
-        } else {
+    fn update_last_token(
+        &mut self,
+        channel: TokenChannel,
+        token_type: TokenType,
+        payload: Payload,
+    ) {
+        if !self.buffer.update_last_token(channel, token_type, payload) {
             // This is an internal error, we should always have a token to replace
             self.emit_error(ErrorType::InternalError("No token to replace"));
 
@@ -242,12 +241,18 @@ impl<'src> Lexer<'src> {
             }
         }
 
+        let last_line = self.buffer.last_line().unwrap_or_else(||
+            // Should not be possible, since we add the first line when creating
+            // the lexer, but whatever
+            self.add_line());
+
         self.buffer.add_token(
             TokenChannel::DEFAULT,
             TokenType::EOF,
             self.cur_byte_offset(),
             self.cur_char_offset(),
-            LineIdx::new(self.buffer.line_count() - 1), // use the last added line
+            // use the last added line
+            last_line,
             Payload::None,
         );
 
@@ -1352,7 +1357,7 @@ impl<'src> Lexer<'src> {
         };
 
         if last_tok_is_start {
-            self.replace_token(
+            self.update_last_token(
                 TokenChannel::DEFAULT,
                 TokenType::StringLiteral,
                 Payload::None,
@@ -1378,7 +1383,7 @@ impl<'src> Lexer<'src> {
 
         let tok_type = self.lex_literal_ending();
 
-        self.replace_token(TokenChannel::DEFAULT, tok_type, Payload::None);
+        self.update_last_token(TokenChannel::DEFAULT, tok_type, Payload::None);
         self.pop_mode();
     }
 
@@ -1553,7 +1558,7 @@ impl<'src> Lexer<'src> {
         // that this is indeed a datalines start token.
         if let Some(tok_info) = self
             .buffer
-            .last_token_on_channel_info(TokenChannel::DEFAULT)
+            .last_token_info_on_channel_info(TokenChannel::DEFAULT)
         {
             if tok_info.token_type() != TokenType::SEMI {
                 // the previous character is not a semicolon
@@ -1586,7 +1591,9 @@ impl<'src> Lexer<'src> {
         loop {
             // Have to do the loop to track line changes
             match self.cursor.advance() {
-                Some('\n') => self.add_line(),
+                Some('\n') => {
+                    self.add_line();
+                }
                 Some(c) if c.is_whitespace() => {}
                 // in reality we know it will be a semicolon
                 _ => break,
@@ -2515,7 +2522,9 @@ impl<'src> Lexer<'src> {
                         self.cursor.advance();
                     }
                 }
-                '\n' => self.add_line(),
+                '\n' => {
+                    self.add_line();
+                }
                 _ => {}
             }
         }

@@ -29,7 +29,7 @@ impl fmt::Display for TokenIdx {
 pub(crate) struct LineIdx(u32);
 
 impl LineIdx {
-    pub(crate) fn new(val: u32) -> Self {
+    fn new(val: u32) -> Self {
         LineIdx(val)
     }
 }
@@ -38,8 +38,13 @@ impl LineIdx {
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum Payload {
     None,
+    /// Stores parsed integer value
     Integer(i64),
+    /// Stores parsed float value
     Float(f64),
+    /// Stored the range in buffer.unquoted_string_literals with the
+    /// properly unquoted value of a lexed quoted/escaped string
+    UnquotedStringLiteral(u32, u32),
 }
 
 /// A struct to hold information about the lines in the tokenized buffer.
@@ -101,20 +106,20 @@ impl TokenInfo {
         self.token_type
     }
 
-    #[must_use]
-    pub(super) fn byte_offset(&self) -> ByteOffset {
-        self.byte_offset
-    }
+    // #[must_use]
+    // pub(super) fn byte_offset(&self) -> ByteOffset {
+    //     self.byte_offset
+    // }
 
-    #[must_use]
-    pub(super) fn start(&self) -> CharOffset {
-        self.start
-    }
+    // #[must_use]
+    // pub(super) fn start(&self) -> CharOffset {
+    //     self.start
+    // }
 
-    #[must_use]
-    pub(super) fn line(&self) -> LineIdx {
-        self.line
-    }
+    // #[must_use]
+    // pub(super) fn line(&self) -> LineIdx {
+    //     self.line
+    // }
 
     // #[must_use]
     // pub(super) fn payload(&self) -> Payload {
@@ -122,9 +127,22 @@ impl TokenInfo {
     // }
 }
 
+/// Specifies minimal initial capacity of token_infos & line_infos vectors
 const MIN_CAPACITY: usize = 4;
-const LINE_INFO_DIVISOR: usize = 88;
-const TOKEN_INFO_DIVISOR: usize = 4;
+
+/// Heursitic for determining an optimal initial capactiy for line_infos vector
+const LINE_INFO_CAPACITY_DIVISOR: usize = 88;
+
+/// Heursitic for determining an optimal initial capactiy for token_infos vector
+const TOKEN_INFO_CAPACITY_DIVISOR: usize = 4;
+
+/// Heursitic for determining an optimal initial capactiy for unquoted string literals vector
+/// I didn't do a scientific test of the frequency of quote usage, but between
+/// %nrstr, %str, 'string with '' quote', "string with "" quote" and the fact
+/// that one occurence of smth. like %% inside %nrstr will put the whole contents
+/// into our buffer - thought ewe may afford overallocating. Let it be 5%
+const STR_LIT_CAPACITY_DIVISOR: usize = 20;
+
 const TOKEN_IDX_OUT_OF_BOUNDS: &str = "Token index out of bounds";
 
 /// A special structure used during lexing that stores
@@ -138,6 +156,7 @@ pub(crate) struct WorkTokenizedBuffer {
     source_len: ByteOffset,
     line_infos: Vec<LineInfo>,
     token_infos: Vec<TokenInfo>,
+    unquoted_string_literals: String,
 }
 
 impl WorkTokenizedBuffer {
@@ -151,15 +170,20 @@ impl WorkTokenizedBuffer {
                 source_len,
                 line_infos: Vec::new(),
                 token_infos: Vec::new(),
+                unquoted_string_literals: String::new(),
             },
             len => WorkTokenizedBuffer {
                 source_len,
                 line_infos: Vec::with_capacity(std::cmp::max(
-                    len / LINE_INFO_DIVISOR,
+                    len / LINE_INFO_CAPACITY_DIVISOR,
                     MIN_CAPACITY,
                 )),
                 token_infos: Vec::with_capacity(std::cmp::max(
-                    len / TOKEN_INFO_DIVISOR,
+                    len / TOKEN_INFO_CAPACITY_DIVISOR,
+                    MIN_CAPACITY,
+                )),
+                unquoted_string_literals: String::with_capacity(std::cmp::max(
+                    len / STR_LIT_CAPACITY_DIVISOR,
                     MIN_CAPACITY,
                 )),
             },
@@ -184,6 +208,7 @@ impl WorkTokenizedBuffer {
         Ok(TokenizedBuffer {
             line_infos: self.line_infos.into_boxed_slice(),
             token_infos: self.token_infos.into_boxed_slice(),
+            unquoted_string_literals: self.unquoted_string_literals,
         })
     }
 
@@ -248,13 +273,40 @@ impl WorkTokenizedBuffer {
         TokenIdx::new(self.token_count() - 1)
     }
 
-    pub(super) fn pop_token(&mut self) -> Option<TokenInfo> {
-        self.token_infos.pop()
+    /// Stores the unquoted string literal in the buffer.
+    #[allow(clippy::cast_possible_truncation)]
+    pub(super) fn add_unquoted_string_literal<S: AsRef<str>>(&mut self, literal: S) -> Payload {
+        // SAFETY: This can only be created from lexer, which restricts the length of the source
+        let start = self.unquoted_string_literals.len() as u32;
+        self.unquoted_string_literals.push_str(literal.as_ref());
+
+        Payload::UnquotedStringLiteral(start, self.unquoted_string_literals.len() as u32)
+    }
+
+    pub(super) fn update_last_token(
+        &mut self,
+        channel: TokenChannel,
+        token_type: TokenType,
+        payload: Payload,
+    ) -> bool {
+        self.token_infos.last_mut().map_or(false, |t| {
+            t.channel = channel;
+            t.token_type = token_type;
+            t.payload = payload;
+            true
+        })
     }
 
     // pub(super) fn iter_line_infos(&self) -> std::slice::Iter<'_, LineInfo> {
     //     self.line_infos.iter()
     // }
+
+    pub(super) fn last_line(&self) -> Option<LineIdx> {
+        match self.line_count() {
+            0 => None,
+            n => Some(LineIdx::new(n - 1)),
+        }
+    }
 
     pub(super) fn last_line_info(&self) -> Option<&LineInfo> {
         self.line_infos.last()
@@ -275,7 +327,10 @@ impl WorkTokenizedBuffer {
         self.token_infos.last()
     }
 
-    pub(super) fn last_token_on_channel_info(&self, channel: TokenChannel) -> Option<&TokenInfo> {
+    pub(super) fn last_token_info_on_channel_info(
+        &self,
+        channel: TokenChannel,
+    ) -> Option<&TokenInfo> {
         self.token_infos.iter().rev().find(|t| t.channel == channel)
     }
 
@@ -310,6 +365,7 @@ impl WorkTokenizedBuffer {
 pub struct TokenizedBuffer {
     line_infos: Box<[LineInfo]>,
     token_infos: Box<[TokenInfo]>,
+    unquoted_string_literals: String,
 }
 
 impl TokenizedBuffer {
@@ -589,6 +645,24 @@ impl TokenizedBuffer {
         self.token_infos
             .get(tidx)
             .map_or(Err(TOKEN_IDX_OUT_OF_BOUNDS), |t| Ok(t.payload))
+    }
+
+    /// Returns the unquoted string literal associated with the token if any.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the token has unquoted string payload but it is out of bounds.
+    pub fn get_token_unquoted_string_literal(
+        &self,
+        start: u32,
+        end: u32,
+    ) -> Result<&str, &'static str> {
+        let start = start as usize;
+        let end = end as usize;
+
+        self.unquoted_string_literals
+            .get(start..end)
+            .map_or(Err("Unquoted string literal out of bounds"), |s| Ok(s))
     }
 }
 
