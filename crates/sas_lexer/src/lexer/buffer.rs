@@ -222,7 +222,7 @@ impl WorkTokenizedBuffer {
             "Line byte offset out of bounds"
         );
         self.line_infos.push(LineInfo { byte_offset, start });
-        LineIdx(self.line_count() - 1)
+        LineIdx::new(self.line_count() - 1)
     }
 
     pub(super) fn add_token(
@@ -312,6 +312,31 @@ impl WorkTokenizedBuffer {
         })
     }
 
+    pub(super) fn rollback(&mut self, last_token: Option<TokenIdx>) -> Result<(), &'static str> {
+        if let Some(last_token_idx) = last_token {
+            // Get info of the last token to be retained
+            let last_token_info = self
+                .token_infos
+                .get(last_token_idx.0 as usize)
+                .ok_or(TOKEN_IDX_OUT_OF_BOUNDS)?;
+
+            // Get the index of the token end line
+            let last_token_end_line =
+                self.get_token_end_line_idx(last_token_idx.0 as usize, last_token_info)?;
+
+            // Remove all tokens after the last token
+            self.token_infos.truncate(last_token_idx.0 as usize + 1);
+
+            // Remove all lines after the last token end line
+            self.line_infos.truncate(last_token_end_line.0 as usize + 1);
+
+            // We do not bother to remove potentially unused string literals
+            Ok(())
+        } else {
+            Ok(())
+        }
+    }
+
     // pub(super) fn iter_line_infos(&self) -> std::slice::Iter<'_, LineInfo> {
     //     self.line_infos.iter()
     // }
@@ -363,6 +388,45 @@ impl WorkTokenizedBuffer {
         // theoretically number of tokens may be larger than text size,
         // which checked to be no more than u32, but this is not possible in practice
         self.token_infos.len() as u32
+    }
+
+    /// Returns index of line info of the token end.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the token index is out of bounds.
+    fn get_token_end_line_idx(
+        &self,
+        tidx: usize,
+        token_info: &TokenInfo,
+    ) -> Result<LineIdx, &'static str> {
+        // This is more elaborate than the start line, as we need to get the
+        // the start line of the next token and compare the offsets
+        if tidx == self.token_infos.len() - 1 {
+            // Must be EOF token => same as start line of EOF token
+            return Ok(token_info.line);
+        }
+
+        let next_tok_inf = self
+            .token_infos
+            .get(tidx + 1)
+            .ok_or(TOKEN_IDX_OUT_OF_BOUNDS)?;
+
+        let (next_token_line_idx, next_token_line_info) = self
+            .line_infos
+            .get(next_tok_inf.line.0 as usize)
+            .map(|li| (next_tok_inf.line, li))
+            .ok_or(TOKEN_IDX_OUT_OF_BOUNDS)?;
+
+        Ok(LineIdx::new(
+            next_token_line_idx.0
+            // If the next token starts at the start of the next line,
+            // means this token ends on the previous line, =>
+            // we must subtract 1 from the next token start line index
+            // Otherwise this tokens ends on the same line as the next token starts
+            // SAFETY: it is logicaly imporssible to overflow here
+            - u32::from(next_tok_inf.byte_offset == next_token_line_info.byte_offset),
+        ))
     }
 }
 
@@ -529,14 +593,13 @@ impl TokenizedBuffer {
             .map(|li| (next_tok_inf.line, li))
             .ok_or(TOKEN_IDX_OUT_OF_BOUNDS)?;
 
-        let tok_end_byte_offset = self.get_token_end_byte_offset(token)?;
-
         Ok(next_token_line_idx.0
             // lines are 1-based, but line indexes are 0-based. 
-            // if this token ends beyond the start of the next token line, 
+            // If the next token starts not at the start of the next line,
+            // means this token ends on the next token line, =>
             // we need to add 1 to the line count. Otherwise it must be on the previous line,
             // so we don't need to add anything.
-            + u32::from(tok_end_byte_offset.get() > next_token_line_info.byte_offset.get()))
+            + u32::from(next_tok_inf.byte_offset > next_token_line_info.byte_offset))
     }
 
     /// Returns column number of the token start, zero-based.
