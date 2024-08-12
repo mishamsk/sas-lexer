@@ -267,7 +267,7 @@ impl TokenTestCase for (TokenType, f64) {
     }
 }
 
-impl TokenTestCase for (TokenType, i64) {
+impl TokenTestCase for (TokenType, u64) {
     fn token_type(&self) -> TokenType {
         self.0
     }

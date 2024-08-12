@@ -16,7 +16,7 @@ sas_lexer_macro = { path = "crates/sas_lexer_macro" }
 
 insta = { version = "1.39.0", features = ["yaml"] }
 phf = { version = "0.11.2", features = ["macros"] }
-rstest = "0.21.0"
+rstest = "0.22.0"
 serde = { version = "1.0.204", features = ["derive"] }
 strum = { version = "0.26.3", features = ["derive", "strum_macros"] }
 

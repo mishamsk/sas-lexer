@@ -38,11 +38,12 @@ impl LineIdx {
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum Payload {
     None,
-    /// Stores parsed integer value
-    Integer(i64),
+    /// Stores parsed integer value. We do not parse -N as a single token
+    /// so it is unsugned.
+    Integer(u64),
     /// Stores parsed float value
     Float(f64),
-    /// Stores the range in buffer.string_literals with the
+    /// Stores the range in `buffer.string_literals_buffer` with the
     /// properly unescaped value of a lexed string with escaped
     /// (quoted in SAS parlance) characters.
     StringLiteral(u32, u32),
@@ -281,7 +282,7 @@ impl WorkTokenizedBuffer {
     ///
     /// # Returns
     ///
-    /// Returns a tuple of the start and end index of the string in the buffer.string_literals.
+    /// Returns a tuple of the start and end index of the string in the `buffer.string_literals_buffer`.
     ///
     /// Use it to generate a `Payload::StringLiteral` for a token.
     #[allow(clippy::cast_possible_truncation)]
