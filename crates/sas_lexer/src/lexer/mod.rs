@@ -1859,7 +1859,7 @@ impl<'src> Lexer<'src> {
     }
 
     fn lex_numeric_literal(&mut self) {
-        debug_assert!(matches!(self.cursor.peek(), '0'..='9' | '-' | '+' | '.'));
+        debug_assert!(matches!(self.cursor.peek(), '0'..='9' | '.'));
         // First, SAS supports 3 notations for numeric literals:
         // 1. Standard decimal notation (base 10)
         // 2. Hexadecimal notation (base 16)
@@ -1916,13 +1916,6 @@ impl<'src> Lexer<'src> {
                     expect_exp = false;
                     // and we can't have a dot after E in neither HEX nor scientific notation
                     expect_dot = false;
-                }
-                '-' | '+' => {
-                    // Must be Scientific notation
-                    // Do not advance, such that the `-` is consumed by the exponent parser
-                    // Also the lack of exponent will be handled by the exponent parser
-                    self.lex_numeric_exp_literal();
-                    return;
                 }
                 '.' => {
                     if expect_dot {
@@ -1987,37 +1980,31 @@ impl<'src> Lexer<'src> {
         };
 
         // See if it is an integer
-        if fvalue.fract() == 0.0 && fvalue.abs() < i64::MAX as f64 {
+        if fvalue.fract() == 0.0 && fvalue.abs() < u64::MAX as f64 {
             // For integers we need to emit different tokens, depending on
             // the presence of the dot as we use different token types.
             // The later is unfortunatelly necesasry due to SAS numeric formats
             // context sensitivity and no way of disambiguating between a number `1.`
             // and the same numeric format `1.`
 
-            // But leading sign or 0 - we can emit the integer token
+            // Leading 0 - we can emit the integer token, can't be a format
+            let payload = Payload::Integer(fvalue as u64);
+
             // Unwrap here is safe, as we know the length is > 0
             // but we still provide default value to avoid panics
             match *number.as_bytes().first().unwrap_or(&b'_') {
-                b'-' | b'+' | b'0' => {
-                    self.emit_token(
-                        TokenChannel::DEFAULT,
-                        TokenType::IntegerLiteral,
-                        Payload::Integer(fvalue as i64),
-                    );
+                b'0' => {
+                    self.emit_token(TokenChannel::DEFAULT, TokenType::IntegerLiteral, payload);
                 }
                 _ => {
                     if number.contains('.') {
                         self.emit_token(
                             TokenChannel::DEFAULT,
                             TokenType::IntegerDotLiteral,
-                            Payload::Integer(fvalue as i64),
+                            payload,
                         );
                     } else {
-                        self.emit_token(
-                            TokenChannel::DEFAULT,
-                            TokenType::IntegerLiteral,
-                            Payload::Integer(fvalue as i64),
-                        );
+                        self.emit_token(TokenChannel::DEFAULT, TokenType::IntegerLiteral, payload);
                     }
                 }
             }
@@ -2222,37 +2209,11 @@ impl<'src> Lexer<'src> {
             }
             '+' => {
                 self.cursor.advance();
-
-                match self.cursor.peek() {
-                    '0'..='9' => {
-                        // `+N`
-                        self.lex_numeric_literal();
-                    }
-                    '.' if self.cursor.peek_next().is_ascii_digit() => {
-                        // `+.N` is a valid number, but `+. ` is not
-                        self.lex_numeric_literal();
-                    }
-                    _ => {
-                        self.emit_token(TokenChannel::DEFAULT, TokenType::PLUS, Payload::None);
-                    }
-                }
+                self.emit_token(TokenChannel::DEFAULT, TokenType::PLUS, Payload::None);
             }
             '-' => {
                 self.cursor.advance();
-
-                match self.cursor.peek() {
-                    '0'..='9' => {
-                        // `+N`
-                        self.lex_numeric_literal();
-                    }
-                    '.' if self.cursor.peek_next().is_ascii_digit() => {
-                        // `+.N` is a valid number, but `+. ` is not
-                        self.lex_numeric_literal();
-                    }
-                    _ => {
-                        self.emit_token(TokenChannel::DEFAULT, TokenType::MINUS, Payload::None);
-                    }
-                }
+                self.emit_token(TokenChannel::DEFAULT, TokenType::MINUS, Payload::None);
             }
             '<' => {
                 self.cursor.advance();

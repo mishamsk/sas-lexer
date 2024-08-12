@@ -510,51 +510,78 @@ fn test_char_format(#[case] contents: &str, #[case] expected_token: Vec<impl Tok
 // Decimal notation
 #[case::int1("1", (TokenType::IntegerLiteral, 1))]
 #[case::int001("001", (TokenType::IntegerLiteral, 1))]
-#[case::int001_plus("+001", (TokenType::IntegerLiteral, 1))]
-#[case::int001_minus("-001", (TokenType::IntegerLiteral, -1))]
 #[case::int1_dot("1.", (TokenType::IntegerDotLiteral, 1))]
 #[case::int_dot_0(".0", (TokenType::IntegerDotLiteral, 0))]
 #[case::int1_dot00("1.00", (TokenType::IntegerDotLiteral, 1))]
 #[case::int01_dot("01.", (TokenType::IntegerLiteral, 1))]
 #[case::int01_dot00("01.00", (TokenType::IntegerLiteral, 1))]
-#[case::int1_minus_dot("-1.", (TokenType::IntegerLiteral, -1))]
-#[case::int01_minus_dot("-01.", (TokenType::IntegerLiteral, -1))]
-#[case::int01_plus_dot00("+01.00", (TokenType::IntegerLiteral, 1))]
-#[case::pos_dec_only("+.1", (TokenType::FloatLiteral, 0.1))]
-#[case::neg_dec_only("-.1", (TokenType::FloatLiteral, -0.1))]
-// one more than i64::MAX
-#[case::i64_overlow("9223372036854775808", (TokenType::FloatLiteral, 9223372036854775808.0))]
+// one more than u64::MAX
+#[case::i64_overlow("18446744073709551616", (TokenType::FloatLiteral, 18446744073709551616.0))]
 // Hexadecimal notation
 #[case::hex("02Ax", (TokenType::IntegerLiteral, 42))]
 #[case::hex_one_digit("9X", (TokenType::IntegerLiteral, 9))]
-#[case::hex_max("-9ffFFffFFffFFffFx", (TokenType::FloatLiteral, -1.152921504606847e19))]
 // Scientific notation
 #[case::sci("1e3", (TokenType::FloatLiteral, 1000.0))]
 #[case::sci_plus("1E+3", (TokenType::FloatLiteral, 1000.0))]
 #[case::sci_minus("1e-3", (TokenType::FloatLiteral, 0.001))]
-#[case::sci_neg("-1E3", (TokenType::FloatLiteral, -1000.0))]
-#[case::sci_pos_plus("+1e+3", (TokenType::FloatLiteral, 1000.0))]
-#[case::sci_neg_minus("-1E-3", (TokenType::FloatLiteral, -0.001))]
 #[case::sci_dot("4.2e3", (TokenType::FloatLiteral, 4200.0))]
 #[case::sci_dot_only(".1E3", (TokenType::FloatLiteral, 100.0))]
-#[case::sci_pos_dot("+4.2e3", (TokenType::FloatLiteral, 4200.0))]
-#[case::sci_neg_dot_only("-.1E3", (TokenType::FloatLiteral, -100.0))]
 fn test_numeric_literal(#[case] contents: &str, #[case] expected_token: impl TokenTestCase) {
     assert_lexing(contents, vec![expected_token], NO_ERRORS);
 }
 
+/// First numeric lexing implementation was also attaching the leading sign to the numeric literal.
+/// But this would not play well with things like integer ranges and input statement mini-language.
+/// Hence these tests.
 #[rstest]
-#[case(".1-", (TokenType::FloatLiteral, 0.0), ErrorType::InvalidNumericLiteral)]
+// Decimal notation
+#[case::int001_minus("001", ("001", TokenType::IntegerLiteral, Payload::Integer(1)))]
+#[case::int1_minus_dot("1.", ("1.", TokenType::IntegerDotLiteral, Payload::Integer(1)))]
+#[case::int01_minus_dot("01.", ("01.", TokenType::IntegerLiteral, Payload::Integer(1)))]
+#[case::neg_dec_only(".1", (".1", TokenType::FloatLiteral, Payload::Float(0.1)))]
+#[case::hex_max("9ffFFffFFffFFffFx", ("9ffFFffFFffFFffFx", TokenType::IntegerLiteral, Payload::Integer(11529215046068469759)))]
+#[case::sci_neg("1E3", ("1E3", TokenType::FloatLiteral, Payload::Float(1000.0)))]
+#[case::sci_neg_minus("1E-3", ("1E-3", TokenType::FloatLiteral, Payload::Float(0.001)))]
+#[case::sci_neg_dot_only(".1E3", (".1E3", TokenType::FloatLiteral, Payload::Float(100.0)))]
+fn test_numeric_literal_with_leading_sign(
+    #[case] contents: &str,
+    #[case] expected_token: (&str, TokenType, Payload),
+    #[values(("-", TokenType::MINUS), ("+", TokenType::PLUS))] (sign_str, sign_tok): (
+        &str,
+        TokenType,
+    ),
+) {
+    assert_lexing(
+        format!("{sign_str}{contents}").as_str(),
+        vec![(sign_str, sign_tok, Payload::None), expected_token],
+        NO_ERRORS,
+    );
+}
+
+#[rstest]
 #[case(".1e", (TokenType::FloatLiteral, 0.0), ErrorType::InvalidNumericLiteral)]
 #[case(".1E", (TokenType::FloatLiteral, 0.0), ErrorType::InvalidNumericLiteral)]
 #[case("02A", (TokenType::IntegerLiteral, 42), ErrorType::UnterminatedHexNumericLiteral)]
-#[case("-9ffFFffFFffFFffF123AFx", (TokenType::FloatLiteral, -1.152921504606847e19), ErrorType::InvalidNumericLiteral)]
+#[case("9ffFFffFFffFFffF123AFx", (TokenType::FloatLiteral, 1.152921504606847e19), ErrorType::InvalidNumericLiteral)]
 fn test_numeric_literal_error_recovery(
     #[case] contents: &str,
     #[case] expected_token: impl TokenTestCase,
     #[case] expected_error: ErrorType,
 ) {
     assert_lexing(contents, vec![expected_token], vec![expected_error]);
+}
+
+#[test]
+fn test_numeric_literal_range() {
+    assert_lexing(
+        "1-2",
+        vec![
+            ("1", TokenType::IntegerLiteral, Payload::Integer(1)),
+            ("-", TokenType::MINUS, Payload::None),
+            ("2", TokenType::IntegerLiteral, Payload::Integer(2)),
+        ],
+        NO_ERRORS,
+    );
 }
 
 #[rstest]
