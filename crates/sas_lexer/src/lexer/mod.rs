@@ -140,7 +140,13 @@ impl<'src> Lexer<'src> {
         })
     }
 
+    /// Create a checkpoint for the lexer
+    ///
+    /// Make sure to always clear the checkpoint, even if not rolling back
     fn checkpoint(&mut self) {
+        // We should always make sure to clear any checkpoints
+        debug_assert!(self.checkpoint.is_none());
+
         self.checkpoint = Some(LexerCheckpoint {
             cursor: self.cursor.clone(),
             cur_token_byte_offset: self.cur_token_byte_offset,
@@ -149,6 +155,9 @@ impl<'src> Lexer<'src> {
             mode_stack_len: self.mode_stack.len(),
             last_token_idx: self.buffer.last_token(),
         });
+    }
+    fn clear_checkpoint(&mut self) {
+        self.checkpoint = None;
     }
 
     fn rollback(&mut self) {
@@ -352,6 +361,9 @@ impl<'src> Lexer<'src> {
                     self.cursor.advance();
 
                     self.emit_token(TokenChannel::DEFAULT, TokenType::LPAREN, Payload::None);
+
+                    // Clear the checkpoint
+                    self.clear_checkpoint();
 
                     // Pop the MaybeMacroCallArgs mode
                     self.pop_mode();

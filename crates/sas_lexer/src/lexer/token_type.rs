@@ -189,6 +189,18 @@ pub enum TokenType {
     KwCancel,
     #[keyword("_ALL_")]
     KwAllVar,
+    #[keyword("_AUTOMATIC_")]
+    KwAutomaticVar,
+    #[keyword("_GLOBAL_")]
+    KwGlobalVar,
+    #[keyword("_LOCAL_")]
+    KwLocalVar,
+    #[keyword("_READONLY_")]
+    KwReadonlyVar,
+    #[keyword("_USER_")]
+    KwUserVar,
+    #[keyword("_WRITABLE_")]
+    KwWritableVar,
 
     // Data step & proc shared keywords
     KwArray,
