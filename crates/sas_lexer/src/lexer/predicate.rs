@@ -1,4 +1,5 @@
 use crate::TokenType;
+use smol_str::SmolStr;
 use std::result::Result;
 use unicode_ident::is_xid_continue;
 
@@ -94,7 +95,7 @@ pub(super) fn is_macro_call(
 
     // Start tracking whether the identifier is ASCII
     // It is necessary, as we need to upper case the identifier if it is ASCII
-    // for checking against statement anmes, and if it is not ASCII,
+    // for checking against statement names, and if it is not ASCII,
     // we know it is not a keyword and can skip the test right away
     let mut is_ascii = true;
 
@@ -124,11 +125,14 @@ pub(super) fn is_macro_call(
     // avoids the allocation and copying
     let ident_end_byte_offset = cursor.remaining_len() - la_view.remaining_len();
 
-    let ident = cursor
-        .as_str()
-        .get(1..ident_end_byte_offset as usize)
-        .ok_or("Unexpected error getting ident slice  in `is_macro_call` lookahead")?
-        .to_ascii_uppercase();
+    let ident = SmolStr::from_iter(
+        cursor
+            .as_str()
+            .get(1..ident_end_byte_offset as usize)
+            .ok_or("Unexpected error getting ident slice  in `is_macro_call` lookahead")?
+            .chars()
+            .map(|c| c.to_ascii_uppercase()),
+    );
 
     if ident.is_empty() {
         // Something like %*
@@ -150,25 +154,10 @@ pub(super) fn is_macro_call(
             ))
         }
     } else {
-        match ident.as_str() {
-            // Nrstr is not a keyword, but a special case of quoted literal
-            "NRSTR" => {
-                if !allow_quote_call {
-                    return Ok((None, 0));
-                }
-
-                Ok((
-                    Some(TokenType::NrStrLiteral),
-                    la_view.char_offset() - cursor.char_offset(),
-                ))
-            }
-            _ => {
-                // Not a statement, not a quote call, must be a macro call
-                Ok((
-                    Some(TokenType::MacroIdentifier),
-                    la_view.char_offset() - cursor.char_offset(),
-                ))
-            }
-        }
+        // Not a statement, not a quote call, must be a macro call
+        Ok((
+            Some(TokenType::MacroIdentifier),
+            la_view.char_offset() - cursor.char_offset(),
+        ))
     }
 }

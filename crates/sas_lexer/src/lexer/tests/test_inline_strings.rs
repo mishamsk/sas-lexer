@@ -585,35 +585,6 @@ fn test_numeric_literal_range() {
 }
 
 #[rstest]
-#[case::empty("%nrstr()")]
-#[case::with_ws_before_paren("%nrstr \t()")]
-#[case::two_precent("%nrstr(%%)")]
-#[case::three_precent("%nrstr(%%%))")]
-#[case::all_quote_types("%nrstr(%(%)%%)")]
-#[case::with_newline("%nrstr(some\nother)")]
-#[case::with_crlf("%nrstr(some\r\nother)")]
-#[case::with_unicode("%nrstr(some\n🔥\n)")]
-#[case::with_macro_chars("%nrstr(&9 and &&&, 9% and % )")]
-#[case::with_real_macro("%nrstr(%some() and &mvar)")]
-fn test_nrstr_quoted_string_literal(#[case] contents: &str) {
-    assert_lexing(contents, vec![TokenType::NrStrLiteral], NO_ERRORS);
-}
-
-#[rstest]
-#[case::missing_open_paren("%nrstr  )", (ErrorType::MissingExpected("("), 8))]
-#[case::missing_closing_paren("%nrstr(%%%)", ErrorType::MissingExpected(")"))]
-fn test_nrstr_quoted_str_error_recovery(
-    #[case] contents: &str,
-    #[case] expected_error: impl ErrorTestCase,
-) {
-    assert_lexing(
-        contents,
-        vec![TokenType::NrStrLiteral],
-        vec![expected_error],
-    );
-}
-
-#[rstest]
 #[case::open_brace_val("%LeT a=(;",
     vec![
         ("%LeT", TokenType::KwmLet),
@@ -951,14 +922,17 @@ vec![
 // which are not allowed in SAS variable names
 #[case::quote_call_in_name_1("%let a%nrstr(a)=2;",
 vec![
-    ("%let", TokenType::KwmLet),
-    (" ", TokenType::WS),
-    ("a", TokenType::Identifier),
+    ("%let", TokenType::KwmLet, TokenChannel::DEFAULT),
+    (" ", TokenType::WS, TokenChannel::HIDDEN),
+    ("a", TokenType::Identifier, TokenChannel::DEFAULT),
     // Recovered from missing assign hence empty string
-    ("", TokenType::ASSIGN),
-    ("%nrstr(a)", TokenType::NrStrLiteral),
-    ("=2", TokenType::MacroString),
-    (";", TokenType::SEMI),
+    ("", TokenType::ASSIGN, TokenChannel::DEFAULT),
+    ("%nrstr", TokenType::KwmNrStr, TokenChannel::HIDDEN),
+    ("(", TokenType::LPAREN, TokenChannel::HIDDEN),
+    ("a", TokenType::MacroString, TokenChannel::DEFAULT),
+    (")", TokenType::RPAREN, TokenChannel::HIDDEN),
+    ("=2", TokenType::MacroString, TokenChannel::DEFAULT),
+    (";", TokenType::SEMI, TokenChannel::DEFAULT),
     ],
     vec![(ErrorType::MissingExpected("="), 6)]
 )]
@@ -980,19 +954,19 @@ vec![
 )]
 #[case::quote_call_in_name_3("%let a%str(%inner())=2;",
 vec![
-    ("%let", TokenType::KwmLet),
-    (" ", TokenType::WS),
-    ("a", TokenType::Identifier),
+    ("%let", TokenType::KwmLet, TokenChannel::DEFAULT),
+    (" ", TokenType::WS, TokenChannel::HIDDEN),
+    ("a", TokenType::Identifier, TokenChannel::DEFAULT),
     // Recovered from missing assign hence empty string
-    ("", TokenType::ASSIGN),
-    ("%str", TokenType::KwmStr),
-    ("(", TokenType::LPAREN),
-    ("%inner", TokenType::MacroIdentifier),
-    ("(", TokenType::LPAREN),
-    (")", TokenType::RPAREN),
-    (")", TokenType::RPAREN),
-    ("=2", TokenType::MacroString),
-    (";", TokenType::SEMI)
+    ("", TokenType::ASSIGN, TokenChannel::DEFAULT),
+    ("%str", TokenType::KwmStr, TokenChannel::HIDDEN),
+    ("(", TokenType::LPAREN, TokenChannel::HIDDEN),
+    ("%inner", TokenType::MacroIdentifier, TokenChannel::DEFAULT),
+    ("(", TokenType::LPAREN, TokenChannel::DEFAULT),
+    (")", TokenType::RPAREN, TokenChannel::DEFAULT),
+    (")", TokenType::RPAREN, TokenChannel::HIDDEN),
+    ("=2", TokenType::MacroString, TokenChannel::DEFAULT),
+    (";", TokenType::SEMI, TokenChannel::DEFAULT)
     ],
     vec![(ErrorType::MissingExpected("="), 6)]
 )]
@@ -1042,6 +1016,16 @@ fn test_macro_let_error_recovery(
         (")", TokenType::RPAREN),
         ("/*c*/", TokenType::CStyleComment),
         (";", TokenType::SEMI),
+    ]
+)]
+#[case::balanced_parens_with_comment("%t((/*c*/))",
+    vec![
+        ("%t", TokenType::MacroIdentifier),
+        ("(", TokenType::LPAREN),
+        ("(", TokenType::MacroString),
+        ("/*c*/", TokenType::CStyleComment),
+        (")", TokenType::MacroString),
+        (")", TokenType::RPAREN),        
     ]
 )]
 #[case::bare_nested_parens("%t(some(),());",
@@ -1121,6 +1105,45 @@ fn test_macro_call(#[case] contents: &str, #[case] expected_token: Vec<impl Toke
         (";", TokenType::SEMI, TokenChannel::DEFAULT),
         ]
 )]
+#[case::empty("%sTr()",
+    vec![
+        ("%sTr", TokenType::KwmStr, TokenChannel::HIDDEN),
+        ("(", TokenType::LPAREN, TokenChannel::HIDDEN),
+        (")", TokenType::RPAREN, TokenChannel::HIDDEN),        
+        ]
+)]
+#[case::with_macro_chars("%str(&9 and &&&, 9% and % )",
+    vec![
+        ("%str", TokenType::KwmStr, TokenChannel::HIDDEN),
+        ("(", TokenType::LPAREN, TokenChannel::HIDDEN),
+        ("&9 and &&&, 9% and % ", TokenType::MacroString, TokenChannel::DEFAULT),
+        (")", TokenType::RPAREN, TokenChannel::HIDDEN),
+        ]
+)]
+#[case::with_unicode_newline_crf("%str(some\r\n🔥\n)",
+    vec![
+        ("%str", TokenType::KwmStr, TokenChannel::HIDDEN),
+        ("(", TokenType::LPAREN, TokenChannel::HIDDEN),
+        ("some\r\n🔥\n", TokenType::MacroString, TokenChannel::DEFAULT),
+        (")", TokenType::RPAREN, TokenChannel::HIDDEN),
+        ]
+)]
+#[case::nested_str_call("%str(-->/*c*/ %str(/*c*/ )<--)",
+    vec![
+        ("%str", TokenType::KwmStr, TokenChannel::HIDDEN),
+        ("(", TokenType::LPAREN, TokenChannel::HIDDEN),
+        ("-->", TokenType::MacroString, TokenChannel::DEFAULT),
+        ("/*c*/", TokenType::CStyleComment, TokenChannel::COMMENT),
+        (" ", TokenType::MacroString, TokenChannel::DEFAULT),
+        ("%str", TokenType::KwmStr, TokenChannel::HIDDEN),
+        ("(", TokenType::LPAREN, TokenChannel::HIDDEN),
+        ("/*c*/", TokenType::CStyleComment, TokenChannel::COMMENT),
+        (" ", TokenType::MacroString, TokenChannel::DEFAULT),
+        (")", TokenType::RPAREN, TokenChannel::HIDDEN),
+        ("<--", TokenType::MacroString, TokenChannel::DEFAULT),
+        (")", TokenType::RPAREN, TokenChannel::HIDDEN),
+        ]
+)]
 #[case::all_quotes("%sTr(%\"v %'v %%call %( %) );",
     vec![
         (
@@ -1167,6 +1190,16 @@ fn test_macro_call(#[case] contents: &str, #[case] expected_token: Vec<impl Toke
         ("(1(2)3)", TokenType::MacroString, TokenChannel::DEFAULT),
         (")", TokenType::RPAREN, TokenChannel::HIDDEN),
         (";", TokenType::SEMI, TokenChannel::DEFAULT),
+        ]
+)]
+#[case::balanced_unquoted_parens("%str((/*c*/))",
+    vec![
+        ("%str", TokenType::KwmStr, TokenChannel::HIDDEN),
+        ("(", TokenType::LPAREN, TokenChannel::HIDDEN),
+        ("(", TokenType::MacroString, TokenChannel::DEFAULT),
+        ("/*c*/", TokenType::CStyleComment, TokenChannel::COMMENT),
+        (")", TokenType::MacroString, TokenChannel::DEFAULT),
+        (")", TokenType::RPAREN, TokenChannel::HIDDEN),
         ]
 )]
 #[case::inline_str_expr("%StR(\");%t()\")",
@@ -1262,6 +1295,205 @@ fn test_macro_str_call(#[case] contents: &str, #[case] expected_token: Vec<impl 
         ]
 )]
 fn test_macro_str_call_error_recovery(
+    #[case] contents: &str,
+    #[case] expected_token: Vec<impl TokenTestCase>,
+    #[case] expected_error: Vec<impl ErrorTestCase>,
+) {
+    assert_lexing(contents, expected_token, expected_error);
+}
+
+#[rstest]
+#[case::basic_call("%nrsTr( );",
+    vec![
+        ("%nrsTr", TokenType::KwmNrStr, TokenChannel::HIDDEN),
+        ("(", TokenType::LPAREN, TokenChannel::HIDDEN),
+        (" ", TokenType::MacroString, TokenChannel::DEFAULT),
+        (")", TokenType::RPAREN, TokenChannel::HIDDEN),
+        (";", TokenType::SEMI, TokenChannel::DEFAULT),
+        ]
+)]
+#[case::empty("%nrsTr()",
+    vec![
+        ("%nrsTr", TokenType::KwmNrStr, TokenChannel::HIDDEN),
+        ("(", TokenType::LPAREN, TokenChannel::HIDDEN),
+        (")", TokenType::RPAREN, TokenChannel::HIDDEN),        
+        ]
+)]
+#[case::with_macro_chars("%nrstr(&9 and &&&, 9% and % )",
+    vec![
+        ("%nrstr", TokenType::KwmNrStr, TokenChannel::HIDDEN),
+        ("(", TokenType::LPAREN, TokenChannel::HIDDEN),
+        ("&9 and &&&, 9% and % ", TokenType::MacroString, TokenChannel::DEFAULT),
+        (")", TokenType::RPAREN, TokenChannel::HIDDEN),
+        ]
+)]
+#[case::with_unicode_newline_crf("%nrstr(some\r\n🔥\n)",
+    vec![
+        ("%nrstr", TokenType::KwmNrStr, TokenChannel::HIDDEN),
+        ("(", TokenType::LPAREN, TokenChannel::HIDDEN),
+        ("some\r\n🔥\n", TokenType::MacroString, TokenChannel::DEFAULT),
+        (")", TokenType::RPAREN, TokenChannel::HIDDEN),
+        ]
+)]
+#[case::nested_str_call("%nrstr(-->/*c*/ %str(/*c*/ )<--)",
+    vec![
+        ("%nrstr", TokenType::KwmNrStr, TokenChannel::HIDDEN),
+        ("(", TokenType::LPAREN, TokenChannel::HIDDEN),
+        ("-->", TokenType::MacroString, TokenChannel::DEFAULT),
+        ("/*c*/", TokenType::CStyleComment, TokenChannel::COMMENT),
+        (" %str(", TokenType::MacroString, TokenChannel::DEFAULT),
+        ("/*c*/", TokenType::CStyleComment, TokenChannel::COMMENT),
+        (" )<--", TokenType::MacroString, TokenChannel::DEFAULT),
+        (")", TokenType::RPAREN, TokenChannel::HIDDEN),
+        ]
+)]
+#[case::all_quotes("%nrsTr(%\"v %'v %%call %( %) );",
+    vec![
+        (
+            "%nrsTr",
+            TokenType::KwmNrStr,
+            TokenChannel::HIDDEN,
+            Payload::None,
+            "%nrsTr",
+        ),
+        (
+            "(",
+            TokenType::LPAREN,
+            TokenChannel::HIDDEN,
+            Payload::None,
+            "(",
+        ),
+        (
+            "%\"v %'v %%call %( %) ",
+            TokenType::MacroString,
+            TokenChannel::DEFAULT,
+            Payload::StringLiteral(0, 16),
+            "\"v 'v %call ( ) ",
+        ),
+        (
+            ")",
+            TokenType::RPAREN,
+            TokenChannel::HIDDEN,
+            Payload::None,
+            ")",
+        ),
+        (
+            ";",
+            TokenType::SEMI,
+            TokenChannel::DEFAULT,
+            Payload::None,
+            ";",
+        ),
+    ]
+)]
+#[case::nested_parens("%nrsTr((1(2)3));",
+    vec![
+        ("%nrsTr", TokenType::KwmNrStr, TokenChannel::HIDDEN),
+        ("(", TokenType::LPAREN, TokenChannel::HIDDEN),
+        ("(1(2)3)", TokenType::MacroString, TokenChannel::DEFAULT),
+        (")", TokenType::RPAREN, TokenChannel::HIDDEN),
+        (";", TokenType::SEMI, TokenChannel::DEFAULT),
+        ]
+)]
+#[case::balanced_unquoted_parens("%nrstr((/*c*/))",
+    vec![
+        ("%nrstr", TokenType::KwmNrStr, TokenChannel::HIDDEN),
+        ("(", TokenType::LPAREN, TokenChannel::HIDDEN),
+        ("(", TokenType::MacroString, TokenChannel::DEFAULT),
+        ("/*c*/", TokenType::CStyleComment, TokenChannel::COMMENT),
+        (")", TokenType::MacroString, TokenChannel::DEFAULT),
+        (")", TokenType::RPAREN, TokenChannel::HIDDEN),
+        ]
+)]
+#[case::inline_str_expr("%nrStR(\");%t()\")",
+    vec![
+        ("%nrStR", TokenType::KwmNrStr, TokenChannel::HIDDEN),
+        ("(", TokenType::LPAREN, TokenChannel::HIDDEN),
+        ("\"", TokenType::StringExprStart, TokenChannel::DEFAULT),
+        (");", TokenType::StringExprText, TokenChannel::DEFAULT),
+        ("%t", TokenType::MacroIdentifier, TokenChannel::DEFAULT),
+        ("(", TokenType::LPAREN, TokenChannel::DEFAULT),
+        (")", TokenType::RPAREN, TokenChannel::DEFAULT),
+        ("\"", TokenType::StringExprEnd, TokenChannel::DEFAULT),
+        (")", TokenType::RPAREN, TokenChannel::HIDDEN),
+        ]
+)]
+#[case::inline_str_expr_with_comment("%nrstr(/*c*/\");/*c*/%t()\" a/*c*/a)",
+    vec![
+        ("%nrstr", TokenType::KwmNrStr, TokenChannel::HIDDEN),
+        ("(", TokenType::LPAREN, TokenChannel::HIDDEN),
+        ("/*c*/", TokenType::CStyleComment, TokenChannel::COMMENT),
+        ("\"", TokenType::StringExprStart, TokenChannel::DEFAULT),
+        (");/*c*/", TokenType::StringExprText, TokenChannel::DEFAULT),
+        ("%t", TokenType::MacroIdentifier, TokenChannel::DEFAULT),
+        ("(", TokenType::LPAREN, TokenChannel::DEFAULT),
+        (")", TokenType::RPAREN, TokenChannel::DEFAULT),
+        ("\"", TokenType::StringExprEnd, TokenChannel::DEFAULT),
+        (" a", TokenType::MacroString, TokenChannel::DEFAULT),
+        ("/*c*/", TokenType::CStyleComment, TokenChannel::COMMENT),
+        ("a", TokenType::MacroString, TokenChannel::DEFAULT),
+        (")", TokenType::RPAREN, TokenChannel::HIDDEN),
+        ]
+)]
+#[case::inline_str_lit_with_comment("%nrstr(');/*c*/%t()' a)",
+    vec![
+        ("%nrstr", TokenType::KwmNrStr, TokenChannel::HIDDEN),
+        ("(", TokenType::LPAREN, TokenChannel::HIDDEN),
+        ("');/*c*/%t()'", TokenType::StringLiteral, TokenChannel::DEFAULT),
+        (" a", TokenType::MacroString, TokenChannel::DEFAULT),
+        (")", TokenType::RPAREN, TokenChannel::HIDDEN),
+        ]
+)]
+#[case::nested_call_with_ws_comment("%nrstr(pre;%t /*c*/ ()post)",
+    vec![
+        ("%nrstr", TokenType::KwmNrStr, TokenChannel::HIDDEN),
+        ("(", TokenType::LPAREN, TokenChannel::HIDDEN),
+        ("pre;%t ", TokenType::MacroString, TokenChannel::DEFAULT),
+        ("/*c*/", TokenType::CStyleComment, TokenChannel::COMMENT),
+        (" ()post", TokenType::MacroString, TokenChannel::DEFAULT),
+        (")", TokenType::RPAREN, TokenChannel::HIDDEN),
+        ]
+)]
+#[case::nested_call_with_ws_comment_no_paren("%nrstr(pre;%t /*c*/ post)",
+    vec![
+        ("%nrstr", TokenType::KwmNrStr, TokenChannel::HIDDEN),
+        ("(", TokenType::LPAREN, TokenChannel::HIDDEN),
+        ("pre;%t ", TokenType::MacroString, TokenChannel::DEFAULT),
+        ("/*c*/", TokenType::CStyleComment, TokenChannel::COMMENT),
+        (" post", TokenType::MacroString, TokenChannel::DEFAULT),
+        (")", TokenType::RPAREN, TokenChannel::HIDDEN),
+        ]
+)]
+fn test_macro_nrstr_call(#[case] contents: &str, #[case] expected_token: Vec<impl TokenTestCase>) {
+    assert_lexing(contents, expected_token, NO_ERRORS);
+}
+
+#[rstest]
+#[case::missing_open_paren("%nrstr  )",
+    vec![
+        ("%nrstr", TokenType::KwmNrStr, TokenChannel::HIDDEN),
+        ("  ", TokenType::WS, TokenChannel::HIDDEN),
+        // Recovered from missing hence empty string
+        ("", TokenType::LPAREN, TokenChannel::HIDDEN),
+        (")", TokenType::RPAREN, TokenChannel::HIDDEN),
+        ],
+    vec![
+        (ErrorType::MissingExpected("("), 8)
+        ]
+)]
+#[case::missing_closing_paren("%nrstr(%%%)",
+    vec![
+        ("%nrstr", TokenType::KwmNrStr, TokenChannel::HIDDEN, Payload::None, "%nrstr"),
+        ("(", TokenType::LPAREN, TokenChannel::HIDDEN, Payload::None, "("),
+        ("%%%)", TokenType::MacroString, TokenChannel::DEFAULT, Payload::StringLiteral(0, 2), "%)"),
+        // Recovered from missing hence empty string
+        ("", TokenType::RPAREN, TokenChannel::HIDDEN, Payload::None, ""),
+        ],
+    vec![
+        (ErrorType::MissingExpected(")"), 11)
+        ]
+)]
+fn test_macro_nrstr_call_error_recovery(
     #[case] contents: &str,
     #[case] expected_token: Vec<impl TokenTestCase>,
     #[case] expected_error: Vec<impl ErrorTestCase>,

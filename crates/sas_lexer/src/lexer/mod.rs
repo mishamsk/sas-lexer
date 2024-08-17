@@ -55,8 +55,17 @@ enum LexerMode {
     /// Note - it should alwys be preceded by the WsOrCStyleCommentOnly mode
     /// and a checkpoint created!
     MaybeMacroCallArgs,
-    /// The state for inner macro expressions, as in `%str(-->1+1<--)`
-    MacroStrQuotedExpr,
+    // The u32 value is the current parenthesis nesting level.
+    // Macro arguments allow balanced parenthesis nesting and
+    // inside these parenthesis, `,` and `=` are not treated as
+    // terminators.
+    MacroCallArgOrValue(u32),
+    MacroCallValue(u32),
+    /// The state for lexing inside an %str/%nrstr call.
+    /// as in `%str(-->1+1<--)`. Boolean flag indicates if we
+    /// % and & are masked, i.e. this is %nrstr.
+    /// u32 value is the current parenthesis nesting level, see MacroCallArgOrValue
+    MacroStrQuotedExpr(bool, u32),
     /// Macro arithmetic/logical expression, as in `%eval(-->1+1<--)`
     MacroEval,
     /// Mode for lexing right after %let/%local/%global, where
@@ -64,12 +73,6 @@ enum LexerMode {
     /// have found at least one token of the variable name
     MacroLetVarName(bool),
     MacroLetInitializer,
-    // The u32 value is the current parenthesis nesting level.
-    // Macro arguments allow balanced parenthesis nesting and
-    // inside these parenthesis, `,` and `=` are not treated as
-    // terminators.
-    MacroCallArgOrValue(u32),
-    MacroCallValue(u32),
 }
 
 #[derive(Debug)]
@@ -321,6 +324,33 @@ impl<'src> Lexer<'src> {
             }
         }
 
+        self.finalize_lexing();
+
+        (self.buffer, self.errors.into_boxed_slice())
+    }
+
+    /// This function gracefully unwinds the stack, emitting any ephemeral
+    /// tokens and errors if necessary, and adds the mandatory EOF token.
+    fn finalize_lexing(&mut self) {
+        // Iterate over the mode stack in reverse and unwind it
+        while let Some(mode) = self.mode_stack.last() {
+            match mode {
+                LexerMode::ExpectToken(content, tok_type, tok_channel) => {
+                    // If we were expecting a token - call lexing that will effectively
+                    // emit an error and the token
+                    self.lex_expected_token(content, *tok_type, *tok_channel)
+                }
+                LexerMode::Default if self.mode_stack.len() == 1 => {
+                    // The default mode is the last one, we can safely exit
+                }
+                _ => {
+                    // For now, ignore all other modes. Maybe we should emit an error
+                }
+            }
+
+            self.mode_stack.pop();
+        }
+
         let last_line = self.buffer.last_line().unwrap_or_else(||
             // Should not be possible, since we add the first line when creating
             // the lexer, but whatever
@@ -335,8 +365,6 @@ impl<'src> Lexer<'src> {
             last_line,
             Payload::None,
         );
-
-        (self.buffer, self.errors.into_boxed_slice())
     }
 
     fn lex_token(&mut self) {
@@ -393,7 +421,9 @@ impl<'src> Lexer<'src> {
             LexerMode::Default => self.lex_mode_default(),
             LexerMode::StringExpr => self.lex_mode_str_expr(),
             LexerMode::MacroEval => !todo!("Macro eval mode"),
-            LexerMode::MacroStrQuotedExpr => self.lex_macro_str_quoted_expr(),
+            LexerMode::MacroStrQuotedExpr(mask_macro, pnl) => {
+                self.lex_macro_str_quoted_expr(mask_macro, pnl)
+            }
             LexerMode::MacroCallArgOrValue(pnl) => self.lex_macro_call_arg_or_value(pnl, true),
             LexerMode::MacroCallValue(pnl) => self.lex_macro_call_arg_or_value(pnl, false),
             LexerMode::MacroLetVarName(found_name) => self.lex_macro_ident_expr(!found_name),
@@ -767,6 +797,14 @@ impl<'src> Lexer<'src> {
                     if self.cursor.peek_next().is_ascii_alphabetic() {
                         // Hit a following macro statement => pop mode and exit
                         // without consuming the character
+
+                        // This would lead to breaking SAS session with:
+                        // ERROR: Open code statement recursion detected.
+                        // so we emit an error here in addition to missing )
+                        // that will emit during mode stack pop
+                        self.emit_error(ErrorType::SASSessionUnrecoverableError(
+                            "ERROR: Open code statement recursion detected.",
+                        ));
                         self.pop_mode();
                         return;
                     }
@@ -839,7 +877,7 @@ impl<'src> Lexer<'src> {
         ));
 
         // Helper function to emit the token and update the mode if needed
-        let emit_token_update_nesting = |lexer: &mut Lexer, local_parens_nesting: u32| {
+        let emit_token_update_nesting = |lexer: &mut Lexer, local_parens_nesting: i32| {
             lexer.emit_token(TokenChannel::DEFAULT, TokenType::MacroString, Payload::None);
 
             // If the local parens nesting has been affected, update the mode
@@ -848,12 +886,12 @@ impl<'src> Lexer<'src> {
                 // string section to push the nesting level below 0
                 // as at the moment of reaching 0, we should have popped the mode
                 // and exited the lexing of the string
-                debug_assert!(parens_nesting_level + local_parens_nesting > 0);
+                debug_assert!(parens_nesting_level as i64 + local_parens_nesting as i64 > 0);
 
                 if let Some(m) = lexer.mode_stack.last_mut() {
                     match m {
                         LexerMode::MacroCallArgOrValue(pnl) | LexerMode::MacroCallValue(pnl) => {
-                            *pnl += local_parens_nesting;
+                            *pnl = pnl.wrapping_add_signed(local_parens_nesting);
                         }
                         _ => unreachable!(),
                     }
@@ -865,7 +903,7 @@ impl<'src> Lexer<'src> {
         // and eventually combine with the nesting that has been passed
         // via mode. This would trigger a possible mode update if
         // nesting level has been affected.
-        let mut local_parens_nesting = 0;
+        let mut local_parens_nesting = 0i32;
 
         loop {
             match self.cursor.peek() {
@@ -914,19 +952,19 @@ impl<'src> Lexer<'src> {
                     local_parens_nesting += 1;
                     self.cursor.advance();
                 }
-                ')' if parens_nesting_level + local_parens_nesting != 0 => {
+                ')' if parens_nesting_level.wrapping_add_signed(local_parens_nesting) != 0 => {
                     // Decrease the local parens nesting level
                     local_parens_nesting -= 1;
                     self.cursor.advance();
                 }
-                ')' if parens_nesting_level + local_parens_nesting == 0 => {
+                ')' if parens_nesting_level.wrapping_add_signed(local_parens_nesting) == 0 => {
                     // Found the terminator of the entire macro call arguments,
                     // emit the token, pop the mode and return
                     self.emit_token(TokenChannel::DEFAULT, TokenType::MacroString, Payload::None);
                     self.pop_mode();
                     return;
                 }
-                ',' if parens_nesting_level + local_parens_nesting == 0 => {
+                ',' if parens_nesting_level.wrapping_add_signed(local_parens_nesting) == 0 => {
                     // Found the terminator, pop the mode and push new modes
                     // to expect stuff, emit token then return
                     self.emit_token(TokenChannel::DEFAULT, TokenType::MacroString, Payload::None);
@@ -942,7 +980,7 @@ impl<'src> Lexer<'src> {
                     return;
                 }
                 '=' if terminate_on_assign
-                    && (parens_nesting_level + local_parens_nesting == 0) =>
+                    && (parens_nesting_level.wrapping_add_signed(local_parens_nesting) == 0) =>
                 {
                     // Found the terminator between argument name and value,
                     // pop the mode and push new modes to expect stuff then return
@@ -968,8 +1006,11 @@ impl<'src> Lexer<'src> {
         }
     }
 
-    fn lex_macro_str_quoted_expr(&mut self) {
-        debug_assert!(matches!(self.mode(), LexerMode::MacroStrQuotedExpr));
+    fn lex_macro_str_quoted_expr(&mut self, mask_macro: bool, parens_nesting_level: u32) {
+        debug_assert!(matches!(
+            self.mode(),
+            LexerMode::MacroStrQuotedExpr(m, l) if m == mask_macro && l == parens_nesting_level
+        ));
 
         self.start_token();
 
@@ -995,21 +1036,21 @@ impl<'src> Lexer<'src> {
                     // string lexing handle it, but this way we
                     // we avoid one extra check
                     self.cursor.advance();
-                    self.lex_macro_string_in_str_call();
+                    self.lex_macro_string_in_str_call(mask_macro, parens_nesting_level);
                 }
             }
-            '&' => {
+            '&' if !mask_macro => {
                 if !self.lex_macro_var_expr() {
                     // Not a macro var, just a sequence of ampersands
                     // consume the sequence and continue lexing the string
                     self.cursor.eat_while(|c| c == '&');
-                    self.lex_macro_string_in_str_call();
+                    self.lex_macro_string_in_str_call(mask_macro, parens_nesting_level);
                 }
             }
-            '%' => {
+            '%' if !mask_macro => {
                 // Check if this is a quote char
                 if matches!(self.cursor.peek_next(), '"' | '\'' | '%' | '(' | ')') {
-                    self.lex_macro_string_in_str_call();
+                    self.lex_macro_string_in_str_call(mask_macro, parens_nesting_level);
                     return;
                 }
 
@@ -1035,7 +1076,7 @@ impl<'src> Lexer<'src> {
                     // string lexing handle it, but this way we
                     // we avoid one extra check
                     self.cursor.advance();
-                    self.lex_macro_string_in_str_call();
+                    self.lex_macro_string_in_str_call(mask_macro, parens_nesting_level);
                 }
             }
             '\n' => {
@@ -1045,9 +1086,9 @@ impl<'src> Lexer<'src> {
                 // we avoid one extra check
                 self.cursor.advance();
                 self.add_line();
-                self.lex_macro_string_in_str_call();
+                self.lex_macro_string_in_str_call(mask_macro, parens_nesting_level);
             }
-            ')' => {
+            ')' if parens_nesting_level == 0 => {
                 // Found the terminator, pop the mode and return
                 self.pop_mode();
             }
@@ -1055,16 +1096,46 @@ impl<'src> Lexer<'src> {
                 // Not a terminator, just a regular character in the string.
                 // Do not consume in case it is an opening parens,
                 // just continue lexing the string
-                self.lex_macro_string_in_str_call();
+                self.lex_macro_string_in_str_call(mask_macro, parens_nesting_level);
             }
         }
     }
 
-    fn lex_macro_string_in_str_call(&mut self) {
-        debug_assert!(matches!(self.mode(), LexerMode::MacroStrQuotedExpr));
+    fn lex_macro_string_in_str_call(&mut self, mask_macro: bool, parens_nesting_level: u32) {
+        debug_assert!(matches!(
+            self.mode(),
+            LexerMode::MacroStrQuotedExpr(m, l) if m == mask_macro && l == parens_nesting_level
+        ));
 
-        // Keep track of parens nesting
-        let mut parens = 0u32;
+        // Helper function to emit the token and update the mode if needed
+        let emit_token_update_nesting =
+            |lexer: &mut Lexer, local_parens_nesting: i32, payload: Payload| {
+                lexer.emit_token(TokenChannel::DEFAULT, TokenType::MacroString, payload);
+
+                // If the local parens nesting has been affected, update the mode
+                if local_parens_nesting != 0 {
+                    // If our logic is correct, it should be impossible for a current
+                    // string section to push the nesting level below 0
+                    // as at the moment of reaching 0, we should have popped the mode
+                    // and exited the lexing of the string
+                    debug_assert!(parens_nesting_level as i64 + local_parens_nesting as i64 > 0);
+
+                    if let Some(m) = lexer.mode_stack.last_mut() {
+                        match m {
+                            LexerMode::MacroStrQuotedExpr(_, pnl) => {
+                                *pnl = pnl.wrapping_add_signed(local_parens_nesting);
+                            }
+                            _ => unreachable!(),
+                        }
+                    };
+                }
+            };
+
+        // We track the current section of macro string for parens
+        // and eventually combine with the nesting that has been passed
+        // via mode. This would trigger a possible mode update if
+        // nesting level has been affected.
+        let mut local_parens_nesting = 0i32;
 
         // See `lex_single_quoted_str` for in-depth comments on the logic
         // of lexing possibly escaped text in a string expression
@@ -1085,7 +1156,7 @@ impl<'src> Lexer<'src> {
                         None, // will use the current byte offset
                     );
 
-                    self.emit_token(TokenChannel::DEFAULT, TokenType::MacroString, payload);
+                    emit_token_update_nesting(self, local_parens_nesting, payload);
                     return;
                 }
                 '/' if self.cursor.peek_next() == '*' => {
@@ -1099,10 +1170,10 @@ impl<'src> Lexer<'src> {
                         None, // will use the current byte offset
                     );
 
-                    self.emit_token(TokenChannel::DEFAULT, TokenType::MacroString, payload);
+                    emit_token_update_nesting(self, local_parens_nesting, payload);
                     return;
                 }
-                '&' => {
+                '&' if !mask_macro => {
                     let (is_macro_amp, amp_count) = is_macro_amp(self.cursor.chars());
 
                     if is_macro_amp {
@@ -1114,7 +1185,7 @@ impl<'src> Lexer<'src> {
                             None, // will use the current byte offset
                         );
 
-                        self.emit_token(TokenChannel::DEFAULT, TokenType::MacroString, payload);
+                        emit_token_update_nesting(self, local_parens_nesting, payload);
 
                         return;
                     }
@@ -1145,7 +1216,7 @@ impl<'src> Lexer<'src> {
                         continue;
                     }
 
-                    if is_macro_percent(self.cursor.peek_next(), false) {
+                    if !mask_macro && is_macro_percent(self.cursor.peek_next(), false) {
                         // Hit a macro call or statment in/after the string expression => emit the text token
                         let payload = self.resolve_string_literal_payload(
                             lit_start_idx,
@@ -1154,7 +1225,7 @@ impl<'src> Lexer<'src> {
                             None, // will use the current byte offset
                         );
 
-                        self.emit_token(TokenChannel::DEFAULT, TokenType::MacroString, payload);
+                        emit_token_update_nesting(self, local_parens_nesting, payload);
 
                         return;
                     }
@@ -1166,7 +1237,17 @@ impl<'src> Lexer<'src> {
                     self.cursor.advance();
                     self.add_line();
                 }
-                ')' if parens == 0 => {
+                '(' => {
+                    // Increase the local parens nesting level
+                    local_parens_nesting += 1;
+                    self.cursor.advance();
+                }
+                ')' if parens_nesting_level.wrapping_add_signed(local_parens_nesting) != 0 => {
+                    // Decrease the local parens nesting level
+                    local_parens_nesting -= 1;
+                    self.cursor.advance();
+                }
+                ')' if parens_nesting_level.wrapping_add_signed(local_parens_nesting) == 0 => {
                     // Found the terminator, emit the token, pop the mode and return
                     let payload = self.resolve_string_literal_payload(
                         lit_start_idx,
@@ -1179,35 +1260,10 @@ impl<'src> Lexer<'src> {
                     self.pop_mode();
                     return;
                 }
-                '(' => {
-                    self.cursor.advance();
-                    parens += 1
-                }
-                ')' => {
-                    self.cursor.advance();
-                    parens -= 1
-                }
                 _ => {
                     // Not a terminator, just a regular character in the string
                     // consume and continue lexing the string
                     self.cursor.advance();
-                }
-            }
-        }
-    }
-
-    fn eat_ws(&mut self) {
-        loop {
-            match self.cursor.peek() {
-                '\n' => {
-                    self.cursor.advance();
-                    self.add_line();
-                }
-                c if c.is_whitespace() => {
-                    self.cursor.advance();
-                }
-                _ => {
-                    return;
                 }
             }
         }
@@ -2497,11 +2553,13 @@ impl<'src> Lexer<'src> {
             });
 
         match tok_type {
-            Some(TokenType::NrStrLiteral) => {
+            Some(tok_type @ TokenType::KwmStr) | Some(tok_type @ TokenType::KwmNrStr) => {
                 self.cursor.advance_by(advance_by);
 
-                // This one has special handling
-                self.lex_macro_nrstr_quoted_literal();
+                // These ones has special handling
+                self.emit_token(TokenChannel::HIDDEN, tok_type, Payload::None);
+
+                self.expect_macro_str_call_args(tok_type == TokenType::KwmNrStr);
 
                 true
             }
@@ -2546,6 +2604,34 @@ impl<'src> Lexer<'src> {
         // and then our special mode that will check for the opening parenthesis
         // and possibly rollback to the checkpoint
         self.push_mode(LexerMode::MaybeMacroCallArgs);
+        self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+    }
+
+    /// A helper to populate the expected states for the %str/%nrstr call
+    ///
+    /// Should be called after adding the %str/%nrstr token
+    fn expect_macro_str_call_args(&mut self, is_nrstr: bool) {
+        // Populate the expected states for the %str/%nrstr call
+        // in reverse order, as the lexer will unwind the stack
+        // as it lexes the tokens
+
+        // We use hidden channel for the %str/%nrstr and the wrapping parens
+        // since this is a pure compile time directive in SAS which just allows
+        // having a macro text expression with things that would otherwise be
+        // interpreted as macro calls or removed (like spaces)
+
+        self.push_mode(LexerMode::ExpectToken(
+            ")",
+            TokenType::RPAREN,
+            TokenChannel::HIDDEN,
+        ));
+        self.push_mode(LexerMode::MacroStrQuotedExpr(is_nrstr, 0));
+        self.push_mode(LexerMode::ExpectToken(
+            "(",
+            TokenType::LPAREN,
+            TokenChannel::HIDDEN,
+        ));
+        // Leading insiginificant WS before opening parenthesis
         self.push_mode(LexerMode::WsOrCStyleCommentOnly);
     }
 
@@ -2647,22 +2733,18 @@ impl<'src> Lexer<'src> {
                         self.emit_token(TokenChannel::HIDDEN, kw_tok_type, Payload::None);
 
                         // Populate the expected states for the %str() call
-                        // in reverse order, as the lexer will unwind the stack
-                        // as it lexes the tokens
-                        self.push_mode(LexerMode::ExpectToken(
-                            ")",
-                            TokenType::RPAREN,
-                            TokenChannel::HIDDEN,
-                        ));
-                        // The handler fo arguments will push the mode for the comma, etc.
-                        self.push_mode(LexerMode::MacroStrQuotedExpr);
-                        self.push_mode(LexerMode::ExpectToken(
-                            "(",
-                            TokenType::LPAREN,
-                            TokenChannel::HIDDEN,
-                        ));
-                        // Leading insiginificant WS before opening parenthesis
-                        self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+                        self.expect_macro_str_call_args(false);
+                    }
+                    TokenType::KwmNrStr => {
+                        // Add the token
+                        // We use hidden channel for the %nrstr and the wrapping parens
+                        // since this is a pure compile time directive in SAS which just allows
+                        // having a macro text expression with things that would otherwise be
+                        // interpreted as macro calls or removed (like spaces)
+                        self.emit_token(TokenChannel::HIDDEN, kw_tok_type, Payload::None);
+
+                        // Populate the expected states for the %str() call
+                        self.expect_macro_str_call_args(true);
                     }
                     TokenType::KwmLet => {
                         // Add the token
@@ -2698,18 +2780,6 @@ impl<'src> Lexer<'src> {
                 }
                 return;
             }
-
-            match ident.as_str() {
-                // Nrstr is not a keyword, but a special case of quoted literal
-                "NRSTR" => {
-                    self.lex_macro_nrstr_quoted_literal();
-                    return;
-                }
-                _ => {
-                    // Do nothing, fall through to the custom macro call
-                    // or label handling below
-                }
-            }
         }
 
         // custom macro call or label
@@ -2720,59 +2790,6 @@ impl<'src> Lexer<'src> {
         );
 
         self.expect_macro_call_args();
-    }
-
-    fn lex_macro_nrstr_quoted_literal(&mut self) {
-        debug_assert!(self.pending_token_text().to_ascii_uppercase().as_str() == "%NRSTR");
-
-        // Consume any whitespace before the opening parenthesis
-        self.eat_ws();
-
-        // Check left parenthesis
-        if !self.cursor.eat_char('(') {
-            // Emit an error but continue lexing
-            self.emit_error(ErrorType::MissingExpected("("));
-        }
-
-        // Keep track of parens nesting
-        let mut parens = 1;
-
-        // eat until the closing parenthesis
-        while let Some(c) = self.cursor.advance() {
-            match c {
-                '(' => parens += 1,
-                ')' => {
-                    parens -= 1;
-                    if parens == 0 {
-                        self.emit_token(
-                            TokenChannel::DEFAULT,
-                            TokenType::NrStrLiteral,
-                            Payload::None,
-                        );
-                        return;
-                    }
-                }
-                '%' => {
-                    // Check if this is a quote char
-                    if matches!(self.cursor.peek(), '%' | '(' | ')') {
-                        // Consume the quoted following char
-                        self.cursor.advance();
-                    }
-                }
-                '\n' => {
-                    self.add_line();
-                }
-                _ => {}
-            }
-        }
-
-        // If we reached here, the literal is unterminated
-        self.emit_token(
-            TokenChannel::DEFAULT,
-            TokenType::NrStrLiteral,
-            Payload::None,
-        );
-        self.emit_error(ErrorType::MissingExpected(")"));
     }
 }
 

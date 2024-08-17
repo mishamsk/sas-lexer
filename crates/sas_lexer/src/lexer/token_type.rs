@@ -126,8 +126,8 @@ pub enum TokenType {
     KwmQuote,    // QUOTE
     KwmSuperq,   // SUPERQ
     // Sudo functions (compile time quoting)
-    KwmStr,       // STR
-    NrStrLiteral, // NRSTR is not a keyword, as it is lexed with the text together
+    KwmStr,   // STR
+    KwmNrStr, // NRSTR
     // Statements
     KwmAbort,          // ABORT
     KwmCopy,           // COPY
@@ -329,7 +329,7 @@ pub(super) fn parse_macro_keyword<S: AsRef<str>>(ident: S) -> Option<TokenType> 
 
 #[inline]
 pub(crate) fn get_macro_quote_call_token_type_range() -> std::ops::RangeInclusive<u16> {
-    TokenType::KwmBquote as u16..=TokenType::NrStrLiteral as u16
+    TokenType::KwmBquote as u16..=TokenType::KwmNrStr as u16
 }
 
 #[inline]
@@ -428,7 +428,7 @@ mod tests {
                         | TokenType::KwmQuote
                         | TokenType::KwmSuperq
                         | TokenType::KwmStr
-                        | TokenType::NrStrLiteral
+                        | TokenType::KwmNrStr
                 )
             );
         }
