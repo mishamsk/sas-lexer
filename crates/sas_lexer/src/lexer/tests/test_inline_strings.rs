@@ -176,7 +176,7 @@ fn test_non_string_literals(
 
 #[rstest]
 fn test_unterminated_string_literal(
-    #[values("'unterminated string", "\"unterminated string")] source: &str,
+    #[values("'", "'unterminated string", "\"", "\"unterminated string")] source: &str,
 ) {
     assert_lexing(
         source,
@@ -900,6 +900,20 @@ vec![
     vec![
         (ErrorType::MissingExpected("ERROR: Expecting a variable name after %LET."), 5),
         (ErrorType::MissingExpected("="), 5)
+        ]
+)]
+#[case::miss_name_at_end("%let",
+    vec![
+        ("%let", TokenType::KwmLet),
+        // Recovered from missing assign hence empty string
+        ("", TokenType::ASSIGN),        
+        // Recovered, hence empty string
+        // But doesn't produce an error!!!
+        ("", TokenType::SEMI),        
+        ],
+    vec![
+        (ErrorType::MissingExpected("ERROR: Expecting a variable name after %LET."), 4),
+        (ErrorType::MissingExpected("="), 4)
         ]
 )]
 #[case::miss_name_wrong_ident_start("%let 9v=1;",
