@@ -38,3 +38,6 @@ exit = "warn"
 get_unwrap = "warn"
 unwrap_used = "warn"
 indexing_slicing = "deny"
+
+[profile.release]
+debug = true
