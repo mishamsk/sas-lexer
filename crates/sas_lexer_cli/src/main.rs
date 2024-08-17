@@ -8,6 +8,7 @@ use sas_lexer::print::error_to_string;
 use sas_lexer::print::token_to_string;
 use sas_lexer::TokenIdx;
 use sas_lexer::TokenizedBuffer;
+use walkdir::WalkDir;
 
 use std::fs;
 use std::io;
@@ -19,10 +20,11 @@ use std::path::PathBuf;
 #[command(version, author, about, long_about = None)]
 /// Lex SAS code from a file or stdin
 struct Cli {
-    /// A file path to read from. If not provided, reads from stdin
-    file: Option<PathBuf>,
+    /// A file or folder path to read from. If not provided, reads from stdin.
+    /// If a folder is provided, reads all files with the `.sas` extension.
+    file_or_dir: Option<PathBuf>,
 
-    /// Print the tokens to the console
+    /// Print the tokens to the console. Ignored if a folder is provided.
     #[arg(short, long)]
     print: bool,
 
@@ -84,14 +86,28 @@ fn lex_and_print(source: &String, print: bool) {
 fn main() -> io::Result<()> {
     let cli = Cli::parse();
 
-    if let Some(file_path) = cli.file.as_ref() {
-        let file_path_str = file_path.to_str().unwrap_or("<invalid path>");
+    if let Some(source_path) = cli.file_or_dir.as_ref() {
+        if source_path.is_dir() {
+            for entry in WalkDir::new(source_path).into_iter().filter_map(Result::ok) {
+                let entry_path = entry.path();
+                if entry_path.extension().and_then(|ext| ext.to_str()) == Some("sas") {
+                    if let Ok(contents) = fs::read_to_string(entry_path) {
+                        println!("Lexing file: {}", entry_path.display());
+                        lex_and_print(&contents, false); // Always pass false for cli.print
+                    } else {
+                        eprintln!("Failed to read file: {}", entry_path.display());
+                    }
+                }
+            }
+        } else if let Ok(contents) = fs::read_to_string(source_path) {
+            let file_path_str = source_path.to_str().unwrap_or("<invalid path>");
 
-        if let Ok(contents) = fs::read_to_string(file_path) {
             println!("Lexing file: {file_path_str}");
 
             lex_and_print(&contents, cli.print);
         } else {
+            let file_path_str = source_path.to_str().unwrap_or("<invalid path>");
+
             eprintln!("Failed to read file: {file_path_str}");
         }
     } else {
