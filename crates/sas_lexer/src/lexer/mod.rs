@@ -1066,18 +1066,40 @@ impl<'src> Lexer<'src> {
         // Keep track of parens nesting
         let mut parens = 0u32;
 
+        // See `lex_single_quoted_str` for in-depth comments on the logic
+        // of lexing possibly escaped text in a string expression
+        let mut lit_start_idx = self.buffer.next_string_literal_start();
+        let mut lit_end_idx = lit_start_idx;
+        let mut last_lit_end_byte_offset = self.cur_byte_offset();
+
         loop {
             match self.cursor.peek() {
                 '\'' | '"' | EOF_CHAR => {
                     // Reached the end of the section of a macro string
                     // Emit the text token and return
-                    self.emit_token(TokenChannel::DEFAULT, TokenType::MacroString, Payload::None);
+
+                    let payload = self.resolve_string_literal_payload(
+                        lit_start_idx,
+                        lit_end_idx,
+                        last_lit_end_byte_offset,
+                        None, // will use the current byte offset
+                    );
+
+                    self.emit_token(TokenChannel::DEFAULT, TokenType::MacroString, payload);
                     return;
                 }
                 '/' if self.cursor.peek_next() == '*' => {
                     // Start of a comment in a macro string
                     // Emit the text token and return
-                    self.emit_token(TokenChannel::DEFAULT, TokenType::MacroString, Payload::None);
+
+                    let payload = self.resolve_string_literal_payload(
+                        lit_start_idx,
+                        lit_end_idx,
+                        last_lit_end_byte_offset,
+                        None, // will use the current byte offset
+                    );
+
+                    self.emit_token(TokenChannel::DEFAULT, TokenType::MacroString, payload);
                     return;
                 }
                 '&' => {
@@ -1085,11 +1107,14 @@ impl<'src> Lexer<'src> {
 
                     if is_macro_amp {
                         // Hit a macro var expr in the string expression => emit the text token
-                        self.emit_token(
-                            TokenChannel::DEFAULT,
-                            TokenType::MacroString,
-                            Payload::None,
+                        let payload = self.resolve_string_literal_payload(
+                            lit_start_idx,
+                            lit_end_idx,
+                            last_lit_end_byte_offset,
+                            None, // will use the current byte offset
                         );
+
+                        self.emit_token(TokenChannel::DEFAULT, TokenType::MacroString, payload);
 
                         return;
                     }
@@ -1100,19 +1125,36 @@ impl<'src> Lexer<'src> {
                 '%' => {
                     // Check if this is a quote char
                     if matches!(self.cursor.peek_next(), '"' | '\'' | '%' | '(' | ')') {
-                        // Quoted char, consume both % and the quoted one and continue
+                        // Quoted char
+
+                        // First, store the literal section before the escape percent
+                        let (new_start, new_end) =
+                            self.add_string_literal(last_lit_end_byte_offset, None);
+                        lit_start_idx = min(lit_start_idx, new_start);
+                        lit_end_idx = new_end;
+
+                        // Now advance the cursor past the percent
                         self.cursor.advance();
+
+                        // And update the last byte offset - this will ensure that the
+                        // following escaped char will be incuded in the next literal section
+                        last_lit_end_byte_offset = self.cur_byte_offset();
+
+                        // Finally, advance the cursor past the quoted char
                         self.cursor.advance();
                         continue;
                     }
 
                     if is_macro_percent(self.cursor.peek_next(), false) {
                         // Hit a macro call or statment in/after the string expression => emit the text token
-                        self.emit_token(
-                            TokenChannel::DEFAULT,
-                            TokenType::MacroString,
-                            Payload::None,
+                        let payload = self.resolve_string_literal_payload(
+                            lit_start_idx,
+                            lit_end_idx,
+                            last_lit_end_byte_offset,
+                            None, // will use the current byte offset
                         );
+
+                        self.emit_token(TokenChannel::DEFAULT, TokenType::MacroString, payload);
 
                         return;
                     }
@@ -1126,7 +1168,14 @@ impl<'src> Lexer<'src> {
                 }
                 ')' if parens == 0 => {
                     // Found the terminator, emit the token, pop the mode and return
-                    self.emit_token(TokenChannel::DEFAULT, TokenType::MacroString, Payload::None);
+                    let payload = self.resolve_string_literal_payload(
+                        lit_start_idx,
+                        lit_end_idx,
+                        last_lit_end_byte_offset,
+                        None, // will use the current byte offset
+                    );
+
+                    self.emit_token(TokenChannel::DEFAULT, TokenType::MacroString, payload);
                     self.pop_mode();
                     return;
                 }
@@ -1225,13 +1274,22 @@ impl<'src> Lexer<'src> {
 
         // When lexing the string, if we encounter a double quote,
         // i.e. an escaped quote, we'll need to store the
-        // an unescaped string literal in the buufer, so we need
+        // unescaped string literal in the buufer, so we need
         // a number of vars to track the start, the end of the literal
-        // in the buffer as well as the byte offset in the cursor as we go
+        // in the buffer as well as the byte offset in the cursor as we go.
         // The common case is that we'll not need to store the literal
+        // as we won't see any escaped quotes, hence they are not always
+        // used in the end.
 
+        // This var stores the true start of the literal in the buffer
         let mut lit_start_idx = self.buffer.next_string_literal_start();
+        // This var stores the true end of the literal in the buffer.
+        // We are adding multiple "sections" of the literal to the buffer
+        // moving the end as we go.
         let mut lit_end_idx = lit_start_idx;
+        // This var stores the byte offset of the end of the source range
+        // for the last literal section added to the buffer. Basically this
+        // allows "skipping" parts of the source text that are quote characters
         let mut last_lit_end_byte_offset = self.cur_byte_offset();
 
         // Now lex the string
@@ -1451,19 +1509,13 @@ impl<'src> Lexer<'src> {
     }
 
     fn lex_str_expr_text(&mut self) {
-        // When lexing the string, if we encounter a double quote,
-        // i.e. an escaped quote, we'll need to store the
-        // an unescaped string literal in the buufer, so we need
-        // a number of vars to track the start, the end of the literal
-        // in the buffer as well as the byte offset in the cursor as we go
-        // The common case is that we'll not need to store the literal
-
+        // See `lex_single_quoted_str` for in-depth comments on the logic
+        // of lexing possibly escaped text in a string expression
         let mut lit_start_idx = self.buffer.next_string_literal_start();
         let mut lit_end_idx = lit_start_idx;
         let mut last_lit_end_byte_offset = self.cur_byte_offset();
 
         // Now lex the string
-
         loop {
             match self.cursor.peek() {
                 '&' => {
