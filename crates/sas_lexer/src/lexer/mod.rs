@@ -45,7 +45,7 @@ enum LexerMode {
     /// emitting an error but also creating the expected token
     ///
     /// SAFETY: The string must not contain newlines
-    ExpectToken(&'static str, TokenType),
+    ExpectToken(&'static str, TokenType, TokenChannel),
     /// A special mode that goes after non-statement macro identifiers
     /// that checks if the first NON-ws or cstyle follower is (.
     /// If found, adds necessary mode stack to parse the macro call args.
@@ -369,7 +369,11 @@ impl<'src> Lexer<'src> {
                     self.pop_mode();
 
                     // Populate the remaining expected states for the macro call
-                    self.push_mode(LexerMode::ExpectToken(")", TokenType::RPAREN));
+                    self.push_mode(LexerMode::ExpectToken(
+                        ")",
+                        TokenType::RPAREN,
+                        TokenChannel::DEFAULT,
+                    ));
                     // The handler fo arguments will push the mode for the comma, etc.
                     self.push_mode(LexerMode::MacroCallArgOrValue(0));
                     // Leading insiginificant WS before the first argument
@@ -383,7 +387,9 @@ impl<'src> Lexer<'src> {
                     self.rollback();
                 }
             }
-            LexerMode::ExpectToken(content, tok_type) => self.lex_expected_token(content, tok_type),
+            LexerMode::ExpectToken(content, tok_type, tok_channel) => {
+                self.lex_expected_token(content, tok_type, tok_channel)
+            }
             LexerMode::Default => self.lex_mode_default(),
             LexerMode::StringExpr => self.lex_mode_str_expr(),
             LexerMode::MacroEval => !todo!("Macro eval mode"),
@@ -395,8 +401,16 @@ impl<'src> Lexer<'src> {
         }
     }
 
-    fn lex_expected_token(&mut self, content: &'static str, tok_type: TokenType) {
-        debug_assert_eq!(self.mode(), LexerMode::ExpectToken(content, tok_type));
+    fn lex_expected_token(
+        &mut self,
+        content: &'static str,
+        tok_type: TokenType,
+        tok_channel: TokenChannel,
+    ) {
+        debug_assert_eq!(
+            self.mode(),
+            LexerMode::ExpectToken(content, tok_type, tok_channel)
+        );
         debug_assert!(!content.is_empty() && !content.contains('\n'));
 
         self.start_token();
@@ -414,7 +428,7 @@ impl<'src> Lexer<'src> {
             self.cursor.advance_by(content.chars().count() as u32);
         }
 
-        self.emit_token(TokenChannel::DEFAULT, tok_type, Payload::None);
+        self.emit_token(tok_channel, tok_type, Payload::None);
         self.pop_mode();
     }
 
@@ -781,7 +795,11 @@ impl<'src> Lexer<'src> {
                 self.push_mode(LexerMode::MacroCallArgOrValue(0));
                 // Leading insiginificant WS before the argument
                 self.push_mode(LexerMode::WsOrCStyleCommentOnly);
-                self.push_mode(LexerMode::ExpectToken(",", TokenType::COMMA));
+                self.push_mode(LexerMode::ExpectToken(
+                    ",",
+                    TokenType::COMMA,
+                    TokenChannel::DEFAULT,
+                ));
             }
             ')' if parens_nesting_level == 0 => {
                 // Found the terminator of the entire macro call arguments,
@@ -795,7 +813,11 @@ impl<'src> Lexer<'src> {
                 self.push_mode(LexerMode::MacroCallValue(0));
                 // Leading insiginificant WS before the argument
                 self.push_mode(LexerMode::WsOrCStyleCommentOnly);
-                self.push_mode(LexerMode::ExpectToken("=", TokenType::ASSIGN));
+                self.push_mode(LexerMode::ExpectToken(
+                    "=",
+                    TokenType::ASSIGN,
+                    TokenChannel::DEFAULT,
+                ));
             }
             _ => {
                 // Not a terminator, just a regular character in the string
@@ -912,7 +934,11 @@ impl<'src> Lexer<'src> {
                     self.push_mode(LexerMode::MacroCallArgOrValue(0));
                     // Leading insiginificant WS before the argument
                     self.push_mode(LexerMode::WsOrCStyleCommentOnly);
-                    self.push_mode(LexerMode::ExpectToken(",", TokenType::COMMA));
+                    self.push_mode(LexerMode::ExpectToken(
+                        ",",
+                        TokenType::COMMA,
+                        TokenChannel::DEFAULT,
+                    ));
                     return;
                 }
                 '=' if terminate_on_assign
@@ -926,7 +952,11 @@ impl<'src> Lexer<'src> {
                     self.push_mode(LexerMode::MacroCallValue(0));
                     // Leading insiginificant WS before the argument
                     self.push_mode(LexerMode::WsOrCStyleCommentOnly);
-                    self.push_mode(LexerMode::ExpectToken("=", TokenType::ASSIGN));
+                    self.push_mode(LexerMode::ExpectToken(
+                        "=",
+                        TokenType::ASSIGN,
+                        TokenChannel::DEFAULT,
+                    ));
                     return;
                 }
                 _ => {
@@ -2563,10 +2593,18 @@ impl<'src> Lexer<'src> {
                         // Populate the expected states for the %str() call
                         // in reverse order, as the lexer will unwind the stack
                         // as it lexes the tokens
-                        self.push_mode(LexerMode::ExpectToken(")", TokenType::RPAREN));
+                        self.push_mode(LexerMode::ExpectToken(
+                            ")",
+                            TokenType::RPAREN,
+                            TokenChannel::DEFAULT,
+                        ));
                         // The handler fo arguments will push the mode for the comma, etc.
                         self.push_mode(LexerMode::MacroStrQuotedExpr);
-                        self.push_mode(LexerMode::ExpectToken("(", TokenType::LPAREN));
+                        self.push_mode(LexerMode::ExpectToken(
+                            "(",
+                            TokenType::LPAREN,
+                            TokenChannel::DEFAULT,
+                        ));
                         // Leading insiginificant WS before opening parenthesis
                         self.push_mode(LexerMode::WsOrCStyleCommentOnly);
                     }
@@ -2581,10 +2619,18 @@ impl<'src> Lexer<'src> {
                         // and it will unwind as we lex tokens
                         // We do not handle the trailing WS for the initialized, instead defer it to the
                         // parser, to avoid excessive lookahead
-                        self.push_mode(LexerMode::ExpectToken(";", TokenType::SEMI));
+                        self.push_mode(LexerMode::ExpectToken(
+                            ";",
+                            TokenType::SEMI,
+                            TokenChannel::DEFAULT,
+                        ));
                         self.push_mode(LexerMode::MacroLetInitializer);
                         self.push_mode(LexerMode::WsOrCStyleCommentOnly);
-                        self.push_mode(LexerMode::ExpectToken("=", TokenType::ASSIGN));
+                        self.push_mode(LexerMode::ExpectToken(
+                            "=",
+                            TokenType::ASSIGN,
+                            TokenChannel::DEFAULT,
+                        ));
                         self.push_mode(LexerMode::WsOrCStyleCommentOnly);
                         self.push_mode(LexerMode::MacroLetVarName(false));
                         self.push_mode(LexerMode::WsOrCStyleCommentOnly);
