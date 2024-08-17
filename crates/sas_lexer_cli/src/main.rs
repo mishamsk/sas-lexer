@@ -1,6 +1,7 @@
 #![allow(clippy::print_stderr, clippy::print_stdout)]
 
 use clap::Parser;
+use std::io::Write;
 
 use sas_lexer::error::ErrorInfo;
 use sas_lexer::lex;
@@ -33,23 +34,23 @@ struct Cli {
     debug: u8,
 }
 
-pub fn print_tokens<'a, I, S>(tokens: I, buffer: &TokenizedBuffer, source: &S)
+pub fn print_tokens<'a, I, S>(dst: &mut impl Write, tokens: I, buffer: &TokenizedBuffer, source: &S)
 where
     I: IntoIterator<Item = TokenIdx>,
     S: AsRef<str> + 'a,
 {
     for token in tokens {
-        println!("{}", token_to_string(token, buffer, source));
+        writeln!(dst, "{}", token_to_string(token, buffer, source)).unwrap();
     }
 }
 
-pub fn print_errors<'a, I, S>(errors: I, buffer: &TokenizedBuffer, source: &S)
+pub fn print_errors<'a, I, S>(dst: &mut impl Write, errors: I, buffer: &TokenizedBuffer, source: &S)
 where
     I: IntoIterator<Item = ErrorInfo>,
     S: AsRef<str> + 'a,
 {
     for error in errors {
-        println!("{}", error_to_string(&error, buffer, source));
+        writeln!(dst, "{}", error_to_string(&error, buffer, source)).unwrap();
     }
 }
 
@@ -62,11 +63,16 @@ fn lex_and_print(source: &String, print: bool) {
             let total_errors = errors.len();
 
             if print {
-                println!("Tokens:");
-                print_tokens(tokens, &tok_buffer, source);
+                let stdout = std::io::stdout();
+                let mut lock = stdout.lock();
 
-                println!("Errors:");
-                print_errors(errors, &tok_buffer, source);
+                writeln!(lock, "Tokens:").unwrap();
+                print_tokens(&mut lock, tokens, &tok_buffer, source);
+
+                if errors.len() > 0 {
+                    writeln!(lock, "Errors:").unwrap();
+                    print_errors(&mut lock, errors, &tok_buffer, source);
+                }
             }
 
             println!("Done! Found {total_tokens} tokens. Had {total_errors} errors!");
