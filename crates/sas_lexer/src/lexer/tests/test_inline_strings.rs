@@ -1123,12 +1123,42 @@ fn test_macro_call(#[case] contents: &str, #[case] expected_token: Vec<impl Toke
 )]
 #[case::all_quotes("%sTr(%\"v %'v %%call %( %) );",
     vec![
-        ("%sTr", TokenType::KwmStr, TokenChannel::HIDDEN),
-        ("(", TokenType::LPAREN, TokenChannel::HIDDEN),
-        ("%\"v %'v %%call %( %) ", TokenType::MacroString, TokenChannel::DEFAULT),
-        (")", TokenType::RPAREN, TokenChannel::HIDDEN),
-        (";", TokenType::SEMI, TokenChannel::DEFAULT),
-        ]
+        (
+            "%sTr",
+            TokenType::KwmStr,
+            TokenChannel::HIDDEN,
+            Payload::None,
+            "%sTr",
+        ),
+        (
+            "(",
+            TokenType::LPAREN,
+            TokenChannel::HIDDEN,
+            Payload::None,
+            "(",
+        ),
+        (
+            "%\"v %'v %%call %( %) ",
+            TokenType::MacroString,
+            TokenChannel::DEFAULT,
+            Payload::StringLiteral(0, 16),
+            "\"v 'v %call ( ) ",
+        ),
+        (
+            ")",
+            TokenType::RPAREN,
+            TokenChannel::HIDDEN,
+            Payload::None,
+            ")",
+        ),
+        (
+            ";",
+            TokenType::SEMI,
+            TokenChannel::DEFAULT,
+            Payload::None,
+            ";",
+        ),
+    ]
 )]
 #[case::nested_parens("%sTr((1(2)3));",
     vec![

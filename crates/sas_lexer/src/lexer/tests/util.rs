@@ -119,6 +119,32 @@ impl TokenTestCase for (&str, TokenType, Payload, &str) {
     }
 }
 
+impl TokenTestCase for (&str, TokenType, TokenChannel, Payload, &str) {
+    fn token_type(&self) -> TokenType {
+        self.1
+    }
+
+    fn token_channel(&self) -> TokenChannel {
+        self.2
+    }
+
+    fn payload(&self) -> Payload {
+        self.3
+    }
+
+    fn raw_text<S: AsRef<str>>(&self, _source: S) -> Option<String> {
+        if self.0.is_empty() {
+            None
+        } else {
+            Some(self.0.to_owned())
+        }
+    }
+
+    fn text<S: AsRef<str>>(&self, _source: S) -> Option<String> {
+        self.4.to_owned().into()
+    }
+}
+
 impl TokenTestCase for (TokenType, Payload, &str) {
     fn token_type(&self) -> TokenType {
         self.0
