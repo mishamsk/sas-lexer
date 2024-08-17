@@ -340,11 +340,26 @@ impl<'src> Lexer<'src> {
                     // emit an error and the token
                     self.lex_expected_token(content, *tok_type, *tok_channel)
                 }
-                LexerMode::Default if self.mode_stack.len() == 1 => {
-                    // The default mode is the last one, we can safely exit
+                LexerMode::Default
+                | LexerMode::WsOrCStyleCommentOnly
+                | LexerMode::MaybeMacroCallArgs
+                | LexerMode::MacroStrQuotedExpr(_, _)
+                | LexerMode::MacroCallArgOrValue(_)
+                | LexerMode::MacroCallValue(_)
+                | LexerMode::MacroLetInitializer => {
+                    // These are optional modes, meaning there can be no actual token lexed in it
+                    // so we can safely pop them
                 }
-                _ => {
-                    // For now, ignore all other modes. Maybe we should emit an error
+                LexerMode::StringExpr => {
+                    // This may happen if we have unbalanced `"` or `'` as the last character
+                    self.handle_unterminated_str_expr(Payload::None)
+                }
+                LexerMode::MacroEval => !todo!("Macro eval mode"),
+                LexerMode::MacroLetVarName(_) => {
+                    // This may happen if we have %let without a variable name in the end
+                    self.emit_error(ErrorType::MissingExpected(
+                        "ERROR: Expecting a variable name after %LET.",
+                    ));
                 }
             }
 
@@ -447,9 +462,12 @@ impl<'src> Lexer<'src> {
         if (content.len() > self.cursor.remaining_len() as usize)
             | (self.cursor.as_str().get(..content.len()) != Some(content))
         {
-            // Expected token not found. Emit an error which will point at previous token
-            // The token itself is emitted below
-            self.emit_error(ErrorType::MissingExpected(content));
+            // Do not emit error for one special case - of the missing semi-colon at EOF
+            if content != ";" || !self.cursor.is_eof() {
+                // Expected token not found. Emit an error which will point at previous token
+                // The token itself is emitted below
+                self.emit_error(ErrorType::MissingExpected(content));
+            }
         } else {
             // Consume the expected content
             // SAFETY: content is not more than the remaining length
