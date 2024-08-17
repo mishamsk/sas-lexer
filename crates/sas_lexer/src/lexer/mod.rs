@@ -2588,7 +2588,11 @@ impl<'src> Lexer<'src> {
                 match kw_tok_type {
                     TokenType::KwmStr => {
                         // Add the token
-                        self.emit_token(TokenChannel::DEFAULT, kw_tok_type, Payload::None);
+                        // We use hidden channel for the %str and the wrapping parens
+                        // since this is a pure compile time directive in SAS which just allows
+                        // having a macro text expression with things that would otherwise be
+                        // interpreted as macro calls or removed (like spaces)
+                        self.emit_token(TokenChannel::HIDDEN, kw_tok_type, Payload::None);
 
                         // Populate the expected states for the %str() call
                         // in reverse order, as the lexer will unwind the stack
@@ -2596,14 +2600,14 @@ impl<'src> Lexer<'src> {
                         self.push_mode(LexerMode::ExpectToken(
                             ")",
                             TokenType::RPAREN,
-                            TokenChannel::DEFAULT,
+                            TokenChannel::HIDDEN,
                         ));
                         // The handler fo arguments will push the mode for the comma, etc.
                         self.push_mode(LexerMode::MacroStrQuotedExpr);
                         self.push_mode(LexerMode::ExpectToken(
                             "(",
                             TokenType::LPAREN,
-                            TokenChannel::DEFAULT,
+                            TokenChannel::HIDDEN,
                         ));
                         // Leading insiginificant WS before opening parenthesis
                         self.push_mode(LexerMode::WsOrCStyleCommentOnly);
