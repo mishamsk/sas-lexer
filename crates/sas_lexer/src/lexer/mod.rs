@@ -2764,6 +2764,17 @@ impl<'src> Lexer<'src> {
                         // Populate the expected states for the %str() call
                         self.expect_macro_str_call_args(true);
                     }
+                    TokenType::KwmEnd | TokenType::KwmReturn => {
+                        // Add the token
+                        self.emit_token(TokenChannel::DEFAULT, kw_tok_type, Payload::None);
+
+                        // Super easy, just expect the closing semi
+                        self.push_mode(LexerMode::ExpectToken(
+                            ";",
+                            TokenType::SEMI,
+                            TokenChannel::DEFAULT,
+                        ));
+                    }
                     TokenType::KwmLet => {
                         // Add the token
                         self.emit_token(TokenChannel::DEFAULT, kw_tok_type, Payload::None);

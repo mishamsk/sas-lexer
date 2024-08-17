@@ -4,7 +4,7 @@ use crate::Payload;
 use crate::{error::ErrorType, lex, TokenChannel, TokenType};
 use rstest::rstest;
 
-use super::super::token_type::KEYWORDS;
+use super::super::token_type::{KEYWORDS, MKEYWORDS};
 use super::util::{assert_lexing, mangle_case, ErrorTestCase, TokenTestCase};
 
 const NO_ERRORS: Vec<ErrorType> = vec![];
@@ -1513,4 +1513,44 @@ fn test_macro_nrstr_call_error_recovery(
     #[case] expected_error: Vec<impl ErrorTestCase>,
 ) {
     assert_lexing(contents, expected_token, expected_error);
+}
+
+/// These are super simple - just a keyword followed by a mandatory SEMI
+#[rstest]
+#[case::macro_end(TokenType::KwmEnd)]
+#[case::macro_return(TokenType::KwmReturn)]
+fn test_macro_simple_stats(#[case] tok_type: TokenType) {
+    // Get the string representation of the token type
+    let tok_str = MKEYWORDS
+        .into_iter()
+        .find_map(|(k, v)| if *v == tok_type { Some(k) } else { None })
+        .unwrap();
+
+    // Prepend % and mangle case
+    let tok_str = format!("%{}", mangle_case(tok_str));
+
+    // First test the correct case
+    assert_lexing(
+        format!("{tok_str};").as_str(),
+        vec![(tok_str.as_str(), tok_type), (";", TokenType::SEMI)],
+        NO_ERRORS,
+    );
+
+    // Recover from missing semicolon at EOF
+    assert_lexing(
+        format!("{tok_str}").as_str(),
+        vec![(tok_str.as_str(), tok_type), ("", TokenType::SEMI)],
+        NO_ERRORS,
+    );
+
+    // Recover from missing semicolon not at EOF, with error
+    assert_lexing(
+        format!("{tok_str}+").as_str(),
+        vec![
+            (tok_str.as_str(), tok_type),
+            ("", TokenType::SEMI),
+            ("+", TokenType::PLUS),
+        ],
+        vec![(ErrorType::MissingExpected(";"), tok_str.len())],
+    );
 }
