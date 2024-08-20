@@ -533,7 +533,7 @@ impl<'src> Lexer<'src> {
             }
             '0'..='9' => {
                 // Numeric literal
-                self.lex_numeric_literal();
+                self.lex_numeric_literal(false);
             }
             c if is_valid_sas_name_start(c) => {
                 self.lex_identifier();
@@ -1853,9 +1853,11 @@ impl<'src> Lexer<'src> {
         self.cursor.eat_while(|c| {
             if c.is_ascii() {
                 matches!(c, 'a'..='z' | 'A'..='Z' | '0'..='9' | '_')
-            } else {
+            } else if is_xid_continue(c) {
                 is_ascii = false;
-                is_xid_continue(c)
+                true
+            } else {
+                false
             }
         });
 
@@ -2026,8 +2028,8 @@ impl<'src> Lexer<'src> {
         true
     }
 
-    fn lex_numeric_literal(&mut self) {
-        debug_assert!(matches!(self.cursor.peek(), '0'..='9' | '.'));
+    fn lex_numeric_literal(&mut self, seen_dot: bool) {
+        debug_assert!(matches!(self.cursor.peek(), '0'..='9'));
         // First, SAS supports 3 notations for numeric literals:
         // 1. Standard decimal notation (base 10)
         // 2. Hexadecimal notation (base 16)
@@ -2038,19 +2040,25 @@ impl<'src> Lexer<'src> {
         // due to 8 bytes of storage for a number in SAS. It must be
         // followed by an `x` or `X` character
 
-        // consume the first digit or the sign
+        // consume the first digit
         self.cursor.advance();
 
         // Now we need to disambiguate between the notations
-        let mut expect_hex = true;
-        let mut expect_dot = true;
+        let mut expect_hex = !seen_dot;
+        let mut expect_dot = !seen_dot;
         let mut expect_exp = true;
+        let mut seen_num_after_exp = false;
 
         loop {
             match self.cursor.peek() {
                 '0'..='9' => {
                     // can be any notation
                     self.cursor.advance();
+
+                    // If we have seen the E, also mark that we have seen a number after it
+                    if !expect_exp {
+                        seen_num_after_exp = true;
+                    }
                 }
                 'a'..='d' | 'A'..='D' | 'f' | 'F' if expect_hex => {
                     // must be HEX notation
@@ -2068,7 +2076,7 @@ impl<'src> Lexer<'src> {
                         // If we already seen the dot and now got E => Scientific notation
                         // consume as lex_numeric_exp_literal() assumes it is working past the E
                         self.cursor.advance();
-                        self.lex_numeric_exp_literal();
+                        self.lex_numeric_exp_literal(seen_num_after_exp);
                         return;
                     }
 
@@ -2091,6 +2099,7 @@ impl<'src> Lexer<'src> {
                         // but not HEX now
                         self.cursor.advance();
                         expect_hex = false;
+                        expect_dot = false;
                         continue;
                     }
 
@@ -2102,7 +2111,7 @@ impl<'src> Lexer<'src> {
                         // either a HEX missing X (user intended `NNNex`), or scientific notation
                         // with missing exponent. For simplicity sake we call the scientific parser
                         // function which will report error and recover.
-                        self.lex_numeric_exp_literal();
+                        self.lex_numeric_exp_literal(seen_num_after_exp);
                     }
 
                     return;
@@ -2115,7 +2124,7 @@ impl<'src> Lexer<'src> {
                         self.lex_decimal_literal();
                     } else {
                         // e.g. `NNNeNNN `
-                        self.lex_numeric_exp_literal();
+                        self.lex_numeric_exp_literal(seen_num_after_exp);
                     }
 
                     return;
@@ -2235,20 +2244,19 @@ impl<'src> Lexer<'src> {
         }
     }
 
-    fn lex_numeric_exp_literal(&mut self) {
+    fn lex_numeric_exp_literal(&mut self, mut seen_exp_sign_or_num: bool) {
         #[cfg(debug_assertions)]
         debug_assert!(matches!(self.cursor.prev_char(), '0'..='9' | 'e' | 'E'));
-
-        let mut seen_sign = false;
 
         loop {
             match self.cursor.peek() {
                 '0'..='9' => {
                     self.cursor.advance();
+                    seen_exp_sign_or_num = true;
                 }
-                '-' | '+' if !seen_sign => {
+                '-' | '+' if !seen_exp_sign_or_num => {
                     self.cursor.advance();
-                    seen_sign = true;
+                    seen_exp_sign_or_num = true;
                 }
                 _ => {
                     break;
@@ -2422,7 +2430,7 @@ impl<'src> Lexer<'src> {
                 match self.cursor.peek() {
                     '0'..='9' => {
                         // `.N`
-                        self.lex_numeric_literal();
+                        self.lex_numeric_literal(true);
                     }
                     _ => {
                         self.emit_token(TokenChannel::DEFAULT, TokenType::DOT, Payload::None);
@@ -2662,9 +2670,6 @@ impl<'src> Lexer<'src> {
         self.cursor.advance();
 
         // And now simply eat until first semi and semi too
-        self.cursor.advance();
-        self.cursor.advance();
-
         loop {
             if let Some(c) = self.cursor.advance() {
                 if c == ';' {
@@ -2712,9 +2717,11 @@ impl<'src> Lexer<'src> {
         self.cursor.eat_while(|c| {
             if c.is_ascii() {
                 matches!(c, 'a'..='z' | 'A'..='Z' | '0'..='9' | '_')
-            } else {
+            } else if is_xid_continue(c) {
                 is_ascii = false;
-                is_xid_continue(c)
+                true
+            } else {
+                false
             }
         });
 

@@ -104,9 +104,11 @@ pub(super) fn is_macro_call(
     la_view.eat_while(|c| {
         if c.is_ascii() {
             matches!(c, 'a'..='z' | 'A'..='Z' | '0'..='9' | '_')
-        } else {
+        } else if is_xid_continue(c) {
             is_ascii = false;
-            is_xid_continue(c)
+            true
+        } else {
+            false
         }
     });
 
