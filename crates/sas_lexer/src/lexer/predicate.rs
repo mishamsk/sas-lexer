@@ -127,14 +127,13 @@ pub(super) fn is_macro_call(
     // avoids the allocation and copying
     let ident_end_byte_offset = cursor.remaining_len() - la_view.remaining_len();
 
-    let ident = SmolStr::from_iter(
-        cursor
-            .as_str()
-            .get(1..ident_end_byte_offset as usize)
-            .ok_or("Unexpected error getting ident slice  in `is_macro_call` lookahead")?
-            .chars()
-            .map(|c| c.to_ascii_uppercase()),
-    );
+    let ident = cursor
+        .as_str()
+        .get(1..ident_end_byte_offset as usize)
+        .ok_or("Unexpected error getting ident slice  in `is_macro_call` lookahead")?
+        .chars()
+        .map(|c| c.to_ascii_uppercase())
+        .collect::<SmolStr>();
 
     if ident.is_empty() {
         // Something like %*

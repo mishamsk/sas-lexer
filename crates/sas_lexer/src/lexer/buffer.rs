@@ -129,13 +129,13 @@ impl TokenInfo {
     // }
 }
 
-/// Specifies minimal initial capacity of token_infos & line_infos vectors
+/// Specifies minimal initial capacity of `token_infos` & `line_infos` vectors
 const MIN_CAPACITY: usize = 4;
 
-/// Heursitic for determining an optimal initial capactiy for line_infos vector
+/// Heursitic for determining an optimal initial capactiy for `line_infos` vector
 const LINE_INFO_CAPACITY_DIVISOR: usize = 88;
 
-/// Heursitic for determining an optimal initial capactiy for token_infos vector
+/// Heursitic for determining an optimal initial capactiy for `token_infos` vector
 const TOKEN_INFO_CAPACITY_DIVISOR: usize = 4;
 
 /// Heursitic for determining an optimal initial capactiy for unescaped string literals vector
@@ -295,6 +295,7 @@ impl WorkTokenizedBuffer {
     }
 
     #[inline]
+    #[allow(clippy::cast_possible_truncation)]
     pub(super) fn next_string_literal_start(&self) -> u32 {
         self.string_literals_buffer.len() as u32
     }
@@ -739,7 +740,7 @@ impl TokenizedBuffer {
 
         self.string_literals_buffer
             .get(start..stop)
-            .map_or(Err("String literal range out of bounds"), |s| Ok(s))
+            .ok_or("String literal range out of bounds")
     }
 }
 
