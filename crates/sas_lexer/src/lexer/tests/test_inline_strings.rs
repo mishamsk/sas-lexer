@@ -81,18 +81,27 @@ fn test_column_count_with_bom() {
     (TokenType::CStyleComment,
     TokenChannel::COMMENT)
 )]
-#[case::cstyle_comment_multi_line(
+#[case::cstyle_comment_multi_line_and_unicode(
     "/* this is 🔥\n comment */",
     (TokenType::CStyleComment,
     TokenChannel::COMMENT)
 )]
-#[case::cstyle_comment_multi_line(
+#[case::macro_comment_multi_line_and_unicode(
     "%* this is 🔥\n macro comment;",
     (TokenType::MacroComment,
     TokenChannel::COMMENT)
 )]
 fn test_single_comment_ws(#[case] contents: &str, #[case] expected_token: impl TokenTestCase) {
     assert_lexing(contents, vec![expected_token], NO_ERRORS);
+}
+
+#[rstest]
+#[case::empty_macro_comment_with_follower(
+    "%*;after",
+    vec![("%*;", TokenType::MacroComment), ("after", TokenType::Identifier)]
+)]
+fn test_comments(#[case] contents: &str, #[case] expected_token: Vec<impl TokenTestCase>) {
+    assert_lexing(contents, expected_token, NO_ERRORS);
 }
 
 #[test]
@@ -454,6 +463,29 @@ fn test_all_single_keywords() {
     });
 }
 
+/// This tests that we are correctly identifying ascii only keywords
+/// and thus handling case insensitivity correctly.
+#[rstest]
+fn test_keywords_followed_by_unicode(
+    #[values(("-", TokenType::MINUS), ("+", TokenType::PLUS))] (keyword, keyword_tok): (
+        &str,
+        TokenType,
+    ),
+) {
+    // Change every odd character to uppercase, and every even character to lowercase
+    let mut mangled_keyword = mangle_case(keyword);
+    mangled_keyword.push('🔥');
+
+    assert_lexing(
+        mangled_keyword.as_str(),
+        vec![
+            (keyword, keyword_tok, TokenChannel::DEFAULT),
+            ("🔥", TokenType::UNKNOWN, TokenChannel::HIDDEN),
+        ],
+        vec![ErrorType::UnknownCharacter('🔥')],
+    );
+}
+
 #[rstest]
 #[case::simple("myvar", vec![TokenType::Identifier] , NO_ERRORS)]
 #[case::underscore("_myvar",vec![TokenType::Identifier], NO_ERRORS)]
@@ -554,6 +586,33 @@ fn test_numeric_literal_with_leading_sign(
     assert_lexing(
         format!("{sign_str}{contents}").as_str(),
         vec![(sign_str, sign_tok, Payload::None), expected_token],
+        NO_ERRORS,
+    );
+}
+
+// Makes sure that traiing sings are not causing erros in scientific notation
+#[rstest]
+#[case::sci("1e3", (TokenType::FloatLiteral, 1000.0))]
+#[case::sci_plus("1E+3", (TokenType::FloatLiteral, 1000.0))]
+#[case::sci_minus("1e-3", (TokenType::FloatLiteral, 0.001))]
+#[case::sci_dot("4.2e3", (TokenType::FloatLiteral, 4200.0))]
+#[case::sci_dot_only(".1E3", (TokenType::FloatLiteral, 100.0))]
+fn test_scientific_numeric_literal_with_suffix(
+    #[case] contents: &str,
+    #[case] expected_token: (TokenType, f64),
+    #[values(("-", TokenType::MINUS), ("+", TokenType::PLUS))] (sign_str, sign_tok): (
+        &str,
+        TokenType,
+    ),
+) {
+    let (token_type, payload) = expected_token;
+
+    assert_lexing(
+        format!("{contents}{sign_str}").as_str(),
+        vec![
+            (contents, token_type, Payload::Float(payload)),
+            (sign_str, sign_tok, Payload::None),
+        ],
         NO_ERRORS,
     );
 }
@@ -1042,6 +1101,16 @@ fn test_macro_let_error_recovery(
         (")", TokenType::RPAREN),        
     ]
 )]
+#[case::balanced_parens_after_slash_with_comment("%t(/(/*c*/))",
+    vec![
+        ("%t", TokenType::MacroIdentifier),
+        ("(", TokenType::LPAREN),
+        ("/(", TokenType::MacroString),
+        ("/*c*/", TokenType::CStyleComment),
+        (")", TokenType::MacroString),
+        (")", TokenType::RPAREN),        
+    ]
+)]
 #[case::bare_nested_parens("%t(some(),());",
     vec![
         ("%t", TokenType::MacroIdentifier),
@@ -1211,6 +1280,16 @@ fn test_macro_call(#[case] contents: &str, #[case] expected_token: Vec<impl Toke
         ("%str", TokenType::KwmStr, TokenChannel::HIDDEN),
         ("(", TokenType::LPAREN, TokenChannel::HIDDEN),
         ("(", TokenType::MacroString, TokenChannel::DEFAULT),
+        ("/*c*/", TokenType::CStyleComment, TokenChannel::COMMENT),
+        (")", TokenType::MacroString, TokenChannel::DEFAULT),
+        (")", TokenType::RPAREN, TokenChannel::HIDDEN),
+        ]
+)]
+#[case::balanced_unquoted_parens_after_slash("%str(/(/*c*/))",
+    vec![
+        ("%str", TokenType::KwmStr, TokenChannel::HIDDEN),
+        ("(", TokenType::LPAREN, TokenChannel::HIDDEN),
+        ("/(", TokenType::MacroString, TokenChannel::DEFAULT),
         ("/*c*/", TokenType::CStyleComment, TokenChannel::COMMENT),
         (")", TokenType::MacroString, TokenChannel::DEFAULT),
         (")", TokenType::RPAREN, TokenChannel::HIDDEN),
@@ -1414,6 +1493,16 @@ fn test_macro_str_call_error_recovery(
         ("%nrstr", TokenType::KwmNrStr, TokenChannel::HIDDEN),
         ("(", TokenType::LPAREN, TokenChannel::HIDDEN),
         ("(", TokenType::MacroString, TokenChannel::DEFAULT),
+        ("/*c*/", TokenType::CStyleComment, TokenChannel::COMMENT),
+        (")", TokenType::MacroString, TokenChannel::DEFAULT),
+        (")", TokenType::RPAREN, TokenChannel::HIDDEN),
+        ]
+)]
+#[case::balanced_unquoted_parens_after_slash("%nrstr(/(/*c*/))",
+    vec![
+        ("%nrstr", TokenType::KwmNrStr, TokenChannel::HIDDEN),
+        ("(", TokenType::LPAREN, TokenChannel::HIDDEN),
+        ("/(", TokenType::MacroString, TokenChannel::DEFAULT),
         ("/*c*/", TokenType::CStyleComment, TokenChannel::COMMENT),
         (")", TokenType::MacroString, TokenChannel::DEFAULT),
         (")", TokenType::RPAREN, TokenChannel::HIDDEN),
