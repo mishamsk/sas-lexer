@@ -37,33 +37,22 @@ impl<'a> Cursor<'a> {
     }
 
     /// Peeks the next symbol from the input stream without consuming it.
-    /// If requested position doesn't exist, `EOF_CHAR` is returned.
-    /// However, getting `EOF_CHAR` doesn't always mean actual end of file,
-    /// it should be checked with `is_eof` method.
-    pub(super) fn peek(&self) -> char {
+    /// If requested position doesn't exist, None is returned.
+    pub(super) fn peek(&self) -> Option<char> {
         // `.next()` optimizes better than `.nth(0)`
-        self.chars.clone().next().unwrap_or(EOF_CHAR)
+        self.chars.clone().next()
     }
 
     /// Peeks the second symbol from the input stream without consuming it.
+    /// If requested position doesn't exist, `EOF_CHAR` is returned.
+    /// However, getting `EOF_CHAR` doesn't always mean actual end of file,
+    /// it should be checked with `is_eof` method.
     pub(super) fn peek_next(&self) -> char {
         // `.next()` optimizes better than `.nth(1)`
         let mut iter = self.chars.clone();
         iter.next();
         iter.next().unwrap_or(EOF_CHAR)
     }
-
-    /// Peeks the next non whitespace symbol from the input stream without consuming it.
-    // pub(super) fn peek_next_non_ws(&self) -> char {
-    //     let iter = self.chars.clone();
-    //     for c in iter {
-    //         if !c.is_whitespace() {
-    //             return c;
-    //         }
-    //     }
-
-    //     EOF_CHAR
-    // }
 
     /// Checks if there is nothing more to consume.
     pub(super) fn is_eof(&self) -> bool {
@@ -88,43 +77,31 @@ impl<'a> Cursor<'a> {
     /// Returns the last character advanced to or EOF if not enough characters left.
     ///
     /// SAFETY: N should be greater than 0.
-    pub(super) fn advance_by(&mut self, n: u32) -> char {
+    pub(super) fn advance_by(&mut self, n: u32) {
         debug_assert!(n > 0);
 
-        let mut advance_count: u32 = 0;
-
-        for c in self.chars.by_ref() {
-            advance_count += 1;
-
-            #[cfg(debug_assertions)]
-            {
-                self.prev_char = c;
-            }
-
-            if advance_count == n {
-                self.char_offset += n;
-                return c;
+        for i in 0..n {
+            if cfg!(debug_assertions) {
+                #[cfg(debug_assertions)]
+                if let Some(c) = self.chars.next() {
+                    self.prev_char = c;
+                } else {
+                    self.char_offset += i;
+                    return;
+                }
+            } else {
+                if self.chars.next().is_none() {
+                    self.char_offset += i;
+                    return;
+                }
             }
         }
 
-        self.char_offset += advance_count;
-        EOF_CHAR
+        self.char_offset += n;
     }
 
-    /// Advances to the end of the file.
-    ///
-    /// This will not update the debug only previous char.
-    // #[allow(clippy::cast_possible_truncation)]
-    // pub(super) fn advance_to_eof(&mut self) {
-    //     // Count the remaining chars to get the offset right
-    //     self.char_offset += self.chars.as_str().chars().count() as u32;
-
-    //     // Set the chars to empty iterator
-    //     self.chars = "".chars();
-    // }
-
     pub(super) fn eat_char(&mut self, c: char) -> bool {
-        if self.peek() == c {
+        if self.peek() == Some(c) {
             self.advance();
             true
         } else {
@@ -136,7 +113,11 @@ impl<'a> Cursor<'a> {
     pub(super) fn eat_while(&mut self, mut predicate: impl FnMut(char) -> bool) {
         // It was tried making optimized version of this for eg. line comments, but
         // LLVM can inline all of this and compile it down to fast iteration over bytes.
-        while predicate(self.peek()) && !self.is_eof() {
+        while let Some(c) = self.peek() {
+            if !predicate(c) {
+                return;
+            }
+
             self.advance();
         }
     }
