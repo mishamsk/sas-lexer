@@ -84,7 +84,7 @@ pub(super) fn is_macro_call(
     cursor: &Cursor,
     allow_quote_call: bool,
 ) -> Result<(Option<TokenType>, u32), &'static str> {
-    debug_assert_eq!(cursor.peek(), '%');
+    debug_assert_eq!(cursor.peek(), Some('%'));
 
     // Since in most cases it will be a macro call, we clone the cursor
     // to do lookahead right away
