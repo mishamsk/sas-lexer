@@ -52,7 +52,7 @@ enum LexerMode {
     /// If not, perorms roll back, so that ws/cstyle comments can be
     /// relexed in different mode.
     ///
-    /// Note - it should alwys be preceded by the WsOrCStyleCommentOnly mode
+    /// Note - it should alwys be preceded by the `WsOrCStyleCommentOnly` mode
     /// and a checkpoint created!
     MaybeMacroCallArgs,
     // The u32 value is the current parenthesis nesting level.
@@ -64,7 +64,7 @@ enum LexerMode {
     /// The state for lexing inside an %str/%nrstr call.
     /// as in `%str(-->1+1<--)`. Boolean flag indicates if we
     /// % and & are masked, i.e. this is %nrstr.
-    /// u32 value is the current parenthesis nesting level, see MacroCallArgOrValue
+    /// u32 value is the current parenthesis nesting level, see `MacroCallArgOrValue`
     MacroStrQuotedExpr(bool, u32),
     /// Macro arithmetic/logical expression, as in `%eval(-->1+1<--)`
     MacroEval,
@@ -258,7 +258,7 @@ impl<'src> Lexer<'src> {
         self.cur_token_line = self.buffer.last_line().unwrap_or_else(||
             // Should not be possible, since we add the first line when creating
             // the lexer, but whatever
-            self.add_line())
+            self.add_line());
     }
 
     fn emit_token(&mut self, channel: TokenChannel, token_type: TokenType, payload: Payload) {
@@ -338,7 +338,7 @@ impl<'src> Lexer<'src> {
                 LexerMode::ExpectToken(content, tok_type, tok_channel) => {
                     // If we were expecting a token - call lexing that will effectively
                     // emit an error and the token
-                    self.lex_expected_token(content, *tok_type, *tok_channel)
+                    self.lex_expected_token(content, *tok_type, *tok_channel);
                 }
                 LexerMode::Default
                 | LexerMode::WsOrCStyleCommentOnly
@@ -352,7 +352,7 @@ impl<'src> Lexer<'src> {
                 }
                 LexerMode::StringExpr => {
                     // This may happen if we have unbalanced `"` or `'` as the last character
-                    self.handle_unterminated_str_expr(Payload::None)
+                    self.handle_unterminated_str_expr(Payload::None);
                 }
                 LexerMode::MacroEval => !todo!("Macro eval mode"),
                 LexerMode::MacroLetVarName(_) => {
@@ -431,13 +431,13 @@ impl<'src> Lexer<'src> {
                 }
             }
             LexerMode::ExpectToken(content, tok_type, tok_channel) => {
-                self.lex_expected_token(content, tok_type, tok_channel)
+                self.lex_expected_token(content, tok_type, tok_channel);
             }
             LexerMode::Default => self.lex_mode_default(),
             LexerMode::StringExpr => self.lex_mode_str_expr(),
             LexerMode::MacroEval => !todo!("Macro eval mode"),
             LexerMode::MacroStrQuotedExpr(mask_macro, pnl) => {
-                self.lex_macro_str_quoted_expr(mask_macro, pnl)
+                self.lex_macro_str_quoted_expr(mask_macro, pnl);
             }
             LexerMode::MacroCallArgOrValue(pnl) => self.lex_macro_call_arg_or_value(pnl, true),
             LexerMode::MacroCallValue(pnl) => self.lex_macro_call_arg_or_value(pnl, false),
@@ -904,7 +904,9 @@ impl<'src> Lexer<'src> {
                 // string section to push the nesting level below 0
                 // as at the moment of reaching 0, we should have popped the mode
                 // and exited the lexing of the string
-                debug_assert!(parens_nesting_level as i64 + local_parens_nesting as i64 > 0);
+                debug_assert!(
+                    i64::from(parens_nesting_level) + i64::from(local_parens_nesting) > 0
+                );
 
                 if let Some(m) = lexer.mode_stack.last_mut() {
                     match m {
@@ -1119,6 +1121,7 @@ impl<'src> Lexer<'src> {
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     fn lex_macro_string_in_str_call(&mut self, mask_macro: bool, parens_nesting_level: u32) {
         debug_assert!(matches!(
             self.mode(),
@@ -1136,7 +1139,9 @@ impl<'src> Lexer<'src> {
                     // string section to push the nesting level below 0
                     // as at the moment of reaching 0, we should have popped the mode
                     // and exited the lexing of the string
-                    debug_assert!(parens_nesting_level as i64 + local_parens_nesting as i64 > 0);
+                    debug_assert!(
+                        i64::from(parens_nesting_level) + i64::from(local_parens_nesting) > 0
+                    );
 
                     if let Some(m) = lexer.mode_stack.last_mut() {
                         match m {
@@ -1871,11 +1876,11 @@ impl<'src> Lexer<'src> {
         // My guess is this should be quicker than capturing the value as we consume it
         // avoids the allocation and copying
         // Using SmolStr is faster as it will be stack allocated
-        let ident = SmolStr::from_iter(
-            self.pending_token_text()
-                .chars()
-                .map(|c| c.to_ascii_uppercase()),
-        );
+        let ident = self
+            .pending_token_text()
+            .chars()
+            .map(|c| c.to_ascii_uppercase())
+            .collect::<SmolStr>();
 
         if let Some(kw_tok_type) = parse_keyword(&ident) {
             self.emit_token(TokenChannel::DEFAULT, kw_tok_type, Payload::None);
@@ -2029,7 +2034,7 @@ impl<'src> Lexer<'src> {
     }
 
     fn lex_numeric_literal(&mut self, seen_dot: bool) {
-        debug_assert!(matches!(self.cursor.peek(), '0'..='9'));
+        debug_assert!(self.cursor.peek().is_ascii_digit());
         // First, SAS supports 3 notations for numeric literals:
         // 1. Standard decimal notation (base 10)
         // 2. Hexadecimal notation (base 16)
@@ -2165,6 +2170,7 @@ impl<'src> Lexer<'src> {
             // and the same numeric format `1.`
 
             // Leading 0 - we can emit the integer token, can't be a format
+            #[allow(clippy::cast_sign_loss)]
             let payload = Payload::Integer(fvalue as u64);
 
             // Unwrap here is safe, as we know the length is > 0
@@ -2579,7 +2585,7 @@ impl<'src> Lexer<'src> {
             });
 
         match tok_type {
-            Some(tok_type @ TokenType::KwmStr) | Some(tok_type @ TokenType::KwmNrStr) => {
+            Some(tok_type @ (TokenType::KwmStr | TokenType::KwmNrStr)) => {
                 self.cursor.advance_by(advance_by);
 
                 // These ones has special handling
@@ -2732,16 +2738,16 @@ impl<'src> Lexer<'src> {
             let mut has_error = false;
 
             // Using SmolStr is faster as it will be stack allocated
-            let ident = SmolStr::from_iter(
-                self.pending_token_text()
-                    .get(1..)
-                    .unwrap_or_else(|| {
-                        has_error = true;
-                        ""
-                    })
-                    .chars()
-                    .map(|c| c.to_ascii_uppercase()),
-            );
+            let ident = self
+                .pending_token_text()
+                .get(1..)
+                .unwrap_or_else(|| {
+                    has_error = true;
+                    ""
+                })
+                .chars()
+                .map(|c| c.to_ascii_uppercase())
+                .collect::<SmolStr>();
 
             if has_error {
                 self.emit_error(ErrorType::InternalError("Failed to get macro identifier"));
