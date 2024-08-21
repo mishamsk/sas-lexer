@@ -16,7 +16,7 @@ use channel::TokenChannel;
 use cursor::EOF_CHAR;
 use error::{ErrorInfo, ErrorType};
 use hex::parse_numeric_hex_str;
-use predicate::{is_macro_amp, is_macro_call, is_macro_percent};
+use predicate::{is_macro_amp, is_macro_call, is_macro_percent, is_macro_stat};
 use sas_lang::is_valid_sas_name_start;
 use smol_str::SmolStr;
 use std::{cmp::min, str::FromStr};
@@ -75,7 +75,9 @@ enum LexerMode {
     /// we expect a variable name expression. Boolean flag indicates if we
     /// have found at least one token of the variable name
     MacroLetVarName(bool),
-    MacroLetInitializer,
+    /// Mode for lexing unrestricted macro text expressions terminated by semi.
+    /// These are used for %let initializations, %put, etc.
+    MacroSemiTerminatedTextExpr,
 }
 
 #[derive(Debug)]
@@ -354,7 +356,7 @@ impl<'src> Lexer<'src> {
                 | LexerMode::MacroStrQuotedExpr(_, _)
                 | LexerMode::MacroCallArgOrValue(_)
                 | LexerMode::MacroCallValue(_)
-                | LexerMode::MacroLetInitializer => {
+                | LexerMode::MacroSemiTerminatedTextExpr => {
                     // These are optional modes, meaning there can be no actual token lexed in it
                     // so we can safely pop them
                 }
@@ -472,7 +474,7 @@ impl<'src> Lexer<'src> {
             LexerMode::MacroLetVarName(found_name) => {
                 self.lex_macro_ident_expr(next_char, !found_name)
             }
-            LexerMode::MacroLetInitializer => self.lex_macro_text_expr(next_char),
+            LexerMode::MacroSemiTerminatedTextExpr => self.lex_macro_text_expr(next_char),
         }
     }
 
@@ -640,7 +642,10 @@ impl<'src> Lexer<'src> {
     }
 
     fn lex_macro_text_expr(&mut self, next_char: char) {
-        debug_assert!(matches!(self.mode(), LexerMode::MacroLetInitializer));
+        debug_assert!(matches!(
+            self.mode(),
+            LexerMode::MacroSemiTerminatedTextExpr
+        ));
 
         self.start_token();
 
@@ -718,7 +723,10 @@ impl<'src> Lexer<'src> {
     }
 
     fn lex_macro_string_unrestricted(&mut self) {
-        debug_assert!(matches!(self.mode(), LexerMode::MacroLetInitializer));
+        debug_assert!(matches!(
+            self.mode(),
+            LexerMode::MacroSemiTerminatedTextExpr
+        ));
 
         while let Some(c) = self.cursor.peek() {
             match c {
@@ -2837,6 +2845,14 @@ impl<'src> Lexer<'src> {
                         // Super easy, just expect the closing semi
                         self.push_mode(LexerMode::ExpectSemiOrEOF);
                     }
+                    TokenType::KwmPut | TokenType::KwmGoto => {
+                        // Add the token
+                        self.emit_token(TokenChannel::DEFAULT, kw_tok_type, Payload::None);
+
+                        self.push_mode(LexerMode::ExpectSemiOrEOF);
+                        self.push_mode(LexerMode::MacroSemiTerminatedTextExpr);
+                        self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+                    }
                     TokenType::KwmLet => {
                         // Add the token
                         self.emit_token(TokenChannel::DEFAULT, kw_tok_type, Payload::None);
@@ -2849,7 +2865,7 @@ impl<'src> Lexer<'src> {
                         // We do not handle the trailing WS for the initialized, instead defer it to the
                         // parser, to avoid excessive lookahead
                         self.push_mode(LexerMode::ExpectSemiOrEOF);
-                        self.push_mode(LexerMode::MacroLetInitializer);
+                        self.push_mode(LexerMode::MacroSemiTerminatedTextExpr);
                         self.push_mode(LexerMode::WsOrCStyleCommentOnly);
                         self.push_mode(LexerMode::ExpectToken(
                             "=",
@@ -2859,6 +2875,12 @@ impl<'src> Lexer<'src> {
                         self.push_mode(LexerMode::WsOrCStyleCommentOnly);
                         self.push_mode(LexerMode::MacroLetVarName(false));
                         self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+                    }
+                    tok_type if !is_macro_stat(tok_type) => {
+                        // TODO!!!!!! PLACEHOLDER
+                        self.emit_token(TokenChannel::DEFAULT, kw_tok_type, Payload::None);
+
+                        self.expect_macro_call_args();
                     }
                     _ => {
                         // TODO!!!!!! PLACEHOLDER
