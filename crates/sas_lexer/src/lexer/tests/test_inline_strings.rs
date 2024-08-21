@@ -1640,6 +1640,123 @@ fn test_macro_simple_stats(#[case] tok_type: TokenType) {
             ("", TokenType::SEMI),
             ("+", TokenType::PLUS),
         ],
-        vec![(ErrorType::MissingExpected(";"), tok_str.len())],
+        vec![(
+            ErrorType::MissingExpected("';' or end of file"),
+            tok_str.len(),
+        )],
     );
+}
+
+#[rstest]
+#[case::open_parens_and_lead_trail_ws("%PuT \n  a=( ;",
+    vec![
+        ("%PuT", TokenType::KwmPut),
+        (" \n  ", TokenType::WS),
+        ("a=( ", TokenType::MacroString),
+        (";", TokenType::SEMI),
+        ]
+)]
+#[case::close_parens_crlf_unicode_mvar("%pUt some\r\n🔥\nother&mv;",
+vec![
+    ("%pUt", TokenType::KwmLet),
+    (" ", TokenType::WS),
+    ("some\r\n🔥\nother", TokenType::MacroString),
+    ("&mv", TokenType::MacroVarExpr),        
+    (";", TokenType::SEMI),
+    ]
+)]
+#[case::atypical_symbols("%put v=[&m_s.];",
+    vec![
+        ("%put", TokenType::KwmPut),
+        ("  ", TokenType::WS),
+        ("v=[", TokenType::MacroString),
+        ("&m_s.", TokenType::MacroVarExpr),
+        ("]", TokenType::MacroString),        
+        (";", TokenType::SEMI),
+        ]
+)]
+#[case::with_numeric_expr_symbols("%put pre <s>=[&mv];",
+    vec![
+        ("%put", TokenType::KwmPut),
+        ("  ", TokenType::WS),
+        ("pre <s>=[", TokenType::MacroString),
+        ("&mv", TokenType::MacroVarExpr),
+        ("]", TokenType::MacroString),        
+        (";", TokenType::SEMI),
+        ]
+)]
+#[case::keywords_mixed_with_other("%put  _AlL_ /*c*/ pre post
+                        _AuTOMATIC_ /*c*/ pre post
+                        _GlOBAL_ /*c*/ pre post
+                        _LoCAL_ /*c*/ pre post
+                        _ReADONLY_ /*c*/ pre post
+                        _UsER_ /*c*/ pre post
+                        _WrITABLE_ /*c*/ pre post;",
+    vec![
+        ("%put", TokenType::KwmLet),
+        ("  ", TokenType::WS),
+        ("_AlL_", TokenType::KwAllVar),
+        (" ", TokenType::MacroString),
+        ("/*c*/", TokenType::CStyleComment),
+        (" pre post\n                        ", TokenType::MacroString),
+        ("_AuTOMATIC_", TokenType::KwAutomaticVar),
+        (" ", TokenType::MacroString),
+        ("/*c*/", TokenType::CStyleComment),
+        (" pre post\n                        ", TokenType::MacroString),
+        ("_GlOBAL_", TokenType::KwGlobalVar),
+        (" ", TokenType::MacroString),
+        ("/*c*/", TokenType::CStyleComment),
+        (" pre post\n                        ", TokenType::MacroString),
+        ("_LoCAL_", TokenType::KwLocalVar),
+        (" ", TokenType::MacroString),
+        ("/*c*/", TokenType::CStyleComment),
+        (" pre post\n                        ", TokenType::MacroString),
+        ("_ReADONLY_", TokenType::KwReadonlyVar),
+        (" ", TokenType::MacroString),
+        ("/*c*/", TokenType::CStyleComment),
+        (" pre post\n                        ", TokenType::MacroString),
+        ("_UsER_", TokenType::KwUserVar),
+        (" ", TokenType::MacroString),
+        ("/*c*/", TokenType::CStyleComment),
+        (" pre post\n                        ", TokenType::MacroString),
+        ("_WrITABLE_", TokenType::KwWritableVar),
+        (" ", TokenType::MacroString),
+        ("/*c*/", TokenType::CStyleComment),
+        (" pre post", TokenType::MacroString),
+        (";", TokenType::SEMI),
+        ]
+)]
+#[case::string_literals("%put a='%t();' \"%t();\";",
+    vec![
+       ("%let" ,TokenType::KwmLet),
+       (" " ,TokenType::WS),
+       ("a=" ,TokenType::MacroString),
+       ("'%t();'" ,TokenType::StringLiteral),
+       (" " ,TokenType::MacroString),
+       ("\"" ,TokenType::StringExprStart),
+       ("%t" ,TokenType::MacroIdentifier),
+       ("(" ,TokenType::LPAREN),
+       (")" ,TokenType::RPAREN),
+       (";" ,TokenType::StringExprText),
+       ("\"" ,TokenType::StringExprEnd),
+       (";" ,TokenType::SEMI),
+       ]
+    )]
+#[case::macro_call_with_ws_comment("%put (pre;%t /*c*/ ()post);",
+    vec![
+        ("%put", TokenType::KwmStr),
+        (" ", TokenType::WS),
+        ("(pre;", TokenType::MacroString),
+        ("%t", TokenType::MacroIdentifier),
+        (" ", TokenType::WS),
+        ("/*c*/", TokenType::CStyleComment),
+        (" ", TokenType::WS),
+        ("(", TokenType::LPAREN),
+        (")", TokenType::RPAREN),
+        ("post)", TokenType::MacroString),        
+        (";" ,TokenType::SEMI),
+        ]
+)]
+fn test_macro_put(#[case] contents: &str, #[case] expected_token: Vec<impl TokenTestCase>) {
+    assert_lexing(contents, expected_token, NO_ERRORS);
 }

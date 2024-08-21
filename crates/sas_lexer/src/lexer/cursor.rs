@@ -54,11 +54,6 @@ impl<'a> Cursor<'a> {
         iter.next().unwrap_or(EOF_CHAR)
     }
 
-    /// Checks if there is nothing more to consume.
-    pub(super) fn is_eof(&self) -> bool {
-        self.chars.as_str().is_empty()
-    }
-
     /// Moves to the next character.
     pub(super) fn advance(&mut self) -> Option<char> {
         let c = self.chars.next()?;
