@@ -706,88 +706,73 @@ impl<'src> Lexer<'src> {
     fn lex_macro_string_unrestricted(&mut self) {
         debug_assert!(matches!(self.mode(), LexerMode::MacroLetInitializer));
 
-        loop {
-            if let Some(c) = self.cursor.peek() {
-                match c {
-                    '\'' | '"' => {
-                        // Reached the end of the section of a macro string
-                        // Emit the text token and return
-                        self.emit_token(
-                            TokenChannel::DEFAULT,
-                            TokenType::MacroString,
-                            Payload::None,
-                        );
-                        return;
-                    }
-                    '/' if self.cursor.peek_next() == '*' => {
-                        // Start of a comment in a macro string
-                        // Emit the text token and return
-                        self.emit_token(
-                            TokenChannel::DEFAULT,
-                            TokenType::MacroString,
-                            Payload::None,
-                        );
-                        return;
-                    }
-                    '&' => {
-                        let (is_macro_amp, amp_count) = is_macro_amp(self.cursor.chars());
-
-                        if is_macro_amp {
-                            // Hit a macro var expr in the string expression => emit the text token
-                            self.emit_token(
-                                TokenChannel::DEFAULT,
-                                TokenType::MacroString,
-                                Payload::None,
-                            );
-
-                            return;
-                        }
-
-                        // Just amps in the text, consume and continue
-                        self.cursor.advance_by(amp_count);
-                    }
-                    '%' => {
-                        if is_macro_percent(self.cursor.peek_next(), false) {
-                            // Hit a macro call or statment in/after the string expression => emit the text token
-                            self.emit_token(
-                                TokenChannel::DEFAULT,
-                                TokenType::MacroString,
-                                Payload::None,
-                            );
-
-                            return;
-                        }
-
-                        // Just percent in the text, consume and continue
-                        self.cursor.advance();
-                    }
-                    '\n' => {
-                        self.cursor.advance();
-                        self.add_line();
-                    }
-                    ';' => {
-                        // Found the terminator, emit the token, pop the mode and return
-                        self.emit_token(
-                            TokenChannel::DEFAULT,
-                            TokenType::MacroString,
-                            Payload::None,
-                        );
-                        self.pop_mode();
-                        return;
-                    }
-                    _ => {
-                        // Not a terminator, just a regular character in the string
-                        // consume and continue lexing the string
-                        self.cursor.advance();
-                    }
+        while let Some(c) = self.cursor.peek() {
+            match c {
+                '\'' | '"' => {
+                    // Reached the end of the section of a macro string
+                    // Emit the text token and return
+                    self.emit_token(TokenChannel::DEFAULT, TokenType::MacroString, Payload::None);
+                    return;
                 }
-            } else {
-                // EOF
-                // Emit the text token and return
-                self.emit_token(TokenChannel::DEFAULT, TokenType::MacroString, Payload::None);
-                return;
+                '/' if self.cursor.peek_next() == '*' => {
+                    // Start of a comment in a macro string
+                    // Emit the text token and return
+                    self.emit_token(TokenChannel::DEFAULT, TokenType::MacroString, Payload::None);
+                    return;
+                }
+                '&' => {
+                    let (is_macro_amp, amp_count) = is_macro_amp(self.cursor.chars());
+
+                    if is_macro_amp {
+                        // Hit a macro var expr in the string expression => emit the text token
+                        self.emit_token(
+                            TokenChannel::DEFAULT,
+                            TokenType::MacroString,
+                            Payload::None,
+                        );
+
+                        return;
+                    }
+
+                    // Just amps in the text, consume and continue
+                    self.cursor.advance_by(amp_count);
+                }
+                '%' => {
+                    if is_macro_percent(self.cursor.peek_next(), false) {
+                        // Hit a macro call or statment in/after the string expression => emit the text token
+                        self.emit_token(
+                            TokenChannel::DEFAULT,
+                            TokenType::MacroString,
+                            Payload::None,
+                        );
+
+                        return;
+                    }
+
+                    // Just percent in the text, consume and continue
+                    self.cursor.advance();
+                }
+                '\n' => {
+                    self.cursor.advance();
+                    self.add_line();
+                }
+                ';' => {
+                    // Found the terminator, emit the token, pop the mode and return
+                    self.emit_token(TokenChannel::DEFAULT, TokenType::MacroString, Payload::None);
+                    self.pop_mode();
+                    return;
+                }
+                _ => {
+                    // Not a terminator, just a regular character in the string
+                    // consume and continue lexing the string
+                    self.cursor.advance();
+                }
             }
         }
+
+        // EOF
+        // Emit the text token and return
+        self.emit_token(TokenChannel::DEFAULT, TokenType::MacroString, Payload::None);
     }
 
     fn lex_macro_call_arg_or_value(
@@ -966,124 +951,108 @@ impl<'src> Lexer<'src> {
         // nesting level has been affected.
         let mut local_parens_nesting = 0i32;
 
-        loop {
-            if let Some(c) = self.cursor.peek() {
-                match c {
-                    '\'' | '"' => {
-                        // Reached the end of the section of a macro string
-                        // Emit the text token and return
-                        emit_token_update_nesting(self, local_parens_nesting);
-                        return;
-                    }
-                    '/' if self.cursor.peek_next() == '*' => {
-                        // Start of a comment in a macro string
-                        // Emit the text token and return
-                        emit_token_update_nesting(self, local_parens_nesting);
-                        return;
-                    }
-                    '&' => {
-                        let (is_macro_amp, amp_count) = is_macro_amp(self.cursor.chars());
-
-                        if is_macro_amp {
-                            // Hit a macro var expr in the string expression => emit the text token
-                            emit_token_update_nesting(self, local_parens_nesting);
-
-                            return;
-                        }
-
-                        // Just amps in the text, consume and continue
-                        self.cursor.advance_by(amp_count);
-                    }
-                    '%' => {
-                        if is_macro_percent(self.cursor.peek_next(), false) {
-                            // Hit a macro call or statment in/after the string expression => emit the text token
-                            emit_token_update_nesting(self, local_parens_nesting);
-
-                            return;
-                        }
-
-                        // Just percent in the text, consume and continue
-                        self.cursor.advance();
-                    }
-                    '\n' => {
-                        self.cursor.advance();
-                        self.add_line();
-                    }
-                    '(' => {
-                        // Increase the local parens nesting level
-                        local_parens_nesting += 1;
-                        self.cursor.advance();
-                    }
-                    ')' if parens_nesting_level.wrapping_add_signed(local_parens_nesting) != 0 => {
-                        // Decrease the local parens nesting level
-                        local_parens_nesting -= 1;
-                        self.cursor.advance();
-                    }
-                    ')' if parens_nesting_level.wrapping_add_signed(local_parens_nesting) == 0 => {
-                        // Found the terminator of the entire macro call arguments,
-                        // emit the token, pop the mode and return
-                        self.emit_token(
-                            TokenChannel::DEFAULT,
-                            TokenType::MacroString,
-                            Payload::None,
-                        );
-                        self.pop_mode();
-                        return;
-                    }
-                    ',' if parens_nesting_level.wrapping_add_signed(local_parens_nesting) == 0 => {
-                        // Found the terminator, pop the mode and push new modes
-                        // to expect stuff, emit token then return
-                        self.emit_token(
-                            TokenChannel::DEFAULT,
-                            TokenType::MacroString,
-                            Payload::None,
-                        );
-                        self.pop_mode();
-                        self.push_mode(LexerMode::MacroCallArgOrValue(0));
-                        // Leading insiginificant WS before the argument
-                        self.push_mode(LexerMode::WsOrCStyleCommentOnly);
-                        self.push_mode(LexerMode::ExpectToken(
-                            ",",
-                            TokenType::COMMA,
-                            TokenChannel::DEFAULT,
-                        ));
-                        return;
-                    }
-                    '=' if terminate_on_assign
-                        && (parens_nesting_level.wrapping_add_signed(local_parens_nesting)
-                            == 0) =>
-                    {
-                        // Found the terminator between argument name and value,
-                        // pop the mode and push new modes to expect stuff then return
-                        self.emit_token(
-                            TokenChannel::DEFAULT,
-                            TokenType::MacroString,
-                            Payload::None,
-                        );
-                        // Pop the arg/value mode and push the value mode
-                        self.pop_mode();
-                        self.push_mode(LexerMode::MacroCallValue(0));
-                        // Leading insiginificant WS before the argument
-                        self.push_mode(LexerMode::WsOrCStyleCommentOnly);
-                        self.push_mode(LexerMode::ExpectToken(
-                            "=",
-                            TokenType::ASSIGN,
-                            TokenChannel::DEFAULT,
-                        ));
-                        return;
-                    }
-                    _ => {
-                        // Not a terminator, just a regular character in the string
-                        // consume and continue lexing the string
-                        self.cursor.advance();
-                    }
+        while let Some(c) = self.cursor.peek() {
+            match c {
+                '\'' | '"' => {
+                    // Reached the end of the section of a macro string
+                    // Emit the text token and return
+                    emit_token_update_nesting(self, local_parens_nesting);
+                    return;
                 }
-            } else {
-                // Reached EOF
-                // Emit the text token and return
-                emit_token_update_nesting(self, local_parens_nesting);
+                '/' if self.cursor.peek_next() == '*' => {
+                    // Start of a comment in a macro string
+                    // Emit the text token and return
+                    emit_token_update_nesting(self, local_parens_nesting);
+                    return;
+                }
+                '&' => {
+                    let (is_macro_amp, amp_count) = is_macro_amp(self.cursor.chars());
+
+                    if is_macro_amp {
+                        // Hit a macro var expr in the string expression => emit the text token
+                        emit_token_update_nesting(self, local_parens_nesting);
+
+                        return;
+                    }
+
+                    // Just amps in the text, consume and continue
+                    self.cursor.advance_by(amp_count);
+                }
+                '%' => {
+                    if is_macro_percent(self.cursor.peek_next(), false) {
+                        // Hit a macro call or statment in/after the string expression => emit the text token
+                        emit_token_update_nesting(self, local_parens_nesting);
+
+                        return;
+                    }
+
+                    // Just percent in the text, consume and continue
+                    self.cursor.advance();
+                }
+                '\n' => {
+                    self.cursor.advance();
+                    self.add_line();
+                }
+                '(' => {
+                    // Increase the local parens nesting level
+                    local_parens_nesting += 1;
+                    self.cursor.advance();
+                }
+                ')' if parens_nesting_level.wrapping_add_signed(local_parens_nesting) != 0 => {
+                    // Decrease the local parens nesting level
+                    local_parens_nesting -= 1;
+                    self.cursor.advance();
+                }
+                ')' if parens_nesting_level.wrapping_add_signed(local_parens_nesting) == 0 => {
+                    // Found the terminator of the entire macro call arguments,
+                    // emit the token, pop the mode and return
+                    self.emit_token(TokenChannel::DEFAULT, TokenType::MacroString, Payload::None);
+                    self.pop_mode();
+                    return;
+                }
+                ',' if parens_nesting_level.wrapping_add_signed(local_parens_nesting) == 0 => {
+                    // Found the terminator, pop the mode and push new modes
+                    // to expect stuff, emit token then return
+                    self.emit_token(TokenChannel::DEFAULT, TokenType::MacroString, Payload::None);
+                    self.pop_mode();
+                    self.push_mode(LexerMode::MacroCallArgOrValue(0));
+                    // Leading insiginificant WS before the argument
+                    self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+                    self.push_mode(LexerMode::ExpectToken(
+                        ",",
+                        TokenType::COMMA,
+                        TokenChannel::DEFAULT,
+                    ));
+                    return;
+                }
+                '=' if terminate_on_assign
+                    && (parens_nesting_level.wrapping_add_signed(local_parens_nesting) == 0) =>
+                {
+                    // Found the terminator between argument name and value,
+                    // pop the mode and push new modes to expect stuff then return
+                    self.emit_token(TokenChannel::DEFAULT, TokenType::MacroString, Payload::None);
+                    // Pop the arg/value mode and push the value mode
+                    self.pop_mode();
+                    self.push_mode(LexerMode::MacroCallValue(0));
+                    // Leading insiginificant WS before the argument
+                    self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+                    self.push_mode(LexerMode::ExpectToken(
+                        "=",
+                        TokenType::ASSIGN,
+                        TokenChannel::DEFAULT,
+                    ));
+                    return;
+                }
+                _ => {
+                    // Not a terminator, just a regular character in the string
+                    // consume and continue lexing the string
+                    self.cursor.advance();
+                }
             }
         }
+        // Reached EOF
+        // Emit the text token and return
+        emit_token_update_nesting(self, local_parens_nesting);
     }
 
     fn lex_macro_str_quoted_expr(&mut self, mask_macro: bool, parens_nesting_level: u32) {
@@ -1228,145 +1197,141 @@ impl<'src> Lexer<'src> {
         let mut lit_end_idx = lit_start_idx;
         let mut last_lit_end_byte_offset = self.cur_byte_offset();
 
-        loop {
-            if let Some(c) = self.cursor.peek() {
-                match c {
-                    '\'' | '"' => {
-                        // Reached the end of the section of a macro string
-                        // Emit the text token and return
+        while let Some(c) = self.cursor.peek() {
+            match c {
+                '\'' | '"' => {
+                    // Reached the end of the section of a macro string
+                    // Emit the text token and return
 
-                        let payload = self.resolve_string_literal_payload(
-                            lit_start_idx,
-                            lit_end_idx,
-                            last_lit_end_byte_offset,
-                            None, // will use the current byte offset
-                        );
+                    let payload = self.resolve_string_literal_payload(
+                        lit_start_idx,
+                        lit_end_idx,
+                        last_lit_end_byte_offset,
+                        None, // will use the current byte offset
+                    );
 
-                        emit_token_update_nesting(self, local_parens_nesting, payload);
-                        return;
-                    }
-                    '/' if self.cursor.peek_next() == '*' => {
-                        // Start of a comment in a macro string
-                        // Emit the text token and return
-
-                        let payload = self.resolve_string_literal_payload(
-                            lit_start_idx,
-                            lit_end_idx,
-                            last_lit_end_byte_offset,
-                            None, // will use the current byte offset
-                        );
-
-                        emit_token_update_nesting(self, local_parens_nesting, payload);
-                        return;
-                    }
-                    '&' if !mask_macro => {
-                        let (is_macro_amp, amp_count) = is_macro_amp(self.cursor.chars());
-
-                        if is_macro_amp {
-                            // Hit a macro var expr in the string expression => emit the text token
-                            let payload = self.resolve_string_literal_payload(
-                                lit_start_idx,
-                                lit_end_idx,
-                                last_lit_end_byte_offset,
-                                None, // will use the current byte offset
-                            );
-
-                            emit_token_update_nesting(self, local_parens_nesting, payload);
-
-                            return;
-                        }
-
-                        // Just amps in the text, consume and continue
-                        self.cursor.advance_by(amp_count);
-                    }
-                    '%' => {
-                        // Check if this is a quote char
-                        if matches!(self.cursor.peek_next(), '"' | '\'' | '%' | '(' | ')') {
-                            // Quoted char
-
-                            // First, store the literal section before the escape percent
-                            let (new_start, new_end) =
-                                self.add_string_literal(last_lit_end_byte_offset, None);
-                            lit_start_idx = min(lit_start_idx, new_start);
-                            lit_end_idx = new_end;
-
-                            // Now advance the cursor past the percent
-                            self.cursor.advance();
-
-                            // And update the last byte offset - this will ensure that the
-                            // following escaped char will be incuded in the next literal section
-                            last_lit_end_byte_offset = self.cur_byte_offset();
-
-                            // Finally, advance the cursor past the quoted char
-                            self.cursor.advance();
-                            continue;
-                        }
-
-                        if !mask_macro && is_macro_percent(self.cursor.peek_next(), false) {
-                            // Hit a macro call or statment in/after the string expression => emit the text token
-                            let payload = self.resolve_string_literal_payload(
-                                lit_start_idx,
-                                lit_end_idx,
-                                last_lit_end_byte_offset,
-                                None, // will use the current byte offset
-                            );
-
-                            emit_token_update_nesting(self, local_parens_nesting, payload);
-
-                            return;
-                        }
-
-                        // Just percent in the text, consume and continue
-                        self.cursor.advance();
-                    }
-                    '\n' => {
-                        self.cursor.advance();
-                        self.add_line();
-                    }
-                    '(' => {
-                        // Increase the local parens nesting level
-                        local_parens_nesting += 1;
-                        self.cursor.advance();
-                    }
-                    ')' if parens_nesting_level.wrapping_add_signed(local_parens_nesting) != 0 => {
-                        // Decrease the local parens nesting level
-                        local_parens_nesting -= 1;
-                        self.cursor.advance();
-                    }
-                    ')' if parens_nesting_level.wrapping_add_signed(local_parens_nesting) == 0 => {
-                        // Found the terminator, emit the token, pop the mode and return
-                        let payload = self.resolve_string_literal_payload(
-                            lit_start_idx,
-                            lit_end_idx,
-                            last_lit_end_byte_offset,
-                            None, // will use the current byte offset
-                        );
-
-                        self.emit_token(TokenChannel::DEFAULT, TokenType::MacroString, payload);
-                        self.pop_mode();
-                        return;
-                    }
-                    _ => {
-                        // Not a terminator, just a regular character in the string
-                        // consume and continue lexing the string
-                        self.cursor.advance();
-                    }
+                    emit_token_update_nesting(self, local_parens_nesting, payload);
+                    return;
                 }
-            } else {
-                // Reached EOF
-                // Emit the text token and return
+                '/' if self.cursor.peek_next() == '*' => {
+                    // Start of a comment in a macro string
+                    // Emit the text token and return
 
-                let payload = self.resolve_string_literal_payload(
-                    lit_start_idx,
-                    lit_end_idx,
-                    last_lit_end_byte_offset,
-                    None, // will use the current byte offset
-                );
+                    let payload = self.resolve_string_literal_payload(
+                        lit_start_idx,
+                        lit_end_idx,
+                        last_lit_end_byte_offset,
+                        None, // will use the current byte offset
+                    );
 
-                emit_token_update_nesting(self, local_parens_nesting, payload);
-                return;
+                    emit_token_update_nesting(self, local_parens_nesting, payload);
+                    return;
+                }
+                '&' if !mask_macro => {
+                    let (is_macro_amp, amp_count) = is_macro_amp(self.cursor.chars());
+
+                    if is_macro_amp {
+                        // Hit a macro var expr in the string expression => emit the text token
+                        let payload = self.resolve_string_literal_payload(
+                            lit_start_idx,
+                            lit_end_idx,
+                            last_lit_end_byte_offset,
+                            None, // will use the current byte offset
+                        );
+
+                        emit_token_update_nesting(self, local_parens_nesting, payload);
+
+                        return;
+                    }
+
+                    // Just amps in the text, consume and continue
+                    self.cursor.advance_by(amp_count);
+                }
+                '%' => {
+                    // Check if this is a quote char
+                    if matches!(self.cursor.peek_next(), '"' | '\'' | '%' | '(' | ')') {
+                        // Quoted char
+
+                        // First, store the literal section before the escape percent
+                        let (new_start, new_end) =
+                            self.add_string_literal(last_lit_end_byte_offset, None);
+                        lit_start_idx = min(lit_start_idx, new_start);
+                        lit_end_idx = new_end;
+
+                        // Now advance the cursor past the percent
+                        self.cursor.advance();
+
+                        // And update the last byte offset - this will ensure that the
+                        // following escaped char will be incuded in the next literal section
+                        last_lit_end_byte_offset = self.cur_byte_offset();
+
+                        // Finally, advance the cursor past the quoted char
+                        self.cursor.advance();
+                        continue;
+                    }
+
+                    if !mask_macro && is_macro_percent(self.cursor.peek_next(), false) {
+                        // Hit a macro call or statment in/after the string expression => emit the text token
+                        let payload = self.resolve_string_literal_payload(
+                            lit_start_idx,
+                            lit_end_idx,
+                            last_lit_end_byte_offset,
+                            None, // will use the current byte offset
+                        );
+
+                        emit_token_update_nesting(self, local_parens_nesting, payload);
+
+                        return;
+                    }
+
+                    // Just percent in the text, consume and continue
+                    self.cursor.advance();
+                }
+                '\n' => {
+                    self.cursor.advance();
+                    self.add_line();
+                }
+                '(' => {
+                    // Increase the local parens nesting level
+                    local_parens_nesting += 1;
+                    self.cursor.advance();
+                }
+                ')' if parens_nesting_level.wrapping_add_signed(local_parens_nesting) != 0 => {
+                    // Decrease the local parens nesting level
+                    local_parens_nesting -= 1;
+                    self.cursor.advance();
+                }
+                ')' if parens_nesting_level.wrapping_add_signed(local_parens_nesting) == 0 => {
+                    // Found the terminator, emit the token, pop the mode and return
+                    let payload = self.resolve_string_literal_payload(
+                        lit_start_idx,
+                        lit_end_idx,
+                        last_lit_end_byte_offset,
+                        None, // will use the current byte offset
+                    );
+
+                    self.emit_token(TokenChannel::DEFAULT, TokenType::MacroString, payload);
+                    self.pop_mode();
+                    return;
+                }
+                _ => {
+                    // Not a terminator, just a regular character in the string
+                    // consume and continue lexing the string
+                    self.cursor.advance();
+                }
             }
         }
+        // Reached EOF
+        // Emit the text token and return
+
+        let payload = self.resolve_string_literal_payload(
+            lit_start_idx,
+            lit_end_idx,
+            last_lit_end_byte_offset,
+            None, // will use the current byte offset
+        );
+
+        emit_token_update_nesting(self, local_parens_nesting, payload);
     }
 
     fn lex_ws(&mut self) {
@@ -1392,34 +1357,29 @@ impl<'src> Lexer<'src> {
         self.cursor.advance();
         self.cursor.advance();
 
-        loop {
-            if let Some(c) = self.cursor.advance() {
-                if c == '*' && self.cursor.peek() == Some('/') {
-                    self.cursor.advance();
-                    break;
-                }
-
-                if c == '\n' {
-                    self.add_line();
-                }
-            } else {
-                // EOF reached without a closing comment
-                // Emit an error token and return
+        while let Some(c) = self.cursor.advance() {
+            if c == '*' && self.cursor.peek() == Some('/') {
+                self.cursor.advance();
                 self.emit_token(
                     TokenChannel::COMMENT,
                     TokenType::CStyleComment,
                     Payload::None,
                 );
-                self.emit_error(ErrorType::UnterminatedComment);
                 return;
             }
-        }
 
+            if c == '\n' {
+                self.add_line();
+            }
+        }
+        // EOF reached without a closing comment
+        // Emit an error token and return
         self.emit_token(
             TokenChannel::COMMENT,
             TokenType::CStyleComment,
             Payload::None,
         );
+        self.emit_error(ErrorType::UnterminatedComment);
     }
 
     fn lex_single_quoted_str(&mut self) {
@@ -1683,95 +1643,15 @@ impl<'src> Lexer<'src> {
         let mut last_lit_end_byte_offset = self.cur_byte_offset();
 
         // Now lex the string
-        loop {
-            if let Some(c) = self.cursor.peek() {
-                match c {
-                    '&' => {
-                        let (is_macro_amp, amp_count) = is_macro_amp(self.cursor.chars());
+        while let Some(c) = self.cursor.peek() {
+            match c {
+                '&' => {
+                    let (is_macro_amp, amp_count) = is_macro_amp(self.cursor.chars());
 
-                        if is_macro_amp {
-                            // Hit a macro var expr in the string expression => emit the text token
-
-                            // Also calculate the payload (will differ whether we had escaped quotes or not).
-                            let payload = self.resolve_string_literal_payload(
-                                lit_start_idx,
-                                lit_end_idx,
-                                last_lit_end_byte_offset,
-                                None, // will use the current byte offset
-                            );
-
-                            self.emit_token(
-                                TokenChannel::DEFAULT,
-                                TokenType::StringExprText,
-                                payload,
-                            );
-
-                            return;
-                        }
-
-                        // Just amps in the text, consume and continue
-                        self.cursor.advance_by(amp_count);
-                    }
-                    '%' => {
-                        if is_macro_percent(self.cursor.peek_next(), false) {
-                            // Hit a macro var expr in the string expression => emit the text token
-
-                            // Also calculate the payload (will differ whether we had escaped quotes or not).
-                            let payload = self.resolve_string_literal_payload(
-                                lit_start_idx,
-                                lit_end_idx,
-                                last_lit_end_byte_offset,
-                                None, // will use the current byte offset
-                            );
-
-                            self.emit_token(
-                                TokenChannel::DEFAULT,
-                                TokenType::StringExprText,
-                                payload,
-                            );
-
-                            return;
-                        }
-
-                        // Just percent in the text, consume and continue
-                        self.cursor.advance();
-                    }
-                    '\n' => {
-                        self.cursor.advance();
-                        self.add_line();
-                    }
-                    '"' => {
-                        if self.cursor.peek_next() == '"' {
-                            // escaped double quote, eat the first, add literal, then second and continue
-                            self.cursor.advance();
-
-                            // First, store the literal section before the escaped quote
-                            let (new_start, new_end) =
-                                self.add_string_literal(last_lit_end_byte_offset, None);
-                            lit_start_idx = min(lit_start_idx, new_start);
-                            lit_end_idx = new_end;
-
-                            // And only then advance the cursor
-                            self.cursor.advance();
-
-                            // And update the last byte offset
-                            last_lit_end_byte_offset = self.cur_byte_offset();
-                            continue;
-                        }
-
-                        // So, we have a closing double quote. Two possibilities:
-                        // 1. This is a real string expression, like "&mv.string"
-                        // 2. This is just a string literal, like "just a string"
-                        let last_tok_is_start =
-                            if let Some(last_tok_info) = self.buffer.last_token_info() {
-                                last_tok_info.token_type() == TokenType::StringExprStart
-                            } else {
-                                false
-                            };
+                    if is_macro_amp {
+                        // Hit a macro var expr in the string expression => emit the text token
 
                         // Also calculate the payload (will differ whether we had escaped quotes or not).
-                        // Unlike in single quoted strings, we do not need to calculate the end of the string
-                        // as we haven't advanced past the closing quote yet
                         let payload = self.resolve_string_literal_payload(
                             lit_start_idx,
                             lit_end_idx,
@@ -1779,36 +1659,103 @@ impl<'src> Lexer<'src> {
                             None, // will use the current byte offset
                         );
 
-                        if last_tok_is_start {
-                            self.lex_double_quoted_literal(payload);
-                            return;
-                        }
-
-                        // We are in a genuine string expression, and hit the end - emit the text token
-                        // The ending quote will be handled by the caller
                         self.emit_token(TokenChannel::DEFAULT, TokenType::StringExprText, payload);
+
                         return;
                     }
-                    _ => {
-                        self.cursor.advance();
-                    }
+
+                    // Just amps in the text, consume and continue
+                    self.cursor.advance_by(amp_count);
                 }
-            } else {
-                // EOF reached without a closing double quote
+                '%' => {
+                    if is_macro_percent(self.cursor.peek_next(), false) {
+                        // Hit a macro var expr in the string expression => emit the text token
 
-                // Also calculate the payload (will differ whether we had escaped quotes or not).
-                let payload = self.resolve_string_literal_payload(
-                    lit_start_idx,
-                    lit_end_idx,
-                    last_lit_end_byte_offset,
-                    None, // will use the current byte offset
-                );
+                        // Also calculate the payload (will differ whether we had escaped quotes or not).
+                        let payload = self.resolve_string_literal_payload(
+                            lit_start_idx,
+                            lit_end_idx,
+                            last_lit_end_byte_offset,
+                            None, // will use the current byte offset
+                        );
 
-                self.handle_unterminated_str_expr(payload);
+                        self.emit_token(TokenChannel::DEFAULT, TokenType::StringExprText, payload);
 
-                return;
+                        return;
+                    }
+
+                    // Just percent in the text, consume and continue
+                    self.cursor.advance();
+                }
+                '\n' => {
+                    self.cursor.advance();
+                    self.add_line();
+                }
+                '"' => {
+                    if self.cursor.peek_next() == '"' {
+                        // escaped double quote, eat the first, add literal, then second and continue
+                        self.cursor.advance();
+
+                        // First, store the literal section before the escaped quote
+                        let (new_start, new_end) =
+                            self.add_string_literal(last_lit_end_byte_offset, None);
+                        lit_start_idx = min(lit_start_idx, new_start);
+                        lit_end_idx = new_end;
+
+                        // And only then advance the cursor
+                        self.cursor.advance();
+
+                        // And update the last byte offset
+                        last_lit_end_byte_offset = self.cur_byte_offset();
+                        continue;
+                    }
+
+                    // So, we have a closing double quote. Two possibilities:
+                    // 1. This is a real string expression, like "&mv.string"
+                    // 2. This is just a string literal, like "just a string"
+                    let last_tok_is_start =
+                        if let Some(last_tok_info) = self.buffer.last_token_info() {
+                            last_tok_info.token_type() == TokenType::StringExprStart
+                        } else {
+                            false
+                        };
+
+                    // Also calculate the payload (will differ whether we had escaped quotes or not).
+                    // Unlike in single quoted strings, we do not need to calculate the end of the string
+                    // as we haven't advanced past the closing quote yet
+                    let payload = self.resolve_string_literal_payload(
+                        lit_start_idx,
+                        lit_end_idx,
+                        last_lit_end_byte_offset,
+                        None, // will use the current byte offset
+                    );
+
+                    if last_tok_is_start {
+                        self.lex_double_quoted_literal(payload);
+                        return;
+                    }
+
+                    // We are in a genuine string expression, and hit the end - emit the text token
+                    // The ending quote will be handled by the caller
+                    self.emit_token(TokenChannel::DEFAULT, TokenType::StringExprText, payload);
+                    return;
+                }
+                _ => {
+                    self.cursor.advance();
+                }
             }
         }
+        // EOF reached without a closing double quote
+
+        // Also calculate the payload (will differ whether we had escaped quotes or not).
+        let payload = self.resolve_string_literal_payload(
+            lit_start_idx,
+            lit_end_idx,
+            last_lit_end_byte_offset,
+            None, // will use the current byte offset
+        );
+
+        self.handle_unterminated_str_expr(payload);
     }
 
     fn handle_unterminated_str_expr(&mut self, payload: Payload) {
@@ -1872,87 +1819,85 @@ impl<'src> Lexer<'src> {
         // Consume the ampersands and the first name character
         self.cursor.advance_by(amp_count + 1);
 
-        loop {
-            if let Some(c) = self.cursor.peek() {
-                match c {
-                    '.' => {
-                        // a dot, terminates a macro var expr, consume it
-                        self.cursor.advance();
+        while let Some(c) = self.cursor.peek() {
+            match c {
+                '.' => {
+                    // a dot, terminates a macro var expr, consume it
+                    self.cursor.advance();
 
-                        // Add the token
-                        self.emit_token(
-                            TokenChannel::DEFAULT,
-                            TokenType::MacroVarExpr,
-                            Payload::None,
-                        );
+                    // Add the token
+                    self.emit_token(
+                        TokenChannel::DEFAULT,
+                        TokenType::MacroVarExpr,
+                        Payload::None,
+                    );
 
-                        // Report we lexed a token
-                        return true;
-                    }
-                    '&' => {
-                        // Ok, we got at least some portion of the macro var expr. But the next amp
-                        // can either be the continuation (like in `&&var&c``)
-                        //                                               ^^
-                        // which we treat as part of the same macro var expr token
-                        // or a trailing amp (like in `&&var&& other stuff``)
-                        //                                  ^^
-                        // Unfortunately, now an arbitrary number of lookahead is needed to
-                        // figure out which case it is as arbitrary number of & characters
-                        // are treated as a single one.
-                        // Thus we do a lookahead predicate on a cloned iterator to avoid consuming
-                        // the original
-                        let (is_macro, amp_count) = is_macro_amp(self.cursor.chars());
-
-                        if !is_macro {
-                            // The following & characters are not part of the macro var expr
-
-                            // Add the token without consuming the following amp
-                            self.emit_token(
-                                TokenChannel::DEFAULT,
-                                TokenType::MacroVarExpr,
-                                Payload::None,
-                            );
-
-                            // Report we lexed a token
-                            return true;
-                        }
-
-                        // Ok we know that the amp is part of the macro var expr
-                        // we can skip the `amp_count` characters
-                        self.cursor.advance_by(amp_count);
-                    }
-                    c if is_xid_continue(c) => {
-                        // Still a name
-                        self.cursor.advance();
-                    }
-                    _ => {
-                        // Reached the end of the macro var expr
-
-                        // Add the token without consuming the following character
-                        self.emit_token(
-                            TokenChannel::DEFAULT,
-                            TokenType::MacroVarExpr,
-                            Payload::None,
-                        );
-
-                        // Report we lexed a token
-                        return true;
-                    }
+                    // Report we lexed a token
+                    return true;
                 }
-            } else {
-                // Reached the end of the macro var expr
+                '&' => {
+                    // Ok, we got at least some portion of the macro var expr. But the next amp
+                    // can either be the continuation (like in `&&var&c``)
+                    //                                               ^^
+                    // which we treat as part of the same macro var expr token
+                    // or a trailing amp (like in `&&var&& other stuff``)
+                    //                                  ^^
+                    // Unfortunately, now an arbitrary number of lookahead is needed to
+                    // figure out which case it is as arbitrary number of & characters
+                    // are treated as a single one.
+                    // Thus we do a lookahead predicate on a cloned iterator to avoid consuming
+                    // the original
+                    let (is_macro, amp_count) = is_macro_amp(self.cursor.chars());
 
-                // Add the token without consuming the following character
-                self.emit_token(
-                    TokenChannel::DEFAULT,
-                    TokenType::MacroVarExpr,
-                    Payload::None,
-                );
+                    if !is_macro {
+                        // The following & characters are not part of the macro var expr
 
-                // Report we lexed a token
-                return true;
+                        // Add the token without consuming the following amp
+                        self.emit_token(
+                            TokenChannel::DEFAULT,
+                            TokenType::MacroVarExpr,
+                            Payload::None,
+                        );
+
+                        // Report we lexed a token
+                        return true;
+                    }
+
+                    // Ok we know that the amp is part of the macro var expr
+                    // we can skip the `amp_count` characters
+                    self.cursor.advance_by(amp_count);
+                }
+                c if is_xid_continue(c) => {
+                    // Still a name
+                    self.cursor.advance();
+                }
+                _ => {
+                    // Reached the end of the macro var expr
+
+                    // Add the token without consuming the following character
+                    self.emit_token(
+                        TokenChannel::DEFAULT,
+                        TokenType::MacroVarExpr,
+                        Payload::None,
+                    );
+
+                    // Report we lexed a token
+                    return true;
+                }
             }
         }
+
+        // Reached the end of the macro var expr
+
+        // Add the token without consuming the following character
+        self.emit_token(
+            TokenChannel::DEFAULT,
+            TokenType::MacroVarExpr,
+            Payload::None,
+        );
+
+        // Report we lexed a token
+        true
     }
 
     fn lex_identifier(&mut self) {
@@ -2041,9 +1986,9 @@ impl<'src> Lexer<'src> {
         // if it may be the start of the datalines (must preceeded by `;` on default channel),
         // then we need to peek forward to find a `;`. Only of we find it, we can be sure
         // that this is indeed a datalines start token.
-        if let Some(tok_info) = self
+        if let Some((tok_info, _)) = self
             .buffer
-            .last_token_info_on_channel_info(TokenChannel::DEFAULT)
+            .last_token_info_if(|&t| t.channel() == TokenChannel::DEFAULT)
         {
             if tok_info.token_type() != TokenType::SEMI {
                 // the previous character is not a semicolon
@@ -2873,27 +2818,16 @@ impl<'src> Lexer<'src> {
 
             if let Some(kw_tok_type) = parse_macro_keyword(&ident) {
                 match kw_tok_type {
-                    TokenType::KwmStr => {
+                    TokenType::KwmStr | TokenType::KwmNrStr => {
                         // Add the token
-                        // We use hidden channel for the %str and the wrapping parens
+                        // We use hidden channel for the %str/%nrstr and the wrapping parens
                         // since this is a pure compile time directive in SAS which just allows
                         // having a macro text expression with things that would otherwise be
                         // interpreted as macro calls or removed (like spaces)
                         self.emit_token(TokenChannel::HIDDEN, kw_tok_type, Payload::None);
 
-                        // Populate the expected states for the %str() call
-                        self.expect_macro_str_call_args(false);
-                    }
-                    TokenType::KwmNrStr => {
-                        // Add the token
-                        // We use hidden channel for the %nrstr and the wrapping parens
-                        // since this is a pure compile time directive in SAS which just allows
-                        // having a macro text expression with things that would otherwise be
-                        // interpreted as macro calls or removed (like spaces)
-                        self.emit_token(TokenChannel::HIDDEN, kw_tok_type, Payload::None);
-
-                        // Populate the expected states for the %str() call
-                        self.expect_macro_str_call_args(true);
+                        // Populate the expected states for the %str/%nrstr() call
+                        self.expect_macro_str_call_args(kw_tok_type == TokenType::KwmNrStr);
                     }
                     TokenType::KwmEnd | TokenType::KwmReturn => {
                         // Add the token
