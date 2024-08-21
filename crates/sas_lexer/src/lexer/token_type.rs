@@ -319,6 +319,33 @@ pub enum TokenType {
     KwPut,
 }
 
+#[derive(Default)]
+pub(super) struct TokenFlags {
+    bits: [u64; (TokenType::COUNT + 63) / 64],
+}
+
+impl TokenFlags {
+    pub(super) fn set(&mut self, tok_type: TokenType) {
+        let index = tok_type as u16;
+        let (word, bit) = ((index / 64) as usize, index % 64);
+
+        assert!(word < self.bits.len());
+
+        self.bits[word] |= 1 << bit;
+    }
+
+    pub(super) fn contains(&self, tok_type: TokenType) -> bool {
+        let index = tok_type as u16;
+        let (word, bit) = ((index / 64) as usize, index % 64);
+
+        assert!(word < self.bits.len());
+
+        self.bits[word] & (1 << bit) != 0
+    }
+
+    // Add other useful methods if needed
+}
+
 pub(super) fn parse_keyword<S: AsRef<str>>(ident: S) -> Option<TokenType> {
     KEYWORDS.get(ident.as_ref()).copied()
 }
@@ -457,5 +484,34 @@ mod tests {
                 }
             };
         }
+    }
+
+    #[test]
+    fn test_token_flags() {
+        // Test setting and checking individual flags
+        for token_type in TokenType::iter() {
+            let mut flags = TokenFlags::default();
+            flags.set(token_type);
+
+            assert!(flags.contains(token_type));
+
+            for other_token_type in TokenType::iter() {
+                if other_token_type != token_type {
+                    assert!(!flags.contains(other_token_type));
+                }
+            }
+        }
+
+        // Do a spot test for a few tokens
+        let mut flags = TokenFlags::default();
+        flags.set(TokenType::KwEQ);
+        flags.set(TokenType::KwIN);
+        flags.set(TokenType::KwAllVar);
+
+        assert!(flags.contains(TokenType::KwEQ));
+        assert!(flags.contains(TokenType::KwIN));
+        assert!(flags.contains(TokenType::KwAllVar));
+        assert!(!flags.contains(TokenType::KwCorr));
+        assert!(!flags.contains(TokenType::KwmAbort));
     }
 }

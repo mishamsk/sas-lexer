@@ -98,10 +98,10 @@ pub(super) struct TokenInfo {
 }
 
 impl TokenInfo {
-    // #[must_use]
-    // pub(super) fn channel(&self) -> TokenChannel {
-    //     self.channel
-    // }
+    #[must_use]
+    pub(super) fn channel(&self) -> TokenChannel {
+        self.channel
+    }
 
     #[must_use]
     pub(super) fn token_type(&self) -> TokenType {
@@ -314,6 +314,10 @@ impl WorkTokenizedBuffer {
         })
     }
 
+    /// Rolls back the buffer to the last token.
+    ///
+    /// This will correctly remove not just the tokens, but also the lines
+    /// after the last token, thus allowing re-lexing from the last token.
     pub(super) fn rollback(&mut self, last_token: Option<TokenIdx>) -> Result<(), &'static str> {
         if let Some(last_token_idx) = last_token {
             // Get info of the last token to be retained
@@ -327,7 +331,7 @@ impl WorkTokenizedBuffer {
                 self.get_token_end_line_idx(last_token_idx.0 as usize, last_token_info)?;
 
             // Remove all tokens after the last token
-            self.token_infos.truncate(last_token_idx.0 as usize + 1);
+            self.truncate(last_token_idx);
 
             // Remove all lines after the last token end line
             self.line_infos.truncate(last_token_end_line.0 as usize + 1);
@@ -337,6 +341,16 @@ impl WorkTokenizedBuffer {
         } else {
             Ok(())
         }
+    }
+
+    /// Truncates the buffer to the last token. Use it to "extend" the last
+    /// token to the current cursor position instaed of adding a new token.
+    ///
+    /// Unlike rollback, this does not remove the lines after the last token.
+    #[inline]
+    pub(super) fn truncate(&mut self, last_token: TokenIdx) {
+        // Remove all tokens after the last token
+        self.token_infos.truncate(last_token.0 as usize + 1);
     }
 
     // pub(super) fn iter_line_infos(&self) -> std::slice::Iter<'_, LineInfo> {
@@ -369,11 +383,24 @@ impl WorkTokenizedBuffer {
         self.token_infos.last()
     }
 
-    pub(super) fn last_token_info_on_channel_info(
-        &self,
-        channel: TokenChannel,
-    ) -> Option<&TokenInfo> {
-        self.token_infos.iter().rev().find(|t| t.channel == channel)
+    pub(super) fn last_token_info_if<F>(&self, mut predicate: F) -> Option<(&TokenInfo, TokenIdx)>
+    where
+        F: FnMut(&TokenInfo) -> bool,
+    {
+        let len = self.token_count();
+        self.token_infos
+            .iter()
+            .rev()
+            .enumerate()
+            .find_map(|(i, info)| {
+                if predicate(info) {
+                    // See `token_count` for explanation why truncation is kinda safe
+                    #[allow(clippy::cast_possible_truncation)]
+                    Some((info, TokenIdx::new(len - 1 - i as u32)))
+                } else {
+                    None
+                }
+            })
     }
 
     #[inline]
@@ -388,7 +415,9 @@ impl WorkTokenizedBuffer {
     #[allow(clippy::cast_possible_truncation)]
     pub(super) fn token_count(&self) -> u32 {
         // theoretically number of tokens may be larger than text size,
-        // which checked to be no more than u32, but this is not possible in practice
+        // even though it is checked to be no more than u32 bytes.
+        // This is possible because tokens may have no text. But in practice
+        // it is ok to just panic here.
         self.token_infos.len() as u32
     }
 
@@ -507,7 +536,7 @@ impl TokenizedBuffer {
     ///
     /// This is the same as the start of the next token or EOF.
     ///
-    /// Note that EOF offset is 1 more than the mximum valid index in the source string.    
+    /// Note that EOF offset is 1 more than the mximum valid index in the source string.
     pub fn get_token_end_byte_offset(&self, token: TokenIdx) -> Result<ByteOffset, &'static str> {
         let tidx = token.0 as usize;
 
@@ -535,7 +564,7 @@ impl TokenizedBuffer {
     /// Note that EOF offset is 1 more than the mximum valid index in the source string.
     ///
     /// Char here means a Unicode code point, not graphemes. This is
-    /// what Python uses to index strings, and IDEs show for cursor position.    
+    /// what Python uses to index strings, and IDEs show for cursor position.
     pub fn get_token_end(&self, token: TokenIdx) -> Result<CharOffset, &'static str> {
         let tidx = token.0 as usize;
 
@@ -596,7 +625,7 @@ impl TokenizedBuffer {
             .ok_or(TOKEN_IDX_OUT_OF_BOUNDS)?;
 
         Ok(next_token_line_idx.0
-            // lines are 1-based, but line indexes are 0-based. 
+            // lines are 1-based, but line indexes are 0-based.
             // If the next token starts not at the start of the next line,
             // means this token ends on the next token line, =>
             // we need to add 1 to the line count. Otherwise it must be on the previous line,
