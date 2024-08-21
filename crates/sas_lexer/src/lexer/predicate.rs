@@ -57,12 +57,12 @@ pub(super) fn is_macro_percent(follow_char: char, in_eval_context: bool) -> bool
 }
 
 #[inline]
-fn is_macro_stat(tok_type: TokenType) -> bool {
+pub(super) fn is_macro_stat(tok_type: TokenType) -> bool {
     get_macro_stat_token_type_range().contains(&tok_type.into())
 }
 
 #[inline]
-fn is_macro_quote_call(tok_type: TokenType) -> bool {
+pub(super) fn is_macro_quote_call(tok_type: TokenType) -> bool {
     get_macro_quote_call_token_type_range().contains(&tok_type.into())
 }
 

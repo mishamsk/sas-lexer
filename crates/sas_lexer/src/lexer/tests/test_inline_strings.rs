@@ -1658,27 +1658,27 @@ fn test_macro_simple_stats(#[case] tok_type: TokenType) {
 )]
 #[case::close_parens_crlf_unicode_mvar("%pUt some\r\n🔥\nother&mv;",
 vec![
-    ("%pUt", TokenType::KwmLet),
+    ("%pUt", TokenType::KwmPut),
     (" ", TokenType::WS),
     ("some\r\n🔥\nother", TokenType::MacroString),
     ("&mv", TokenType::MacroVarExpr),        
     (";", TokenType::SEMI),
     ]
 )]
-#[case::atypical_symbols("%put v=[&m_s.];",
+#[case::atypical_symbols("%put \nv=[&m_s.];",
     vec![
         ("%put", TokenType::KwmPut),
-        ("  ", TokenType::WS),
+        (" \n", TokenType::WS),
         ("v=[", TokenType::MacroString),
         ("&m_s.", TokenType::MacroVarExpr),
         ("]", TokenType::MacroString),        
         (";", TokenType::SEMI),
         ]
 )]
-#[case::with_numeric_expr_symbols("%put pre <s>=[&mv];",
+#[case::with_numeric_expr_symbols("%put\t\n \npre <s>=[&mv];",
     vec![
         ("%put", TokenType::KwmPut),
-        ("  ", TokenType::WS),
+        ("\t\n \n", TokenType::WS),
         ("pre <s>=[", TokenType::MacroString),
         ("&mv", TokenType::MacroVarExpr),
         ("]", TokenType::MacroString),        
@@ -1693,34 +1693,21 @@ vec![
                         _UsER_ /*c*/ pre post
                         _WrITABLE_ /*c*/ pre post;",
     vec![
-        ("%put", TokenType::KwmLet),
+        ("%put", TokenType::KwmPut),
         ("  ", TokenType::WS),
-        ("_AlL_", TokenType::KwAllVar),
-        (" ", TokenType::MacroString),
+        ("_AlL_ ", TokenType::MacroString),
         ("/*c*/", TokenType::CStyleComment),
-        (" pre post\n                        ", TokenType::MacroString),
-        ("_AuTOMATIC_", TokenType::KwAutomaticVar),
-        (" ", TokenType::MacroString),
+        (" pre post\n                        _AuTOMATIC_ ", TokenType::MacroString),        
         ("/*c*/", TokenType::CStyleComment),
-        (" pre post\n                        ", TokenType::MacroString),
-        ("_GlOBAL_", TokenType::KwGlobalVar),
-        (" ", TokenType::MacroString),
+        (" pre post\n                        _GlOBAL_ ", TokenType::MacroString),        
         ("/*c*/", TokenType::CStyleComment),
-        (" pre post\n                        ", TokenType::MacroString),
-        ("_LoCAL_", TokenType::KwLocalVar),
-        (" ", TokenType::MacroString),
+        (" pre post\n                        _LoCAL_ ", TokenType::MacroString),        
         ("/*c*/", TokenType::CStyleComment),
-        (" pre post\n                        ", TokenType::MacroString),
-        ("_ReADONLY_", TokenType::KwReadonlyVar),
-        (" ", TokenType::MacroString),
+        (" pre post\n                        _ReADONLY_ ", TokenType::MacroString),        
         ("/*c*/", TokenType::CStyleComment),
-        (" pre post\n                        ", TokenType::MacroString),
-        ("_UsER_", TokenType::KwUserVar),
-        (" ", TokenType::MacroString),
+        (" pre post\n                        _UsER_ ", TokenType::MacroString),        
         ("/*c*/", TokenType::CStyleComment),
-        (" pre post\n                        ", TokenType::MacroString),
-        ("_WrITABLE_", TokenType::KwWritableVar),
-        (" ", TokenType::MacroString),
+        (" pre post\n                        _WrITABLE_ ", TokenType::MacroString),
         ("/*c*/", TokenType::CStyleComment),
         (" pre post", TokenType::MacroString),
         (";", TokenType::SEMI),
@@ -1728,7 +1715,7 @@ vec![
 )]
 #[case::string_literals("%put a='%t();' \"%t();\";",
     vec![
-       ("%let" ,TokenType::KwmLet),
+       ("%put" ,TokenType::KwmPut),
        (" " ,TokenType::WS),
        ("a=" ,TokenType::MacroString),
        ("'%t();'" ,TokenType::StringLiteral),
@@ -1742,11 +1729,11 @@ vec![
        (";" ,TokenType::SEMI),
        ]
     )]
-#[case::macro_call_with_ws_comment("%put (pre;%t /*c*/ ()post);",
+#[case::macro_call_with_ws_comment("%put (pre%t /*c*/ ()post);",
     vec![
-        ("%put", TokenType::KwmStr),
+        ("%put", TokenType::KwmPut),
         (" ", TokenType::WS),
-        ("(pre;", TokenType::MacroString),
+        ("(pre", TokenType::MacroString),
         ("%t", TokenType::MacroIdentifier),
         (" ", TokenType::WS),
         ("/*c*/", TokenType::CStyleComment),
@@ -1758,5 +1745,26 @@ vec![
         ]
 )]
 fn test_macro_put(#[case] contents: &str, #[case] expected_token: Vec<impl TokenTestCase>) {
+    assert_lexing(contents, expected_token, NO_ERRORS);
+}
+
+#[rstest]
+#[case::static_label("%goTO findit;",
+    vec![
+        ("%goTO", TokenType::KwmGoto),
+        (" ", TokenType::WS),
+        ("findit", TokenType::MacroString),
+        (";", TokenType::SEMI),
+        ]
+)]
+#[case::text_expr("%goto &home;",
+    vec![
+        ("%goto", TokenType::KwmGoto),
+        (" ", TokenType::WS),
+        ("&home", TokenType::MacroVarExpr),
+        (";", TokenType::SEMI),
+        ]
+)]
+fn test_macro_goto(#[case] contents: &str, #[case] expected_token: Vec<impl TokenTestCase>) {
     assert_lexing(contents, expected_token, NO_ERRORS);
 }

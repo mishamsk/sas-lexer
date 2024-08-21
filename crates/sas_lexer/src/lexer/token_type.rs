@@ -189,18 +189,6 @@ pub enum TokenType {
     KwCancel,
     #[keyword("_ALL_")]
     KwAllVar,
-    #[keyword("_AUTOMATIC_")]
-    KwAutomaticVar,
-    #[keyword("_GLOBAL_")]
-    KwGlobalVar,
-    #[keyword("_LOCAL_")]
-    KwLocalVar,
-    #[keyword("_READONLY_")]
-    KwReadonlyVar,
-    #[keyword("_USER_")]
-    KwUserVar,
-    #[keyword("_WRITABLE_")]
-    KwWritableVar,
 
     // Data step & proc shared keywords
     KwArray,
@@ -361,7 +349,7 @@ pub(crate) fn get_macro_quote_call_token_type_range() -> std::ops::RangeInclusiv
 
 #[inline]
 pub(crate) fn get_macro_stat_token_type_range() -> std::ops::RangeInclusive<u16> {
-    TokenType::KwmAbort as u16..=TokenType::KwmWindow as u16
+    TokenType::KwmAbort as u16..=TokenType::KwmList as u16
 }
 
 #[cfg(test)]
@@ -433,6 +421,8 @@ mod tests {
                         | TokenType::KwmSysmstoreclear
                         | TokenType::KwmSysrput
                         | TokenType::KwmWindow
+                        | TokenType::KwmInclude
+                        | TokenType::KwmList
                 )
             );
         }
