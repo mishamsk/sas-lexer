@@ -11,6 +11,7 @@ pub enum ErrorType {
     UnterminatedHexNumericLiteral,
     UnknownCharacter(char),
     SASSessionUnrecoverableError(&'static str),
+    MissingExpectedChar(char),
     MissingExpected(&'static str),
     InternalError(&'static str),
 }
@@ -32,6 +33,9 @@ impl Display for ErrorType {
             }
             ErrorType::SASSessionUnrecoverableError(msg) => {
                 write!(f, "SAS session unrecoverable error: {msg}")
+            }
+            ErrorType::MissingExpectedChar(c) => {
+                write!(f, "Missing expected character: '{c}'")
             }
             ErrorType::MissingExpected(msg) => {
                 write!(f, "Missing expected: {msg}")
