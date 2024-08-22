@@ -40,14 +40,12 @@ enum LexerMode {
     /// this is the mode where we want to lex all consecutive whitespace and comments
     /// and then return to the previous mode
     WsOrCStyleCommentOnly,
-    /// A special mode where only a specific sequence of characters is expected.
+    /// A special mode where only a specific non-letter char is expected.
     /// In this mode we also auto-recover if the expected character is not found
-    /// emitting an error but also creating the expected token
-    ///
-    /// SAFETY: The string must not contain newlines
-    ExpectToken(&'static str, TokenType, TokenChannel),
+    /// emitting an error but also creating the expected token    
+    ExpectSymbol(char, TokenType, TokenChannel),
     /// A common case where we expect a semicolon or EOF. Works like
-    /// `ExpectToken` but with a special case for EOF
+    /// `ExpectSymbol` but with a special case for EOF
     ExpectSemiOrEOF,
     /// A special mode that goes after non-statement macro identifiers
     /// that checks if the first NON-ws or cstyle follower is (.
@@ -340,10 +338,10 @@ impl<'src> Lexer<'src> {
         // Iterate over the mode stack in reverse and unwind it
         while let Some(mode) = self.mode_stack.last() {
             match mode {
-                LexerMode::ExpectToken(content, tok_type, tok_channel) => {
+                LexerMode::ExpectSymbol(expected_char, tok_type, tok_channel) => {
                     // If we were expecting a token - call lexing that will effectively
                     // emit an error and the token
-                    self.lex_expected_token(content, *tok_type, *tok_channel);
+                    self.lex_expected_token(None, *expected_char, *tok_type, *tok_channel);
                 }
                 LexerMode::ExpectSemiOrEOF => {
                     // If we were expecting a semicolon or EOF - emit a virtual semicolon for parser convenience
@@ -422,8 +420,8 @@ impl<'src> Lexer<'src> {
                     self.pop_mode();
 
                     // Populate the remaining expected states for the macro call
-                    self.push_mode(LexerMode::ExpectToken(
-                        ")",
+                    self.push_mode(LexerMode::ExpectSymbol(
+                        ')',
                         TokenType::RPAREN,
                         TokenChannel::DEFAULT,
                     ));
@@ -440,8 +438,8 @@ impl<'src> Lexer<'src> {
                     self.rollback();
                 }
             }
-            LexerMode::ExpectToken(content, tok_type, tok_channel) => {
-                self.lex_expected_token(content, tok_type, tok_channel);
+            LexerMode::ExpectSymbol(expected_char, tok_type, tok_channel) => {
+                self.lex_expected_token(Some(next_char), expected_char, tok_type, tok_channel);
             }
             LexerMode::ExpectSemiOrEOF => {
                 self.start_token();
@@ -480,27 +478,25 @@ impl<'src> Lexer<'src> {
 
     fn lex_expected_token(
         &mut self,
-        content: &'static str,
+        next_char: Option<char>,
+        expected_char: char,
         tok_type: TokenType,
         tok_channel: TokenChannel,
     ) {
         debug_assert_eq!(
             self.mode(),
-            LexerMode::ExpectToken(content, tok_type, tok_channel)
+            LexerMode::ExpectSymbol(expected_char, tok_type, tok_channel)
         );
-        debug_assert!(!content.is_empty() && !content.contains('\n'));
+        debug_assert!(!expected_char.is_ascii_alphabetic());
 
         self.start_token();
-        if self.cursor.as_str().get(..content.len()) != Some(content) {
+        if next_char.map_or(true, |c| c != expected_char) {
             // Expected token not found. Emit an error which will point at previous token
             // The token itself is emitted below
-            self.emit_error(ErrorType::MissingExpected(content));
+            self.emit_error(ErrorType::MissingExpectedChar(expected_char));
         } else {
             // Consume the expected content
-            // SAFETY: content is not more than the remaining length
-            // and the length can't be more than u32::MAX
-            #[allow(clippy::cast_possible_truncation)]
-            self.cursor.advance_by(content.chars().count() as u32);
+            self.cursor.advance();
         }
 
         self.emit_token(tok_channel, tok_type, Payload::None);
@@ -886,8 +882,8 @@ impl<'src> Lexer<'src> {
                 self.push_mode(LexerMode::MacroCallArgOrValue(0));
                 // Leading insiginificant WS before the argument
                 self.push_mode(LexerMode::WsOrCStyleCommentOnly);
-                self.push_mode(LexerMode::ExpectToken(
-                    ",",
+                self.push_mode(LexerMode::ExpectSymbol(
+                    ',',
                     TokenType::COMMA,
                     TokenChannel::DEFAULT,
                 ));
@@ -904,8 +900,8 @@ impl<'src> Lexer<'src> {
                 self.push_mode(LexerMode::MacroCallValue(0));
                 // Leading insiginificant WS before the argument
                 self.push_mode(LexerMode::WsOrCStyleCommentOnly);
-                self.push_mode(LexerMode::ExpectToken(
-                    "=",
+                self.push_mode(LexerMode::ExpectSymbol(
+                    '=',
                     TokenType::ASSIGN,
                     TokenChannel::DEFAULT,
                 ));
@@ -1027,8 +1023,8 @@ impl<'src> Lexer<'src> {
                     self.push_mode(LexerMode::MacroCallArgOrValue(0));
                     // Leading insiginificant WS before the argument
                     self.push_mode(LexerMode::WsOrCStyleCommentOnly);
-                    self.push_mode(LexerMode::ExpectToken(
-                        ",",
+                    self.push_mode(LexerMode::ExpectSymbol(
+                        ',',
                         TokenType::COMMA,
                         TokenChannel::DEFAULT,
                     ));
@@ -1045,8 +1041,8 @@ impl<'src> Lexer<'src> {
                     self.push_mode(LexerMode::MacroCallValue(0));
                     // Leading insiginificant WS before the argument
                     self.push_mode(LexerMode::WsOrCStyleCommentOnly);
-                    self.push_mode(LexerMode::ExpectToken(
-                        "=",
+                    self.push_mode(LexerMode::ExpectSymbol(
+                        '=',
                         TokenType::ASSIGN,
                         TokenChannel::DEFAULT,
                     ));
@@ -2724,14 +2720,14 @@ impl<'src> Lexer<'src> {
         // having a macro text expression with things that would otherwise be
         // interpreted as macro calls or removed (like spaces)
 
-        self.push_mode(LexerMode::ExpectToken(
-            ")",
+        self.push_mode(LexerMode::ExpectSymbol(
+            ')',
             TokenType::RPAREN,
             TokenChannel::HIDDEN,
         ));
         self.push_mode(LexerMode::MacroStrQuotedExpr(is_nrstr, 0));
-        self.push_mode(LexerMode::ExpectToken(
-            "(",
+        self.push_mode(LexerMode::ExpectSymbol(
+            '(',
             TokenType::LPAREN,
             TokenChannel::HIDDEN,
         ));
@@ -2867,8 +2863,8 @@ impl<'src> Lexer<'src> {
                         self.push_mode(LexerMode::ExpectSemiOrEOF);
                         self.push_mode(LexerMode::MacroSemiTerminatedTextExpr);
                         self.push_mode(LexerMode::WsOrCStyleCommentOnly);
-                        self.push_mode(LexerMode::ExpectToken(
-                            "=",
+                        self.push_mode(LexerMode::ExpectSymbol(
+                            '=',
                             TokenType::ASSIGN,
                             TokenChannel::DEFAULT,
                         ));
