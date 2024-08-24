@@ -3,7 +3,7 @@ pub(crate) mod channel;
 mod cursor;
 pub mod error;
 mod hex;
-mod predicate;
+mod r#macro;
 pub mod print;
 mod sas_lang;
 #[cfg(test)]
@@ -16,7 +16,7 @@ use channel::TokenChannel;
 use cursor::EOF_CHAR;
 use error::{ErrorInfo, ErrorType};
 use hex::parse_numeric_hex_str;
-use predicate::{is_macro_amp, is_macro_call, is_macro_percent, is_macro_stat};
+use r#macro::{is_macro_amp, is_macro_call, is_macro_percent, is_macro_stat};
 use sas_lang::is_valid_sas_name_start;
 use smol_str::SmolStr;
 use std::{cmp::min, str::FromStr};
@@ -2627,8 +2627,7 @@ impl<'src> Lexer<'src> {
         }
     }
 
-    /// Try lexing %xxx, but only allow macro call starts,
-    /// i.e any identifier after percent except for reserved statements
+    /// Perfomrs a lookeahed to check if
     fn lex_macro_call(&mut self, allow_quote_call: bool) -> bool {
         debug_assert_eq!(self.cursor.peek(), Some('%'));
 
@@ -2638,31 +2637,13 @@ impl<'src> Lexer<'src> {
                 (None, 0)
             });
 
-        match tok_type {
-            Some(tok_type @ (TokenType::KwmStr | TokenType::KwmNrStr)) => {
-                self.cursor.advance_by(advance_by);
+        tok_type.map_or(false, |kw_tok_type| {
+            self.cursor.advance_by(advance_by);
 
-                // These ones has special handling
-                self.emit_token(TokenChannel::HIDDEN, tok_type, Payload::None);
+            self.dispatch_macro_call_or_stat(kw_tok_type);
 
-                self.expect_macro_str_call_args(tok_type == TokenType::KwmNrStr);
-
-                true
-            }
-            Some(tok_type) => {
-                self.cursor.advance_by(advance_by);
-
-                self.emit_token(TokenChannel::DEFAULT, tok_type, Payload::None);
-
-                self.expect_macro_call_args();
-
-                true
-            }
-            None => {
-                // Not a macro call
-                false
-            }
-        }
+            true
+        })
     }
 
     /// A special helper that allows us to do a complex "parsing" look-ahead
@@ -2681,7 +2662,7 @@ impl<'src> Lexer<'src> {
     /// may be text!
     ///
     /// We obviously can't do that, so we will assume that the macro call is with arguments.
-    fn expect_macro_call_args(&mut self) {
+    fn maybe_expect_macro_call_args(&mut self) {
         // Checkpoint the current state
         self.checkpoint();
 
@@ -2808,67 +2789,7 @@ impl<'src> Lexer<'src> {
             }
 
             if let Some(kw_tok_type) = parse_macro_keyword(&ident) {
-                match kw_tok_type {
-                    TokenType::KwmStr | TokenType::KwmNrStr => {
-                        // Add the token
-                        // We use hidden channel for the %str/%nrstr and the wrapping parens
-                        // since this is a pure compile time directive in SAS which just allows
-                        // having a macro text expression with things that would otherwise be
-                        // interpreted as macro calls or removed (like spaces)
-                        self.emit_token(TokenChannel::HIDDEN, kw_tok_type, Payload::None);
-
-                        // Populate the expected states for the %str/%nrstr() call
-                        self.expect_macro_str_call_args(kw_tok_type == TokenType::KwmNrStr);
-                    }
-                    TokenType::KwmEnd | TokenType::KwmReturn => {
-                        // Add the token
-                        self.emit_token(TokenChannel::DEFAULT, kw_tok_type, Payload::None);
-
-                        // Super easy, just expect the closing semi
-                        self.push_mode(LexerMode::ExpectSemiOrEOF);
-                    }
-                    TokenType::KwmPut | TokenType::KwmGoto => {
-                        // Add the token
-                        self.emit_token(TokenChannel::DEFAULT, kw_tok_type, Payload::None);
-
-                        self.push_mode(LexerMode::ExpectSemiOrEOF);
-                        self.push_mode(LexerMode::MacroSemiTerminatedTextExpr);
-                        self.push_mode(LexerMode::WsOrCStyleCommentOnly);
-                    }
-                    TokenType::KwmLet => {
-                        // Add the token
-                        self.emit_token(TokenChannel::DEFAULT, kw_tok_type, Payload::None);
-
-                        // following let we must have name, equal sign and expression.
-                        // All maybe surrounded by insignificant whitespace! + the closing semi
-                        // Also, SAS happily recovers after missing equal sign, with just a note
-                        // Hence we pre-feed all the expected states to the mode stack in reverse order,
-                        // and it will unwind as we lex tokens
-                        // We do not handle the trailing WS for the initialized, instead defer it to the
-                        // parser, to avoid excessive lookahead
-                        self.push_mode(LexerMode::ExpectSemiOrEOF);
-                        self.push_mode(LexerMode::MacroSemiTerminatedTextExpr);
-                        self.push_mode(LexerMode::WsOrCStyleCommentOnly);
-                        self.push_mode(LexerMode::ExpectSymbol(
-                            '=',
-                            TokenType::ASSIGN,
-                            TokenChannel::DEFAULT,
-                        ));
-                        self.push_mode(LexerMode::WsOrCStyleCommentOnly);
-                        self.push_mode(LexerMode::MacroLetVarName(false));
-                        self.push_mode(LexerMode::WsOrCStyleCommentOnly);
-                    }
-                    tok_type if !is_macro_stat(tok_type) => {
-                        // TODO!!!!!! PLACEHOLDER
-                        self.emit_token(TokenChannel::DEFAULT, kw_tok_type, Payload::None);
-
-                        self.expect_macro_call_args();
-                    }
-                    _ => {
-                        // TODO!!!!!! PLACEHOLDER
-                        self.emit_token(TokenChannel::DEFAULT, kw_tok_type, Payload::None);
-                    }
-                }
+                self.dispatch_macro_call_or_stat(kw_tok_type);
                 return;
             }
         }
@@ -2880,7 +2801,73 @@ impl<'src> Lexer<'src> {
             Payload::None,
         );
 
-        self.expect_macro_call_args();
+        self.maybe_expect_macro_call_args();
+    }
+
+    fn dispatch_macro_call_or_stat(&mut self, kw_tok_type: TokenType) {
+        match kw_tok_type {
+            // Built-in Macro functions
+            TokenType::KwmStr | TokenType::KwmNrStr => {
+                // Add the token
+                // We use hidden channel for the %str/%nrstr and the wrapping parens
+                // since this is a pure compile time directive in SAS which just allows
+                // having a macro text expression with things that would otherwise be
+                // interpreted as macro calls or removed (like spaces)
+                self.emit_token(TokenChannel::HIDDEN, kw_tok_type, Payload::None);
+
+                // Populate the expected states for the %str/%nrstr() call
+                self.expect_macro_str_call_args(kw_tok_type == TokenType::KwmNrStr);
+            }
+            tok_type if !is_macro_stat(tok_type) => {
+                // TODO!!!!!! PLACEHOLDER
+                self.emit_token(TokenChannel::DEFAULT, kw_tok_type, Payload::None);
+
+                self.maybe_expect_macro_call_args();
+            }
+            // Macro statements
+            TokenType::KwmEnd | TokenType::KwmReturn => {
+                // Add the token
+                self.emit_token(TokenChannel::DEFAULT, kw_tok_type, Payload::None);
+
+                // Super easy, just expect the closing semi
+                self.push_mode(LexerMode::ExpectSemiOrEOF);
+            }
+            TokenType::KwmPut | TokenType::KwmGoto => {
+                // Add the token
+                self.emit_token(TokenChannel::DEFAULT, kw_tok_type, Payload::None);
+
+                self.push_mode(LexerMode::ExpectSemiOrEOF);
+                self.push_mode(LexerMode::MacroSemiTerminatedTextExpr);
+                self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+            }
+            TokenType::KwmLet => {
+                // Add the token
+                self.emit_token(TokenChannel::DEFAULT, kw_tok_type, Payload::None);
+
+                // following let we must have name, equal sign and expression.
+                // All maybe surrounded by insignificant whitespace! + the closing semi
+                // Also, SAS happily recovers after missing equal sign, with just a note
+                // Hence we pre-feed all the expected states to the mode stack in reverse order,
+                // and it will unwind as we lex tokens
+                // We do not handle the trailing WS for the initialized, instead defer it to the
+                // parser, to avoid excessive lookahead
+                self.push_mode(LexerMode::ExpectSemiOrEOF);
+                self.push_mode(LexerMode::MacroSemiTerminatedTextExpr);
+                self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+                self.push_mode(LexerMode::ExpectSymbol(
+                    '=',
+                    TokenType::ASSIGN,
+                    TokenChannel::DEFAULT,
+                ));
+                self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+                self.push_mode(LexerMode::MacroLetVarName(false));
+                self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+            }
+            _ => {
+                // TODO!!!!!! PLACEHOLDER
+                self.emit_token(TokenChannel::DEFAULT, kw_tok_type, Payload::None);
+            }
+        }
     }
 }
 
