@@ -66,32 +66,35 @@ pub(super) fn is_macro_quote_call(tok_type: TokenType) -> bool {
     get_macro_quote_call_token_type_range().contains(&tok_type.into())
 }
 
-/// Performs lookahead to determine if the current position is a macro call.
+/// Consumes the cursor starting at % and followed by a valid sas name start,
+/// returning a token type (either one of the built-in call/stats) or a macro
+/// identifier token.
 ///
-/// Macro call is anything that is `%identifier` where `identifier` is a valid
-/// SAS identifier and not one of the statement identifiers.
+/// We are not making distinction between a label and a custom call, i.e. doesn't do a lookahead
+/// past the identifier to see if colon follows. So far it seems that SAS would
+/// always fail if a label appears in a place where we assume only a macro call
+/// can be, so this should be ok.
 ///
-/// This function will not check whether it is a label, i.e. doesn't do a lookahead
-/// past the identifier to see if colon follows. At least in %let cases,
-/// it seems like SAS will not allow a label to follow a %let keyword.
-///
-/// Doesn't consume the input.
+/// Consumes the input! So if a lookeahed is necessary - pass a clone of the main
+/// cursor.
 ///
 /// Returns a tuple of:
-/// - `Option<TokenType>`: `TokenType` if the current position is a macro call, None otherwise.
+/// - `TokenType`: `TokenType`
 /// - `u32`: number of characters to consume if it is a macro call.
-pub(super) fn is_macro_call(
-    cursor: &Cursor,
-    allow_quote_call: bool,
-) -> Result<(Option<TokenType>, u32), &'static str> {
+///
+/// Error in this function means a bug, but is returned for safety
+pub(super) fn lex_macro_call_stat_or_label(
+    cursor: &mut Cursor,
+) -> Result<(TokenType, u32), &'static str> {
     debug_assert_eq!(cursor.peek(), Some('%'));
+    debug_assert!(is_valid_sas_name_start(cursor.peek_next()));
 
-    // Since in most cases it will be a macro call, we clone the cursor
-    // to do lookahead right away
-    let mut la_view = cursor.clone();
+    let start_rem_length = cursor.remaining_len();
+    let start_char_offset = cursor.char_offset();
+    let source_view = cursor.as_str();
 
     // Move past the % to the first character of the identifier
-    la_view.advance();
+    cursor.advance();
 
     // Start tracking whether the identifier is ASCII
     // It is necessary, as we need to upper case the identifier if it is ASCII
@@ -101,7 +104,7 @@ pub(super) fn is_macro_call(
 
     // Eat the identifier. We can safely use `is_xid_continue` becase the caller
     // already checked that the first character is a valid start of an identifier
-    la_view.eat_while(|c| {
+    cursor.eat_while(|c| {
         if c.is_ascii() {
             matches!(c, 'a'..='z' | 'A'..='Z' | '0'..='9' | '_')
         } else if is_xid_continue(c) {
@@ -116,8 +119,8 @@ pub(super) fn is_macro_call(
     // must be a macro call
     if !is_ascii {
         return Ok((
-            Some(TokenType::MacroIdentifier),
-            la_view.char_offset() - cursor.char_offset(),
+            TokenType::MacroIdentifier,
+            cursor.char_offset() - start_char_offset,
         ));
     }
 
@@ -125,40 +128,24 @@ pub(super) fn is_macro_call(
 
     // My guess is this should be quicker than capturing the value as we consume it
     // avoids the allocation and copying
-    let ident_end_byte_offset = cursor.remaining_len() - la_view.remaining_len();
+    let ident_end_byte_offset = start_rem_length - cursor.remaining_len();
 
-    let ident = cursor
-        .as_str()
+    let ident = source_view
         .get(1..ident_end_byte_offset as usize)
-        .ok_or("Unexpected error getting ident slice  in `is_macro_call` lookahead")?
+        .ok_or("Unexpected error getting ident slice in `lex_macro_call_stat_or_label`")?
         .chars()
         .map(|c| c.to_ascii_uppercase())
         .collect::<SmolStr>();
 
     if ident.is_empty() {
         // Something like %*
-        return Ok((None, 0));
+        return Err(
+            "Unexpected error in `lex_macro_call_stat_or_label` - no identifier followed %",
+        );
     }
 
-    if let Some(kw_tok_type) = parse_macro_keyword(&ident) {
-        if is_macro_stat(kw_tok_type) {
-            // It is a statement, not a macro call
-            Ok((None, 0))
-        } else if is_macro_quote_call(kw_tok_type) && !allow_quote_call {
-            // A quote call that is not allowed
-            Ok((None, 0))
-        } else {
-            // Looks like a built macro function call
-            Ok((
-                Some(kw_tok_type),
-                la_view.char_offset() - cursor.char_offset(),
-            ))
-        }
-    } else {
-        // Not a statement, not a quote call, may be a macro call (or a label)
-        Ok((
-            Some(TokenType::MacroIdentifier),
-            la_view.char_offset() - cursor.char_offset(),
-        ))
-    }
+    Ok((
+        parse_macro_keyword(&ident).unwrap_or(TokenType::MacroIdentifier),
+        cursor.char_offset() - start_char_offset,
+    ))
 }
