@@ -16,12 +16,15 @@ use channel::TokenChannel;
 use cursor::EOF_CHAR;
 use error::{ErrorInfo, ErrorType};
 use hex::parse_numeric_hex_str;
-use r#macro::{is_macro_amp, is_macro_call, is_macro_percent, is_macro_stat};
+use r#macro::{
+    is_macro_amp, is_macro_percent, is_macro_quote_call, is_macro_stat,
+    lex_macro_call_stat_or_label,
+};
 use sas_lang::is_valid_sas_name_start;
 use smol_str::SmolStr;
 use std::{cmp::min, str::FromStr};
 use text::{ByteOffset, CharOffset};
-use token_type::{parse_keyword, parse_macro_keyword, TokenType};
+use token_type::{parse_keyword, TokenType};
 use unicode_ident::{is_xid_continue, is_xid_start};
 
 use crate::TokenIdx;
@@ -76,6 +79,13 @@ enum LexerMode {
     /// Mode for lexing unrestricted macro text expressions terminated by semi.
     /// These are used for %let initializations, %put, etc.
     MacroSemiTerminatedTextExpr,
+}
+
+#[derive(PartialEq)]
+enum MacroKwType {
+    None,
+    MacroCallOrLabel,
+    MacroStat,
 }
 
 #[derive(Debug)]
@@ -541,7 +551,7 @@ impl<'src> Lexer<'src> {
                 }
             }
             '%' => {
-                if !self.lex_macro() {
+                if !self.lex_macro_any() {
                     // Not a macro, just a percent
                     self.cursor.advance();
                     self.emit_token(TokenChannel::DEFAULT, TokenType::PERCENT, Payload::None);
@@ -607,13 +617,17 @@ impl<'src> Lexer<'src> {
                 update_mode(self);
             }
             '%' => {
-                if !self.lex_macro_call(false) {
-                    // Not a macro, just a percent. Pop mode without consuming the character
-                    pop_mode_and_check(self);
-                    return;
+                match self.lex_macro_call(false) {
+                    MacroKwType::MacroStat | MacroKwType::None => {
+                        // Hit a following macro statement or just a percent => pop mode and exit.
+                        // Error for statement case has already been emitted by `lex_macro_call`
+                        pop_mode_and_check(self);
+                        return;
+                    }
+                    MacroKwType::MacroCallOrLabel => {
+                        update_mode(self);
+                    }
                 }
-
-                update_mode(self);
             }
             c if is_valid_sas_name_start(c) => {
                 // A macro string in place of macro identifier
@@ -668,21 +682,22 @@ impl<'src> Lexer<'src> {
                 }
             }
             '%' => {
-                if !self.lex_macro_call(true) {
-                    // Not a macro, but possibly a macro statement
-                    if self.cursor.peek_next().is_ascii_alphabetic() {
-                        // Hit a following macro statement => pop mode and exit
-                        // without consuming the character
+                match self.lex_macro_call(true) {
+                    MacroKwType::MacroStat => {
+                        // Hit a following macro statement => pop mode and exit.
+                        // Error has already been emitted by the `lex_macro_call`
                         self.pop_mode();
                         return;
                     }
-
-                    // Just a percent, consume and continue lexing the string
-                    // We could have not consumed it and let the
-                    // string lexing handle it, but this way we
-                    // we avoid one extra check
-                    self.cursor.advance();
-                    self.lex_macro_string_unrestricted();
+                    MacroKwType::None => {
+                        // Just a percent, consume and continue lexing the string
+                        // We could have not consumed it and let the
+                        // string lexing handle it, but this way we
+                        // we avoid one extra check
+                        self.cursor.advance();
+                        self.lex_macro_string_unrestricted();
+                    }
+                    MacroKwType::MacroCallOrLabel => {}
                 }
             }
             '\n' => {
@@ -822,29 +837,25 @@ impl<'src> Lexer<'src> {
                 }
             }
             '%' => {
-                if !self.lex_macro_call(true) {
-                    // Not a macro, but possibly a macro statement
-                    if self.cursor.peek_next().is_ascii_alphabetic() {
-                        // Hit a following macro statement => pop mode and exit
-                        // without consuming the character
-
-                        // This would lead to breaking SAS session with:
-                        // ERROR: Open code statement recursion detected.
-                        // so we emit an error here in addition to missing )
-                        // that will emit during mode stack pop
-                        self.emit_error(ErrorType::SASSessionUnrecoverableError(
-                            "ERROR: Open code statement recursion detected.",
-                        ));
+                match self.lex_macro_call(true) {
+                    MacroKwType::MacroStat => {
+                        // Hit a following macro statement => pop mode and exit.
+                        // Error has already been emitted by the `lex_macro_call`
                         self.pop_mode();
                         return;
                     }
-
-                    // Just a percent, consume and continue lexing the string
-                    // We could have not consumed it and let the
-                    // string lexing handle it, but this way we
-                    // we avoid one extra check
-                    self.cursor.advance();
-                    self.lex_macro_string_in_macro_call(parens_nesting_level, terminate_on_assign);
+                    MacroKwType::None => {
+                        // Just a percent, consume and continue lexing the string
+                        // We could have not consumed it and let the
+                        // string lexing handle it, but this way we
+                        // we avoid one extra check
+                        self.cursor.advance();
+                        self.lex_macro_string_in_macro_call(
+                            parens_nesting_level,
+                            terminate_on_assign,
+                        );
+                    }
+                    MacroKwType::MacroCallOrLabel => {}
                 }
             }
             '\n' => {
@@ -1086,29 +1097,22 @@ impl<'src> Lexer<'src> {
                     return;
                 }
 
-                if !self.lex_macro_call(true) {
-                    // Not a macro, but possibly a macro statement
-                    if self.cursor.peek_next().is_ascii_alphabetic() {
-                        // Hit a following macro statement => pop mode and exit
-                        // without consuming the character
-
-                        // This would lead to breaking SAS session with:
-                        // ERROR: Open code statement recursion detected.
-                        // so we emit an error here in addition to missing )
-                        // that will emit during mode stack pop
-                        self.emit_error(ErrorType::SASSessionUnrecoverableError(
-                            "ERROR: Open code statement recursion detected.",
-                        ));
+                match self.lex_macro_call(true) {
+                    MacroKwType::MacroStat => {
+                        // Hit a following macro statement => pop mode and exit.
+                        // Error has already been emitted by the `lex_macro_call`
                         self.pop_mode();
                         return;
                     }
-
-                    // Just a percent, consume and continue lexing the string
-                    // We could have not consumed it and let the
-                    // string lexing handle it, but this way we
-                    // we avoid one extra check
-                    self.cursor.advance();
-                    self.lex_macro_string_in_str_call(mask_macro, parens_nesting_level);
+                    MacroKwType::None => {
+                        // Just a percent, consume and continue lexing the string
+                        // We could have not consumed it and let the
+                        // string lexing handle it, but this way we
+                        // we avoid one extra check
+                        self.cursor.advance();
+                        self.lex_macro_string_in_str_call(mask_macro, parens_nesting_level);
+                    }
+                    MacroKwType::MacroCallOrLabel => {}
                 }
             }
             '\n' => {
@@ -1609,7 +1613,7 @@ impl<'src> Lexer<'src> {
                 }
             }
             '%' => {
-                if !self.lex_macro() {
+                if !self.lex_macro_any() {
                     // just a percent. consume and continue
                     self.cursor.advance();
                     self.lex_str_expr_text();
@@ -2587,7 +2591,11 @@ impl<'src> Lexer<'src> {
         true
     }
 
-    fn lex_macro(&mut self) -> bool {
+    /// Checks whether the current % starts a macro comment, statement,
+    /// label or call and lexes them is so.
+    ///
+    /// Returns `true` or `false` indicating whether anything has been lexed.
+    fn lex_macro_any(&mut self) -> bool {
         debug_assert_eq!(self.cursor.peek(), Some('%'));
 
         match self.cursor.peek_next() {
@@ -2595,55 +2603,73 @@ impl<'src> Lexer<'src> {
                 self.lex_macro_comment();
                 true
             }
-            '~' | '^' if self.mode() == LexerMode::MacroEval => {
-                // Consume both
-                self.cursor.advance();
-                self.cursor.advance();
-
-                self.emit_token(TokenChannel::DEFAULT, TokenType::NE, Payload::None);
-                true
-            }
-            '=' if self.mode() == LexerMode::MacroEval => {
-                // Consume both
-                self.cursor.advance();
-                self.cursor.advance();
-
-                self.emit_token(
-                    TokenChannel::DEFAULT,
-                    TokenType::MacroNeverExpr,
-                    Payload::None,
-                );
-                true
-            }
-            EOF_CHAR => false,
             c if is_valid_sas_name_start(c) => {
                 self.lex_macro_identifier();
                 true
             }
-            _ => {
-                // todo: implement
-                false
-            }
+            _ => false,
         }
     }
 
-    /// Perfomrs a lookeahed to check if
-    fn lex_macro_call(&mut self, allow_quote_call: bool) -> bool {
+    /// Similar to `lex_macro_any`, but allowing only macro calls and
+    /// auto-emitting error on macro statements. Use in contexts
+    /// where only macro calls are appropriate.
+    ///
+    /// Performs a lookeahed to check if % starts a macro call,
+    /// and lexes it if so.
+    ///
+    /// Arguments:
+    /// - allow_quote_call: bool - if `false`, macro quote functions will
+    ///     not be lexed as macro calls.
+    ///
+    /// Returns `MacroKwType`, which will indicate if the token was a macro call,
+    /// a macro statement keyword is following (not lexed) or something else.
+    ///
+    /// NOTE: If `allow_quote_call` is `false` the return will be `MacroKwType::None`!
+    ///
+    /// Automatically emits an error if a statement is encountered,
+    /// without consuming the statement itself.
+    fn lex_macro_call(&mut self, allow_quote_call: bool) -> MacroKwType {
         debug_assert_eq!(self.cursor.peek(), Some('%'));
 
-        let (tok_type, advance_by) =
-            is_macro_call(&self.cursor, allow_quote_call).unwrap_or_else(|err| {
+        if !is_valid_sas_name_start(self.cursor.peek_next()) {
+            // Not followed by an identifier char
+            return MacroKwType::None;
+        }
+
+        // Pass a clone of the actual cursor to perform lookahead,
+        // as we are only allowing macro calls and not macro statements
+        let (tok_type, advance_by) = lex_macro_call_stat_or_label(&mut self.cursor.clone())
+            .unwrap_or_else(|err| {
                 self.emit_error(ErrorType::InternalError(err));
-                (None, 0)
+                (TokenType::MacroIdentifier, 0)
             });
 
-        tok_type.map_or(false, |kw_tok_type| {
+        if !is_macro_stat(tok_type) {
+            // A macro call (or technically a label, but see the docs for
+            // `lex_macro_call_stat_or_label` for the explanation)
+            if !allow_quote_call && is_macro_quote_call(tok_type) {
+                return MacroKwType::None;
+            }
+
             self.cursor.advance_by(advance_by);
 
-            self.dispatch_macro_call_or_stat(kw_tok_type);
+            self.dispatch_macro_call_or_stat(tok_type);
 
-            true
-        })
+            return MacroKwType::MacroCallOrLabel;
+        }
+
+        // Must be a macro statement
+
+        // This would lead to breaking SAS session with:
+        // ERROR: Open code statement recursion detected.
+        // so we emit an error here in addition to missing )
+        // that will emit during mode stack pop
+        self.emit_error(ErrorType::SASSessionUnrecoverableError(
+            "ERROR: Open code statement recursion detected.",
+        ));
+
+        MacroKwType::MacroStat
     }
 
     /// A special helper that allows us to do a complex "parsing" look-ahead
@@ -2744,64 +2770,27 @@ impl<'src> Lexer<'src> {
         debug_assert_eq!(self.cursor.peek(), Some('%'));
         debug_assert!(is_valid_sas_name_start(self.cursor.peek_next()));
 
-        // Eat the %, at this point this 100% is a macro call, statement or label
-        self.cursor.advance();
+        // Pass the actual cursor so it will not only be lexed into
+        // a token type but also consumed
+        let (kw_tok_type, _) =
+            lex_macro_call_stat_or_label(&mut self.cursor).unwrap_or_else(|err| {
+                self.emit_error(ErrorType::InternalError(err));
+                (TokenType::MacroIdentifier, 0)
+            });
 
-        // Start tracking whether the identifier is ASCII
-        // It is necessary, as we neew to upper case the identifier if it is ASCII
-        // for dispatching, and if it is not ASCII, we know it is not a keyword and can
-        // skip the dispatching
-        let mut is_ascii = true;
+        if kw_tok_type == TokenType::MacroIdentifier {
+            // custom macro call or label
+            self.emit_token(
+                TokenChannel::DEFAULT,
+                TokenType::MacroIdentifier,
+                Payload::None,
+            );
 
-        // Eat the identifier. We can safely use `is_xid_continue` becase the caller
-        // already checked that the first character is a valid start of an identifier
-        self.cursor.eat_while(|c| {
-            if c.is_ascii() {
-                matches!(c, 'a'..='z' | 'A'..='Z' | '0'..='9' | '_')
-            } else if is_xid_continue(c) {
-                is_ascii = false;
-                true
-            } else {
-                false
-            }
-        });
-
-        // Now the fun part - dispatch all kinds of identifiers
-        if is_ascii {
-            // My guess is this should be quicker than capturing the value as we consume it
-            // avoids the allocation and copying
-            let mut has_error = false;
-
-            // Using SmolStr is faster as it will be stack allocated
-            let ident = self
-                .pending_token_text()
-                .get(1..)
-                .unwrap_or_else(|| {
-                    has_error = true;
-                    ""
-                })
-                .chars()
-                .map(|c| c.to_ascii_uppercase())
-                .collect::<SmolStr>();
-
-            if has_error {
-                self.emit_error(ErrorType::InternalError("Failed to get macro identifier"));
-            }
-
-            if let Some(kw_tok_type) = parse_macro_keyword(&ident) {
-                self.dispatch_macro_call_or_stat(kw_tok_type);
-                return;
-            }
+            self.maybe_expect_macro_call_args();
+            return;
         }
 
-        // custom macro call or label
-        self.emit_token(
-            TokenChannel::DEFAULT,
-            TokenType::MacroIdentifier,
-            Payload::None,
-        );
-
-        self.maybe_expect_macro_call_args();
+        self.dispatch_macro_call_or_stat(kw_tok_type);
     }
 
     fn dispatch_macro_call_or_stat(&mut self, kw_tok_type: TokenType) {
