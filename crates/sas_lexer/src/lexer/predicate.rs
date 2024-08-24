@@ -155,7 +155,7 @@ pub(super) fn is_macro_call(
             ))
         }
     } else {
-        // Not a statement, not a quote call, must be a macro call
+        // Not a statement, not a quote call, may be a macro call (or a label)
         Ok((
             Some(TokenType::MacroIdentifier),
             la_view.char_offset() - cursor.char_offset(),

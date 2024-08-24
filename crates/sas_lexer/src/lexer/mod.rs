@@ -315,6 +315,8 @@ impl<'src> Lexer<'src> {
         ));
     }
 
+    /// Main lexing loop, responsible for driving the lexing forwards
+    /// as well as finalizing it with a mandatroy EOF roken.
     fn lex(mut self) -> (WorkTokenizedBuffer, Box<[ErrorInfo]>) {
         while let Some(next_char) = self.cursor.peek() {
             self.lex_token(next_char);
@@ -390,6 +392,7 @@ impl<'src> Lexer<'src> {
         );
     }
 
+    /// Main dispatcher of lexing mode to lexer function
     fn lex_token(&mut self, next_char: char) {
         match self.mode() {
             LexerMode::WsOrCStyleCommentOnly => match next_char {
@@ -457,22 +460,24 @@ impl<'src> Lexer<'src> {
                 self.emit_token(TokenChannel::DEFAULT, TokenType::SEMI, Payload::None);
                 self.pop_mode();
             }
-            LexerMode::Default => self.lex_mode_default(next_char),
-            LexerMode::StringExpr => self.lex_mode_str_expr(next_char),
+            LexerMode::Default => self.dispatch_mode_default(next_char),
+            LexerMode::StringExpr => self.dispatch_mode_str_expr(next_char),
             LexerMode::MacroEval => !todo!("Macro eval mode"),
             LexerMode::MacroStrQuotedExpr(mask_macro, pnl) => {
-                self.lex_macro_str_quoted_expr(next_char, mask_macro, pnl);
+                self.dispatch_macro_str_quoted_expr(next_char, mask_macro, pnl);
             }
             LexerMode::MacroCallArgOrValue(pnl) => {
-                self.lex_macro_call_arg_or_value(next_char, pnl, true)
+                self.dispatch_macro_call_arg_or_value(next_char, pnl, true)
             }
             LexerMode::MacroCallValue(pnl) => {
-                self.lex_macro_call_arg_or_value(next_char, pnl, false)
+                self.dispatch_macro_call_arg_or_value(next_char, pnl, false)
             }
             LexerMode::MacroLetVarName(found_name) => {
-                self.lex_macro_ident_expr(next_char, !found_name)
+                self.dispatch_macro_ident_expr(next_char, !found_name)
             }
-            LexerMode::MacroSemiTerminatedTextExpr => self.lex_macro_text_expr(next_char),
+            LexerMode::MacroSemiTerminatedTextExpr => {
+                self.dispatch_macro_semi_term_text_expr(next_char)
+            }
         }
     }
 
@@ -503,7 +508,7 @@ impl<'src> Lexer<'src> {
         self.pop_mode();
     }
 
-    fn lex_mode_default(&mut self, next_char: char) {
+    fn dispatch_mode_default(&mut self, next_char: char) {
         debug_assert_eq!(self.mode(), LexerMode::Default);
 
         self.start_token();
@@ -515,15 +520,7 @@ impl<'src> Lexer<'src> {
                 self.lex_ws();
             }
             '\'' => self.lex_single_quoted_str(),
-            '"' => {
-                self.cursor.advance();
-                self.emit_token(
-                    TokenChannel::DEFAULT,
-                    TokenType::StringExprStart,
-                    Payload::None,
-                );
-                self.push_mode(LexerMode::StringExpr);
-            }
+            '"' => self.lex_string_expression_start(),
             ';' => {
                 self.cursor.advance();
                 self.emit_token(TokenChannel::DEFAULT, TokenType::SEMI, Payload::None);
@@ -564,7 +561,7 @@ impl<'src> Lexer<'src> {
         }
     }
 
-    fn lex_macro_ident_expr(&mut self, next_char: char, first: bool) {
+    fn dispatch_macro_ident_expr(&mut self, next_char: char, first: bool) {
         debug_assert!(matches!(self.mode(), LexerMode::MacroLetVarName(_)));
 
         self.start_token();
@@ -637,7 +634,7 @@ impl<'src> Lexer<'src> {
         }
     }
 
-    fn lex_macro_text_expr(&mut self, next_char: char) {
+    fn dispatch_macro_semi_term_text_expr(&mut self, next_char: char) {
         debug_assert!(matches!(
             self.mode(),
             LexerMode::MacroSemiTerminatedTextExpr
@@ -648,15 +645,7 @@ impl<'src> Lexer<'src> {
         // Dispatch the "big" categories
         match next_char {
             '\'' => self.lex_single_quoted_str(),
-            '"' => {
-                self.cursor.advance();
-                self.emit_token(
-                    TokenChannel::DEFAULT,
-                    TokenType::StringExprStart,
-                    Payload::None,
-                );
-                self.push_mode(LexerMode::StringExpr);
-            }
+            '"' => self.lex_string_expression_start(),
             '/' => {
                 if self.cursor.peek_next() == '*' {
                     self.lex_cstyle_comment();
@@ -793,7 +782,7 @@ impl<'src> Lexer<'src> {
         self.emit_token(TokenChannel::DEFAULT, TokenType::MacroString, Payload::None);
     }
 
-    fn lex_macro_call_arg_or_value(
+    fn dispatch_macro_call_arg_or_value(
         &mut self,
         next_char: char,
         parens_nesting_level: u32,
@@ -810,15 +799,7 @@ impl<'src> Lexer<'src> {
         // Dispatch the "big" categories
         match next_char {
             '\'' => self.lex_single_quoted_str(),
-            '"' => {
-                self.cursor.advance();
-                self.emit_token(
-                    TokenChannel::DEFAULT,
-                    TokenType::StringExprStart,
-                    Payload::None,
-                );
-                self.push_mode(LexerMode::StringExpr);
-            }
+            '"' => self.lex_string_expression_start(),
             '/' => {
                 if self.cursor.peek_next() == '*' {
                     self.lex_cstyle_comment();
@@ -1060,7 +1041,7 @@ impl<'src> Lexer<'src> {
         emit_token_update_nesting(self, local_parens_nesting);
     }
 
-    fn lex_macro_str_quoted_expr(
+    fn dispatch_macro_str_quoted_expr(
         &mut self,
         next_char: char,
         mask_macro: bool,
@@ -1076,15 +1057,7 @@ impl<'src> Lexer<'src> {
         // Dispatch the "big" categories
         match next_char {
             '\'' => self.lex_single_quoted_str(),
-            '"' => {
-                self.cursor.advance();
-                self.emit_token(
-                    TokenChannel::DEFAULT,
-                    TokenType::StringExprStart,
-                    Payload::None,
-                );
-                self.push_mode(LexerMode::StringExpr);
-            }
+            '"' => self.lex_string_expression_start(),
             '/' => {
                 if self.cursor.peek_next() == '*' {
                     self.lex_cstyle_comment();
@@ -1390,6 +1363,19 @@ impl<'src> Lexer<'src> {
         self.emit_error(ErrorType::UnterminatedComment);
     }
 
+    #[inline(always)]
+    fn lex_string_expression_start(&mut self) {
+        debug_assert_eq!(self.cursor.peek(), Some('"'));
+
+        self.cursor.advance();
+        self.emit_token(
+            TokenChannel::DEFAULT,
+            TokenType::StringExprStart,
+            Payload::None,
+        );
+        self.push_mode(LexerMode::StringExpr);
+    }
+
     fn lex_single_quoted_str(&mut self) {
         debug_assert_eq!(self.cursor.peek(), Some('\''));
 
@@ -1468,7 +1454,7 @@ impl<'src> Lexer<'src> {
         let str_text_end_byte_offset = Some(self.cur_byte_offset() - 1);
 
         // Now check if this is a single quoted string or one of the other literals
-        let tok_type = self.lex_literal_ending();
+        let tok_type = self.resolve_string_literal_ending();
 
         let payload = self.resolve_string_literal_payload(
             lit_start_idx,
@@ -1516,7 +1502,7 @@ impl<'src> Lexer<'src> {
 
     /// Lexes the ending of a literal token, returning the type
     /// but does not emit the token
-    fn lex_literal_ending(&mut self) -> TokenType {
+    fn resolve_string_literal_ending(&mut self) -> TokenType {
         #[cfg(debug_assertions)]
         debug_assert!(['"', '\''].contains(&self.cursor.prev_char()));
 
@@ -1549,7 +1535,7 @@ impl<'src> Lexer<'src> {
         tok_type
     }
 
-    fn lex_mode_str_expr(&mut self, next_char: char) {
+    fn dispatch_mode_str_expr(&mut self, next_char: char) {
         debug_assert_eq!(self.mode(), LexerMode::StringExpr);
 
         self.start_token();
@@ -1794,7 +1780,7 @@ impl<'src> Lexer<'src> {
         // string, replace the last token and exit the string expression mode
         self.cursor.advance();
 
-        let tok_type = self.lex_literal_ending();
+        let tok_type = self.resolve_string_literal_ending();
 
         self.update_last_token(TokenChannel::DEFAULT, tok_type, payload);
         self.pop_mode();
