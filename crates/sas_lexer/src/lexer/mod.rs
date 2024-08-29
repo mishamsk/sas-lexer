@@ -996,6 +996,12 @@ impl<'src> Lexer<'src> {
                     // Not a terminator, just a regular character in the string
                     // consume and continue lexing the string
                     self.cursor.advance();
+
+                    // If we had a ws_mark, means string contains WS => can't be a number
+                    if ws_mark.is_some() {
+                        try_lexing_numeric = false;
+                        ws_mark = None;
+                    }
                 }
             }
         }
