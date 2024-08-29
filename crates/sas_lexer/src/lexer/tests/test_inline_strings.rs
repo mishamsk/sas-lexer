@@ -100,6 +100,17 @@ fn test_single_comment_ws(#[case] contents: &str, #[case] expected_token: impl T
     "%*;after",
     vec![("%*;", TokenType::MacroComment), ("after", TokenType::Identifier)]
 )]
+#[case::cstyle_double_comment(
+    "%put /* nestest /* comment */  yes*/;",
+    vec![
+        ("%put", TokenType::KwmPut),
+        (" ", TokenType::WS),
+        ("/* nestest /* comment */", TokenType::CStyleComment),
+        ("  ", TokenType::WS),
+        ("yes*/", TokenType::MacroString),
+        (";", TokenType::SEMI),
+    ]
+)]
 fn test_comments(#[case] contents: &str, #[case] expected_token: Vec<impl TokenTestCase>) {
     assert_lexing(contents, expected_token, NO_ERRORS);
 }
@@ -1798,6 +1809,7 @@ fn test_macro_goto(#[case] contents: &str, #[case] expected_token: Vec<impl Toke
 #[case(">=", TokenType::GE)]
 #[case("Ge", TokenType::KwGE)]
 #[case("&", TokenType::AMP)] // AND op in sas macro
+#[case("&&&", TokenType::AMP)] // multiples should also work
 #[case("AnD", TokenType::KwAND)]
 #[case("|", TokenType::PIPE)] // OR op in sas macro
 #[case("Or", TokenType::KwOR)]
@@ -1822,44 +1834,51 @@ fn test_macro_integer_eval_expr_all_ops_simple(
 }
 
 // TODO:
-// - test that mnemonics as pa rt of str are not lexed
+// - test that mnemonics as part of str are not lexed
 // - ws around ops vs in the operands
 // - something that starts as integer, but is not (e.g. `1 2` or any decimal in regular eval ctx)
-// - other symbols are not lexed as symbols
+// X other symbols are not lexed as symbols
 // - inline macro, string literals and expressions
 // - if implemented - the "empty macro string"
 // - expression delimiters (parens, commas) and ws around them
 // - %sysevalf mode
 // - at least one test that eval mode is in all expected places (stats etc)
+// - inline comments
+// - complex nested expressions with () etc
 
-// #[rstest]
-// #[case(";", TokenType::SEMI)]
-// #[case("&&&", TokenType::AMP)]
-// #[case("%", TokenType::PERCENT)]
 // #[case("(", TokenType::LPAREN)]
 // #[case(")", TokenType::RPAREN)]
-// #[case("{", TokenType::LCURLY)]
-// #[case("}", TokenType::RCURLY)]
-// #[case("[", TokenType::LBRACK)]
-// #[case("]", TokenType::RBRACK)]
-// #[case("!", TokenType::EXCL)]
-// #[case("!!", TokenType::EXCL2)]
-// #[case("¦", TokenType::BPIPE)]
-// #[case("¦¦", TokenType::BPIPE2)]
-// #[case("||", TokenType::PIPE2)]
-// #[case("∘", TokenType::NOT)]
-// #[case("><", TokenType::GTLT)]
-// #[case("<>", TokenType::LTGT)]
-// #[case("∘=", TokenType::NE)]
-// #[case(".", TokenType::DOT)]
-// #[case(",", TokenType::COMMA)]
-// #[case(":", TokenType::COLON)]
-// #[case("$", TokenType::DOLLAR)]
-// #[case("@", TokenType::AT)]
-// #[case("=*", TokenType::SoundsLike)]
-// fn test_macro_integer_eval_expr_not_real_ops(
-//     #[case] op_str: &str,
-//     #[case] expected_op_token: TokenType,
-// ) {
-//     assert_lexing(op_str, expected_op_token, NO_ERRORS);
-// }
+
+#[rstest]
+#[case(";")]
+#[case("%")]
+#[case("{")]
+#[case("}")]
+#[case("[")]
+#[case("]")]
+#[case("!")]
+#[case("!!")]
+#[case("¦")]
+#[case("¦¦")]
+#[case("∘")]
+#[case(".")]
+#[case(",")]
+#[case(":")]
+#[case("$")]
+#[case("@")]
+fn test_macro_integer_eval_expr_not_real_ops(#[case] op_str: &str) {
+    assert_lexing(
+        format!("%eval(1 {op_str} \n2)").as_str(),
+        vec![
+            ("%eval", TokenType::KwmEval, Payload::None),
+            ("(", TokenType::LPAREN, Payload::None),
+            (
+                format!("1 {op_str} \n2").as_ref(),
+                TokenType::MacroString,
+                Payload::None,
+            ),
+            (")", TokenType::RPAREN, Payload::None),
+        ],
+        NO_ERRORS,
+    );
+}
