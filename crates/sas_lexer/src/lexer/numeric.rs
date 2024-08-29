@@ -1,11 +1,61 @@
-/// A collection of functions that converts
-/// SAS HEX literals (numeric & string) to their respective values
 use super::buffer::Payload;
+/// A collection of functions that converts
+/// SAS numeric literals (hex & decimal) to their respective values
+use std::str::FromStr;
 
 use super::error::ErrorType;
 use super::token_type::TokenType;
 
-/// Parses a valid SAS HEX number (sans the trailing `x` or `X`).
+/// Tries to parses a possibly valid SAS number.
+///
+/// # Returns
+///
+/// A tuple with the parsed token and an optional error
+#[allow(clippy::cast_precision_loss)]
+pub(super) fn parse_numeric(number: &str) -> ((TokenType, Payload), Option<ErrorType>) {
+    let Ok(fvalue) = f64::from_str(number) else {
+        return (
+            (TokenType::IntegerLiteral, Payload::Integer(0)),
+            Some(ErrorType::InvalidNumericLiteral),
+        );
+    };
+
+    // See if it is an integer
+    if fvalue.fract() == 0.0 && fvalue.abs() < u64::MAX as f64 {
+        // For integers we need to emit different tokens, depending on
+        // the presence of the dot as we use different token types.
+        // The later is unfortunatelly necesasry due to SAS numeric formats
+        // context sensitivity and no way of disambiguating between a number `1.`
+        // and the same numeric format `1.`
+
+        // Leading 0 - we can emit the integer token, can't be a format
+        #[allow(clippy::cast_sign_loss)]
+        let payload = Payload::Integer(fvalue as u64);
+
+        // Unwrap here is safe, as we know the length is > 0
+        // but we still provide default value to avoid panics
+        match *number.as_bytes().first().unwrap_or(&b'_') {
+            b'0' => {
+                return ((TokenType::IntegerLiteral, payload), None);
+            }
+            _ => {
+                if number.contains('.') {
+                    return ((TokenType::IntegerDotLiteral, payload), None);
+                } else {
+                    return ((TokenType::IntegerLiteral, payload), None);
+                }
+            }
+        }
+    } else {
+        // And for floats, similarly it is important whether it
+        // it was created from scientific notation or not, but
+        // this function only handles the decimal literals, so
+        // no need to check for that
+        return ((TokenType::FloatLiteral, Payload::Float(fvalue)), None);
+    }
+}
+
+/// Parses a possibly valid SAS HEX number (sans the trailing `x` or `X`).
 ///
 /// # Returns
 ///
@@ -51,7 +101,8 @@ pub(super) fn parse_numeric_hex_str(number: &str) -> ((TokenType, Payload), Opti
                     ((TokenType::FloatLiteral, Payload::Float(fvalue)), None)
                 }
                 _ => {
-                    // This is an internal error, should not happen
+                    // This is an internal error if called from regular lexer
+                    // or an invalid HEX literal when called from the macro eval lexer
                     (
                         (TokenType::IntegerLiteral, Payload::Integer(0)),
                         Some(ErrorType::InternalError("Failed to parse HEX literal")),

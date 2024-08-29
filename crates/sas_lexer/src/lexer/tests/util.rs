@@ -628,10 +628,10 @@ pub(super) fn check_error(
     );
 }
 
-pub(super) fn assert_lexing(
+pub(super) fn assert_lexing<TT: TokenTestCase, ET: ErrorTestCase>(
     source: &str,
-    expected_tokens: Vec<impl TokenTestCase>,
-    expected_errors: Vec<impl ErrorTestCase>,
+    expected_tokens: Vec<TT>,
+    expected_errors: Vec<ET>,
 ) {
     let (buffer, errors) = lex(&source).unwrap();
 

@@ -2,6 +2,14 @@ use phf::phf_map;
 use sas_lexer_macro::{FromU16, KeywordMap, MacroKeywordMap, ToU16};
 use strum::{Display, EnumCount, EnumIter};
 
+/// What you expect - the token types.
+///
+/// Order of variants are VERY important, as multiple
+/// predicates rely on integer values of the variants that
+/// are generated automatically from the order.
+///
+/// Naming also is used to autogenerate static hash maps
+/// for regular keywords and macro keywords.
 #[derive(
     Debug,
     PartialEq,
@@ -22,44 +30,55 @@ pub enum TokenType {
     EOF,
     UNKNOWN,
     WS,
-    SEMI,           // ';'
-    AMP,            // '&'+
-    PERCENT,        // '%'
-    LPAREN,         // '('
-    RPAREN,         // ')'
-    LCURLY,         // '{'
-    RCURLY,         // '}'
-    LBRACK,         // '['
-    RBRACK,         // ']'
-    STAR,           // '*'
-    EXCL,           // '!'
-    EXCL2,          // '!!'
-    BPIPE,          // '¦'
-    BPIPE2,         // '¦¦'
-    PIPE2,          // '||'
-    STAR2,          // '**'
-    NOT,            // '¬' | '^' | '~' | '∘'
-    FSLASH,         // '/'
-    PLUS,           // '+'
-    MINUS,          // '-'
-    GTLT,           // '><'
-    LTGT,           // '<>'
-    LT,             // '<'
-    LE,             // '<='
-    NE,             // '¬=' | '^=' | '~=' | '∘='
-    GT,             // '>'
-    GE,             // '>='
-    SoundsLike,     // '=*'
-    PIPE,           // '|'
-    DOT,            // '.'
-    COMMA,          // ','
-    COLON,          // ':'
-    ASSIGN,         // '='
-    DOLLAR,         // '$'
-    AT,             // '@'
-    HASH,           // '#'
-    QUESTION,       // '?'
-    TermQuote,      // *'; and *" ";
+    SEMI,       // ';'
+    AMP,        // '&'+
+    PERCENT,    // '%'
+    LPAREN,     // '('
+    RPAREN,     // ')'
+    LCURLY,     // '{'
+    RCURLY,     // '}'
+    LBRACK,     // '['
+    RBRACK,     // ']'
+    STAR,       // '*'
+    EXCL,       // '!'
+    EXCL2,      // '!!'
+    BPIPE,      // '¦'
+    BPIPE2,     // '¦¦'
+    PIPE2,      // '||'
+    STAR2,      // '**'
+    NOT,        // '¬' | '^' | '~' | '∘'
+    FSLASH,     // '/'
+    PLUS,       // '+'
+    MINUS,      // '-'
+    GTLT,       // '><'
+    LTGT,       // '<>'
+    LT,         // '<'
+    LE,         // '<='
+    NE,         // '¬=' | '^=' | '~=' | '∘='
+    GT,         // '>'
+    GE,         // '>='
+    SoundsLike, // '=*'
+    PIPE,       // '|'
+    DOT,        // '.'
+    COMMA,      // ','
+    COLON,      // ':'
+    ASSIGN,     // '='
+    DOLLAR,     // '$'
+    AT,         // '@'
+    HASH,       // '#'
+    QUESTION,   // '?'
+    TermQuote,  // *'; and *" ";
+    // Mnemonics for logical expressions
+    KwLT,           // LT
+    KwLE,           // LE
+    KwEQ,           // EQ
+    KwIN,           // IN
+    KwNE,           // NE
+    KwGT,           // GT
+    KwGE,           // GE
+    KwAND,          // AND
+    KwOR,           // OR
+    KwNOT,          // NOT
     IntegerLiteral, // 42
     // 42., 42.000 - this is seprate due to ambiguity with numeric formats
     // but not 042. or [-/+]42. because width in the format can't be 0 and can't be
@@ -89,20 +108,17 @@ pub enum TokenType {
     // the closing ;[;;;] after dataines is lexed as SEMI
     CharFormat, // $charformat.
     // ----------------MACRO TOKENS----------------
-    MacroComment,    // %* ...;
-    MacroVarExpr,    // &&mvar&another. etc.
-    MacroIdentifier, // %macro_name
-    MacroString,     // %let var = macro_string;
+    MacroComment,     // %* ...;
+    MacroVarExpr,     // &&mvar&another. etc.
+    MacroIdentifier,  // %macro_name
+    MacroString,      // %let var = macro_string;
+    MacroStringEmpty, // implicit empty macro string in logical expr `%eval(= rhs)`
     // Macro built in function keywords
+    // Non masking versions
     KwmEval,          // EVAL
     KwmIndex,         // INDEX
     KwmLength,        // LENGTH
     KwmLowcase,       // LOWCASE
-    KwmQLowcase,      // QLOWCASE
-    KwmQScan,         // QSCAN
-    KwmQSubstr,       // QSUBSTR
-    KwmQsysfunc,      // QSYSFUNC
-    KwmQUpcase,       // QUPCASE
     KwmScan,          // SCAN
     KwmSubstr,        // SUBSTR
     KwmSymExist,      // SYMEXIST
@@ -118,6 +134,29 @@ pub enum TokenType {
     KwmSysprod,       // SYSPROD
     KwmUnquote,       // UNQUOTE
     KwmUpcase,        // UPCASE
+    // NLS functions (non-masking)
+    KwmKCmpres,  // KCMPRES
+    KwmKIndex,   // KINDEX
+    KwmKLeft,    // KLEFT
+    KwmKLength,  // KLENGTH
+    KwmKScan,    // KSCAN
+    KwmKSubstr,  // KSUBSTR
+    KwmKUpcase,  // KUPCASE
+    KwmValidchs, // VALIDCHS
+    // Macro Masking versions. They mask the resolved value
+    // at runtime, much like quoting functions below, so do not
+    // change the lexing itself (but obviously influence downstream)
+    KwmQLowcase, // QLOWCASE
+    KwmQScan,    // QSCAN
+    KwmQSubstr,  // QSUBSTR
+    KwmQsysfunc, // QSYSFUNC
+    KwmQUpcase,  // QUPCASE
+    // NLS functions (masking)
+    KwmQKCmpres, // QKCMPRES
+    KwmQKLeft,   // QKLEFT
+    KwmQKScan,   // QKSCAN
+    KwmQKSubstr, // QKSUBSTR
+    KwmQKUpcase, // QKUPCASE
     // Runtime Quoting functions
     KwmBquote,   // BQUOTE
     KwmNrBquote, // NRBQUOTE
@@ -161,24 +200,15 @@ pub enum TokenType {
     #[keyword("INCLUDE", "INC")]
     KwmInclude, // INCLUDE or INC
     KwmList, // LIST
-    // ----------------MACRO TOKENS----------------
-    // Put pure second pass tokens after this line only
+    // ----------------MACRO TOKENS (end) ----------------
+    // Put pure non macro tokens after this line only
     Identifier,
-    KwLT,
-    KwLE,
-    KwEQ,
-    KwIN,
-    KwNE,
-    KwGT,
-    KwGE,
     KwEQT,
     KwGTT,
     KwLTT,
     KwGET,
     KwLET,
     KwNET,
-    KwAND,
-    KwOR,
     // Global SAS statement keywords & shared keywords
     KwComment,
     KwLibname,
@@ -341,15 +371,11 @@ pub(super) fn parse_macro_keyword<S: AsRef<str>>(ident: S) -> Option<TokenType> 
     MKEYWORDS.get(ident.as_ref()).copied()
 }
 
-#[inline]
-pub(crate) fn get_macro_quote_call_token_type_range() -> std::ops::RangeInclusive<u16> {
-    TokenType::KwmBquote as u16..=TokenType::KwmNrStr as u16
-}
+pub(super) const MACRO_QUOTE_CALL_TOKEN_TYPE_RANGE: (u16, u16) =
+    (TokenType::KwmBquote as u16, TokenType::KwmNrStr as u16);
 
-#[inline]
-pub(crate) fn get_macro_stat_token_type_range() -> std::ops::RangeInclusive<u16> {
-    TokenType::KwmAbort as u16..=TokenType::KwmList as u16
-}
+pub(super) const MACRO_STAT_TOKEN_TYPE_RANGE: (u16, u16) =
+    (TokenType::KwmAbort as u16, TokenType::KwmList as u16);
 
 #[cfg(test)]
 mod tests {
@@ -382,13 +408,12 @@ mod tests {
 
     #[test]
     fn test_get_macro_stat_token_type_range() {
-        let range = get_macro_stat_token_type_range();
-
         for variant in TokenType::iter() {
             let variant_val = variant as u16;
 
             assert_eq!(
-                range.contains(&variant_val),
+                MACRO_STAT_TOKEN_TYPE_RANGE.0 <= variant_val
+                    && MACRO_STAT_TOKEN_TYPE_RANGE.1 >= variant_val,
                 matches!(
                     variant,
                     TokenType::KwmAbort
@@ -429,13 +454,12 @@ mod tests {
 
     #[test]
     fn test_get_macro_quote_call_token_type_range() {
-        let range = get_macro_quote_call_token_type_range();
-
         for variant in TokenType::iter() {
             let variant_val = variant as u16;
 
             assert_eq!(
-                range.contains(&variant_val),
+                MACRO_QUOTE_CALL_TOKEN_TYPE_RANGE.0 <= variant_val
+                    && MACRO_QUOTE_CALL_TOKEN_TYPE_RANGE.1 >= variant_val,
                 matches!(
                     variant,
                     TokenType::KwmBquote
