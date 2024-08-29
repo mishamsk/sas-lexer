@@ -2,8 +2,8 @@ pub(crate) mod buffer;
 pub(crate) mod channel;
 mod cursor;
 pub mod error;
-mod hex;
 mod r#macro;
+mod numeric;
 pub mod print;
 mod sas_lang;
 #[cfg(test)]
@@ -15,9 +15,10 @@ use buffer::{LineIdx, Payload, TokenizedBuffer, WorkTokenizedBuffer};
 use channel::TokenChannel;
 use cursor::EOF_CHAR;
 use error::{ErrorInfo, ErrorType};
-use hex::parse_numeric_hex_str;
+use numeric::{parse_numeric, parse_numeric_hex_str};
 use r#macro::{
-    is_macro_amp, is_macro_percent, is_macro_quote_call, is_macro_stat,
+    is_macro_amp, is_macro_eval_logical_op, is_macro_eval_mnemonic, is_macro_eval_quotable_op,
+    is_macro_percent, is_macro_quote_call_tok_type, is_macro_stat, is_macro_stat_tok_type,
     lex_macro_call_stat_or_label,
 };
 use sas_lang::is_valid_sas_name_start;
@@ -30,6 +31,55 @@ use unicode_ident::{is_xid_continue, is_xid_start};
 use crate::TokenIdx;
 
 const BOM: char = '\u{feff}';
+
+/// Packed flags for macro eval expressions (arithmetic/logical)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct MacroEvalExprFlags(u8);
+
+impl MacroEvalExprFlags {
+    const FLOAT_MODE_MASK: u8 = 0b0000_0001;
+    const TERMINATE_ON_COMMA_MASK: u8 = 0b0000_0010;
+    const TERMINATE_ON_STAT_MASK: u8 = 0b0000_0100;
+    const TERMINATE_ON_SEMI_MASK: u8 = 0b0000_1000;
+
+    const fn new(
+        float_mode: bool,
+        terminate_on_comma: bool,
+        terminate_on_stat: bool,
+        terminate_on_semi: bool,
+    ) -> Self {
+        let mut bits = 0;
+        if float_mode {
+            bits |= Self::FLOAT_MODE_MASK;
+        }
+        if terminate_on_comma {
+            bits |= Self::TERMINATE_ON_COMMA_MASK;
+        }
+        if terminate_on_stat {
+            bits |= Self::TERMINATE_ON_STAT_MASK;
+        }
+        if terminate_on_semi {
+            bits |= Self::TERMINATE_ON_SEMI_MASK;
+        }
+        Self { 0: bits }
+    }
+
+    const fn float_mode(&self) -> bool {
+        self.0 & Self::FLOAT_MODE_MASK != 0
+    }
+
+    const fn terminate_on_comma(&self) -> bool {
+        self.0 & Self::TERMINATE_ON_COMMA_MASK != 0
+    }
+
+    const fn terminate_on_stat(&self) -> bool {
+        self.0 & Self::TERMINATE_ON_STAT_MASK != 0
+    }
+
+    const fn terminate_on_semi(&self) -> bool {
+        self.0 & Self::TERMINATE_ON_SEMI_MASK != 0
+    }
+}
 
 /// The lexer mode
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -70,8 +120,10 @@ enum LexerMode {
     /// % and & are masked, i.e. this is %nrstr.
     /// u32 value is the current parenthesis nesting level, see `MacroCallArgOrValue`
     MacroStrQuotedExpr(bool, u32),
-    /// Macro arithmetic/logical expression, as in `%eval(-->1+1<--)`
-    MacroEval,
+    /// Macro arithmetic/logical expression, as in `%eval(-->1+1<--)`, or `%if 1+1`
+    /// See `MacroEvalExprFlags` for the packed flags.
+    /// u32 value is the current parenthesis nesting level, see `MacroCallArgOrValue`
+    MacroEval(MacroEvalExprFlags, u32),
     /// Mode for lexing right after %let/%local/%global, where
     /// we expect a variable name expression. Boolean flag indicates if we
     /// have found at least one token of the variable name
@@ -274,6 +326,21 @@ impl<'src> Lexer<'src> {
             self.add_line());
     }
 
+    /// Special helper to save necessary token start values, without
+    /// changing the main state. This can be used to emit a token at
+    /// a mark that is different the current cursor position. Use with
+    /// `emit_token_at_mark`
+    fn mark_token_start(&mut self) -> (ByteOffset, CharOffset, LineIdx) {
+        (
+            self.cur_byte_offset(),
+            self.cur_char_offset(),
+            self.buffer.last_line().unwrap_or_else(||
+            // Should not be possible, since we add the first line when creating
+            // the lexer, but whatever
+            self.add_line()),
+        )
+    }
+
     fn emit_token(&mut self, channel: TokenChannel, token_type: TokenType, payload: Payload) {
         self.buffer.add_token(
             channel,
@@ -283,6 +350,20 @@ impl<'src> Lexer<'src> {
             self.cur_token_line,
             payload,
         );
+    }
+
+    /// Emits token at a previously locally saved mark. In contrast the
+    /// normal `emit_token` uses the Lexer state as the starting point
+    /// of a token
+    fn emit_token_at_mark(
+        &mut self,
+        channel: TokenChannel,
+        token_type: TokenType,
+        payload: Payload,
+        mark: (ByteOffset, CharOffset, LineIdx),
+    ) {
+        self.buffer
+            .add_token(channel, token_type, mark.0, mark.1, mark.2, payload);
     }
 
     fn update_last_token(
@@ -363,18 +444,37 @@ impl<'src> Lexer<'src> {
                 LexerMode::Default
                 | LexerMode::WsOrCStyleCommentOnly
                 | LexerMode::MaybeMacroCallArgs
-                | LexerMode::MacroStrQuotedExpr(_, _)
-                | LexerMode::MacroCallArgOrValue(_)
-                | LexerMode::MacroCallValue(_)
                 | LexerMode::MacroSemiTerminatedTextExpr => {
                     // These are optional modes, meaning there can be no actual token lexed in it
                     // so we can safely pop them
+                }
+                LexerMode::MacroStrQuotedExpr(_, pnl)
+                | LexerMode::MacroCallArgOrValue(pnl)
+                | LexerMode::MacroCallValue(pnl)
+                | LexerMode::MacroEval(_, pnl) => {
+                    // If the parens nesting level is > 0, we should emit the missing number of
+                    // closing parens to balance it out
+                    let pnl = pnl.clone(); // do not ask...borrow checker!
+
+                    if pnl > 0 {
+                        self.emit_error(ErrorType::MissingExpected(
+                            "Missing closing parenthesis to balance the expression",
+                        ));
+
+                        self.start_token();
+                        for _ in 0..pnl {
+                            self.emit_token(
+                                TokenChannel::DEFAULT,
+                                TokenType::RPAREN,
+                                Payload::None,
+                            );
+                        }
+                    }
                 }
                 LexerMode::StringExpr => {
                     // This may happen if we have unbalanced `"` or `'` as the last character
                     self.handle_unterminated_str_expr(Payload::None);
                 }
-                LexerMode::MacroEval => !todo!("Macro eval mode"),
                 LexerMode::MacroLetVarName(_) => {
                     // This may happen if we have %let without a variable name in the end
                     self.emit_error(ErrorType::MissingExpected(
@@ -472,7 +572,9 @@ impl<'src> Lexer<'src> {
             }
             LexerMode::Default => self.dispatch_mode_default(next_char),
             LexerMode::StringExpr => self.dispatch_mode_str_expr(next_char),
-            LexerMode::MacroEval => !todo!("Macro eval mode"),
+            LexerMode::MacroEval(flags, pnl) => {
+                self.dispatch_mode_macro_eval(next_char, flags, pnl)
+            }
             LexerMode::MacroStrQuotedExpr(mask_macro, pnl) => {
                 self.dispatch_macro_str_quoted_expr(next_char, mask_macro, pnl);
             }
@@ -571,6 +673,478 @@ impl<'src> Lexer<'src> {
         }
     }
 
+    fn dispatch_mode_macro_eval(
+        &mut self,
+        next_char: char,
+        macro_eval_flags: MacroEvalExprFlags,
+        parens_nesting_level: u32,
+    ) {
+        debug_assert!(matches!(
+            self.mode(),
+            LexerMode::MacroEval(f, pnl) if f == macro_eval_flags && pnl == parens_nesting_level
+        ));
+
+        self.start_token();
+
+        // Dispatch the "big" categories
+        match next_char {
+            '\'' => {
+                self.lex_single_quoted_str();
+            }
+            '"' => {
+                self.lex_string_expression_start();
+            }
+            '/' => {
+                if self.cursor.peek_next() == '*' {
+                    self.lex_cstyle_comment();
+                } else {
+                    self.cursor.advance();
+                    self.emit_token(TokenChannel::DEFAULT, TokenType::FSLASH, Payload::None);
+                    // WS after operator or delimiter is insignificant
+                    self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+                }
+            }
+            '&' => {
+                if !self.lex_macro_var_expr() {
+                    // Regular AMP sequence, consume as token
+                    self.cursor.eat_while(|c| c == '&');
+                    self.emit_token(TokenChannel::DEFAULT, TokenType::AMP, Payload::None);
+                    // WS after operator or delimiter is insignificant
+                    self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+                }
+            }
+            '%' => {
+                match self.lex_macro_call(true, macro_eval_flags.terminate_on_stat()) {
+                    MacroKwType::MacroStat => {
+                        // Hit a following macro statement => pop mode and exit.
+                        // Error has already been emitted by the `lex_macro_call`
+                        // if macro stat is not allowed
+                        self.pop_mode();
+                        return;
+                    }
+                    MacroKwType::None => {
+                        // Either a string % or the quoted op.
+                        // Whatever is the case, we can advance
+                        self.cursor.advance();
+
+                        let second_next = self.cursor.peek().unwrap_or(' ');
+
+                        if is_macro_eval_quotable_op(second_next) {
+                            self.lex_macro_eval_operator(second_next);
+                        } else {
+                            // Just a percent, continue lexing the string
+                            // We could have not consumed it and let the
+                            // string lexing handle it, but this way we
+                            // we avoid one extra check
+                            self.lex_macro_string_in_macro_eval_context(macro_eval_flags);
+                        }
+                    }
+                    MacroKwType::MacroCallOrLabel => {}
+                }
+            }
+            ')' if parens_nesting_level == 0 => {
+                // Found the end of the expression, pop the mode and return
+                self.maybe_emit_empty_macro_string(None);
+                self.pop_mode();
+            }
+            ',' if macro_eval_flags.terminate_on_comma() => {
+                // Found the end of the expression, pop the mode and return
+                self.maybe_emit_empty_macro_string(None);
+                self.pop_mode();
+            }
+            ';' if macro_eval_flags.terminate_on_semi() => {
+                // Found the end of the expression, pop the mode and return
+                self.maybe_emit_empty_macro_string(None);
+                self.pop_mode();
+            }
+            c => {
+                if !self.lex_macro_eval_operator(c) {
+                    // Not an operator => must be a macro string
+                    self.lex_macro_string_in_macro_eval_context(macro_eval_flags);
+                }
+            }
+        }
+        // empty macro string detection
+    }
+
+    fn lex_macro_eval_operator(&mut self, next_char: char) -> bool {
+        debug_assert!(matches!(self.mode(), LexerMode::MacroEval(_, _)));
+
+        // Helper function to emit the token and update the mode if needed
+        let update_parens_nesting = |lexer: &mut Lexer, increment: bool| {
+            if let Some(LexerMode::MacroEval(_, pnl)) = lexer.mode_stack.last_mut() {
+                if !increment {
+                    // If our logic is correct, it should be impossible for the symbol
+                    // lex function to decrement the parens nesting level below 0
+                    debug_assert!(*pnl > 0);
+                    *pnl = pnl.wrapping_add_signed(-1);
+                } else {
+                    *pnl = pnl.wrapping_add_signed(1);
+                }
+            };
+        };
+
+        let (tok_type, extra_advance_by) = match next_char {
+            // '/' is not here, becase it is handled in the caller with c-style comment
+            // same for `&`
+            '*' => {
+                if self.cursor.peek_next() == '*' {
+                    (TokenType::STAR2, 1)
+                } else {
+                    (TokenType::STAR, 0)
+                }
+            }
+            '(' => {
+                update_parens_nesting(self, true);
+                (TokenType::LPAREN, 0)
+            }
+            ')' => {
+                update_parens_nesting(self, false);
+                (TokenType::RPAREN, 0)
+            }
+            '|' => (TokenType::PIPE, 0),
+            '¬' | '^' | '~' => {
+                if self.cursor.peek_next() == '=' {
+                    (TokenType::NE, 1)
+                } else {
+                    (TokenType::NOT, 0)
+                }
+            }
+            '+' => (TokenType::PLUS, 0),
+            '-' => (TokenType::MINUS, 0),
+            '<' => {
+                if self.cursor.peek_next() == '=' {
+                    (TokenType::LE, 1)
+                } else {
+                    (TokenType::LT, 0)
+                }
+            }
+            '>' => {
+                if self.cursor.peek_next() == '=' {
+                    (TokenType::GE, 1)
+                } else {
+                    (TokenType::GT, 0)
+                }
+            }
+            '=' => (TokenType::ASSIGN, 0),
+            '#' => (TokenType::HASH, 0),
+            'e' | 'n' | 'l' | 'g' | 'a' | 'o' | 'i' | 'E' | 'N' | 'L' | 'G' | 'A' | 'O' | 'I' => {
+                if let (Some(tok_type), extra_advance_by) =
+                    is_macro_eval_mnemonic(self.cursor.chars())
+                {
+                    (tok_type, extra_advance_by)
+                } else {
+                    // not a mnemonic, return
+                    return false;
+                }
+            }
+            _ => return false,
+        };
+
+        self.maybe_emit_empty_macro_string(Some(tok_type));
+
+        self.cursor.advance_by(1 + extra_advance_by);
+        self.emit_token(TokenChannel::DEFAULT, tok_type, Payload::None);
+        // WS after operator or delimiter is insignificant
+        self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+        true
+    }
+
+    fn lex_macro_string_in_macro_eval_context(&mut self, macro_eval_flags: MacroEvalExprFlags) {
+        debug_assert!(matches!(self.mode(), LexerMode::MacroEval(_, _)));
+
+        // In eval context, the leading/trailing whitespace may or may not be
+        // part of a macro string depending on the preceeding/following characters.
+        // Before and after operators and delimiter (comma, semicolon) it is not
+        // part of the macro string. But in-between of the operands it is.
+        //
+        // E.g. in a case like this: `%eval(1   + 2)`.
+        //                      insignificant^^^
+        // While it is significant here: `%eval(pre   &mv=&other)`.
+        //                              significant^^^
+        // `pre   ` should be a single macro string token on default channel.
+        //
+        // The WS after operator or delimiter is handled as hidden by pushing the WS mode.
+        // However, if we had, say, a '' or "" string literal, after lexing it
+        // we'll be back here and can start with whitespace. Or we can be lexing
+        // the `pre` in the example above and encounter whitespace before the `&`.
+        //
+        // Thus when we encounter WS, we "mark" it as a potential start of
+        // a WS token and depending on how we end the current token, either
+        // emit a hidden WS token or make it part of the macro string.
+
+        // The other aspect is that SAS will recognize numerics (integers for
+        // all contexts except `%sysevals` where it will also recognize floats).
+        // But it is very clever. `%eval(1+1)` here both `1` and `1` are recognized
+        // as integers. But in `%eval(1.0+1)` the `1.0` is lexed as string because
+        // it is not a valid integer. Or in `%eval(1 2=12)` the lhs will be a macro
+        // string `1 2`, not integers `1` and `2`.
+        //
+        // It is super hard to implement this correctly, e.g. in `%eval(1/*comment*/2)`
+        // thus we do our best, but may not be 100% correct for every edge case.
+
+        let mut ws_mark: Option<(ByteOffset, CharOffset, LineIdx)> = None;
+        let mut try_lexing_numeric = true;
+
+        while let Some(c) = self.cursor.peek() {
+            // We read until we've found something that terminates
+            // the macro string portion. The type of the terminator is
+            // important as it will influence how we handle trailing whitespace
+            // and if we'll try lexing integer/floar literals
+            match c {
+                '*' | '(' | ')' | '|' | '¬' | '^' | '~' | '+' | '-' | '<' | '>' | '=' | '#' => {
+                    // Symbol operators and parens which are always terminators
+                    break;
+                }
+                '\'' | '"' => {
+                    // If string literal follows, we should not try lexing
+                    // whatever we got so far as a numeric literal. But ws
+                    // before the string literal should be part of the macro string
+                    try_lexing_numeric = false;
+                    ws_mark = None;
+                    break;
+                }
+                '/' => {
+                    // Both division op and start of a comment signify the end
+                    // of at least a macro string portion. Without doing
+                    // insane unlimited lookahead, we can't know whether it is
+                    // followed by an operator (and hence the preceding WS is
+                    // insignificant) or a continuation of a string (and
+                    // the WS is significant). We just assume the latter and
+                    // accept this is as a known limitation. Worst case
+                    // the user of the parsed code will have to call int() on
+                    // the macro string to get the numeric value.
+                    if self.cursor.peek_next() == '*' {
+                        try_lexing_numeric = false;
+                        ws_mark = None;
+                    }
+                    break;
+                }
+                ';' if macro_eval_flags.terminate_on_semi() => {
+                    // Found the end of the expression, break
+                    break;
+                }
+                ',' if macro_eval_flags.terminate_on_comma() => {
+                    // Found the end of the expression, break
+                    break;
+                }
+                '&' => {
+                    // In macro eval amp always means an end to a macro string.
+                    // It is either a following operator or a macro var expression.
+                    // But we we need to know if it is operator or macro var expr
+                    // to properly handle the trailing WS.
+                    if is_macro_amp(self.cursor.chars()).0 {
+                        // Not an operator, but a macro var expression
+                        // Hence preceeding WS is significant and we should not
+                        // try lexing the preceeding as a numeric literal
+                        try_lexing_numeric = false;
+                        ws_mark = None;
+                    }
+                    // Stop consuming char and break for standard logic.
+                    break;
+                }
+                '%' => {
+                    if is_macro_percent(self.cursor.peek_next(), true) {
+                        // Hit a macro call or statment in/after the string expression
+                        // Stop consuming char and break for standard logic.
+
+                        // NOTE: this is super expensive look-ahead. If we push down
+                        // trailing WS trimming to the parser, it can be avoided.
+                        if !is_macro_stat(self.cursor.chars()) {
+                            // Not a delimiting statment, but a macro call
+                            // Hence preceeding WS is significant and we should not
+                            // try lexing the preceeding as a numeric literal
+                            try_lexing_numeric = false;
+                            ws_mark = None;
+                        }
+                        break;
+                    }
+
+                    // Just percent in the text, consume and continue
+                    self.cursor.advance();
+
+                    // Also reset the ws mark (not in ws anymore) and
+                    // it can't be part of a numeric literal now
+                    try_lexing_numeric = false;
+                    ws_mark = None;
+                }
+                '\n' => {
+                    ws_mark = ws_mark.or_else(|| Some(self.mark_token_start()));
+                    self.cursor.advance();
+                    self.add_line();
+                }
+                c if c.is_whitespace() => {
+                    ws_mark = ws_mark.or_else(|| Some(self.mark_token_start()));
+                    self.cursor.advance();
+                }
+                // Mnemonics should only be recognized if they are have WS before them
+                'e' | 'n' | 'l' | 'g' | 'a' | 'o' | 'i' | 'E' | 'N' | 'L' | 'G' | 'A' | 'O'
+                | 'I'
+                    if ws_mark.is_some() =>
+                {
+                    if let (Some(_), _) = is_macro_eval_mnemonic(self.cursor.chars()) {
+                        // Found a mnemonic, break
+                        break;
+                    } else {
+                        // String continues. Reset the ws mark & integer literal, advance
+                        try_lexing_numeric = false;
+                        ws_mark = None;
+                        self.cursor.advance();
+                    }
+                }
+                _ => {
+                    // Not a terminator, just a regular character in the string
+                    // consume and continue lexing the string
+                    self.cursor.advance();
+                }
+            }
+        }
+
+        // Few. We got here. We can have a few cases:
+        // 1. No mark => just a seuqeunce characters, all macro string. We may try lexing it as a number
+        //      if flag is set
+        // 2. Mark, and nothing else, just WS! => emit hidden WS token
+        // 3. A sequence of characters, then a mark which starts at the beginning of WS =>
+        //      do both - try lexing the sequence as a number and emit the WS token
+
+        let macro_string = self
+            .source
+            .get(
+                self.cur_token_byte_offset.into()
+                    ..ws_mark
+                        .and_then(|m| Some(m.0))
+                        .unwrap_or_else(|| self.cur_byte_offset())
+                        .into(),
+            )
+            .unwrap_or_else(|| {
+                // This is an internal error, we should always have a token text
+                self.emit_error(ErrorType::InternalError("No token text"));
+                ""
+            });
+
+        if macro_string.len() > 0 {
+            if try_lexing_numeric {
+                // Try parsing
+                if macro_string.as_bytes().ends_with(&[b'x', b'X']) {
+                    // Try hex
+                    let ((tok_type, payload), error) = parse_numeric_hex_str(
+                        macro_string.get(..macro_string.len() - 1).unwrap_or(""),
+                    );
+
+                    if error.is_none() {
+                        self.emit_token(TokenChannel::DEFAULT, tok_type, payload);
+                    };
+                } else {
+                    // Try integer/float depending on the flag
+                    let ((tok_type, payload), error) = parse_numeric(macro_string);
+
+                    if error.is_none() {
+                        match tok_type {
+                            TokenType::IntegerLiteral | TokenType::IntegerDotLiteral => {
+                                // We do not care for the DotIntegerLiteral version here
+                                // as format may not be in this context
+                                self.emit_token(
+                                    TokenChannel::DEFAULT,
+                                    TokenType::IntegerLiteral,
+                                    payload,
+                                );
+                            }
+                            TokenType::FloatLiteral if macro_eval_flags.float_mode() => {
+                                self.emit_token(TokenChannel::DEFAULT, tok_type, payload);
+                            }
+                            TokenType::FloatLiteral => {
+                                // Emit as macro string
+                                self.emit_token(
+                                    TokenChannel::DEFAULT,
+                                    TokenType::MacroString,
+                                    Payload::None,
+                                );
+                            }
+                            _ => {
+                                // Not a number, emit as macro string
+                                self.emit_token(
+                                    TokenChannel::DEFAULT,
+                                    TokenType::MacroString,
+                                    Payload::None,
+                                );
+                            }
+                        }
+                    };
+                }
+            } else {
+                // Not trying to lex as a number, emit as macro string
+                self.emit_token(TokenChannel::DEFAULT, TokenType::MacroString, Payload::None);
+            }
+        }
+
+        // Now handle the trailing WS
+        if let Some(ws_mark) = ws_mark {
+            self.emit_token_at_mark(TokenChannel::HIDDEN, TokenType::WS, Payload::None, ws_mark);
+        }
+    }
+
+    /// In macro logical expressions all ops except IN/# allow empty lhs/rhs.
+    /// We emit special token to make parser's life easier.
+    ///
+    /// This will handle all lhs and rhs cases, or consecutive ops like in the following `lhs = =`
+    /// this is an empty macro string in both rhs position for left associative rules ---------^
+    ///
+    /// For IN docs say:
+    /// > ** When you use the IN operator, both operands must contain a value.
+    /// > If the operand contains a null value, an error is generated.`
+    ///
+    /// So we also emit an error mimicking SAS
+    ///
+    /// We should check either before a logical operator (e.g. ` ne some`)
+    ///                                                    here ^
+    /// before closing parens that are not the end of exprt  (e.g. `(some ne) or other`)
+    ///                                                               here ^
+    /// or at any genuine end of expression, which may be comma, semi, statement keyword etc.
+    /// In the latter case, `next_expr_tok_type` should be None
+    fn maybe_emit_empty_macro_string(&mut self, next_expr_tok_type: Option<TokenType>) {
+        if next_expr_tok_type.map_or(true, |tok_type| {
+            is_macro_eval_logical_op(tok_type) || tok_type == TokenType::RPAREN
+        }) {
+            if let Some(prev_tok_info) = self.buffer.last_token_info_on_default_channel() {
+                let prev_tok_type = prev_tok_info.token_type();
+
+                // is we have a preceedning logical operator, we should emit empty string
+                // no matter the next token type
+                if is_macro_eval_logical_op(prev_tok_type) {
+                    // TODO: emit SAS error on missing operand for IN/#
+                    self.emit_token(
+                        TokenChannel::DEFAULT,
+                        TokenType::MacroStringEmpty,
+                        Payload::None,
+                    );
+                } else if matches!(
+                    prev_tok_type,
+                    // These are all possible "starts", tokens preceeding
+                    // the start of an evaluated macro expr.
+                    // See: https://documentation.sas.com/doc/en/pgmsascdc/9.4_3.5/mcrolref/n1alyfc9f4qrten10sd5qz5e1w5q.htm#p17exjo2c9f5e3n19jqgng0ho42u
+                    TokenType::LPAREN
+                        | TokenType::ASSIGN
+                        | TokenType::KwmIf
+                        | TokenType::KwmTo
+                        | TokenType::KwmBy
+                        | TokenType::COMMA
+                ) {
+                    // if we are at the start of expression, or start of parenthesized subexpression
+                    // the logic is more involved since in reality SAS will emit an error about
+                    // character operand found in eval context. It doesn't allow bare empty condition
+                    self.emit_error(ErrorType::SASSessionUnrecoverableError(
+                        "ERROR: A character operand was found in the %EVAL function or %IF condition where a numeric operand is required.",
+                    ));
+                    self.emit_token(
+                        TokenChannel::DEFAULT,
+                        TokenType::MacroStringEmpty,
+                        Payload::None,
+                    );
+                }
+            }
+        }
+    }
+
     fn dispatch_macro_ident_expr(&mut self, next_char: char, first: bool) {
         debug_assert!(matches!(self.mode(), LexerMode::MacroLetVarName(_)));
 
@@ -617,7 +1191,7 @@ impl<'src> Lexer<'src> {
                 update_mode(self);
             }
             '%' => {
-                match self.lex_macro_call(false) {
+                match self.lex_macro_call(false, false) {
                     MacroKwType::MacroStat | MacroKwType::None => {
                         // Hit a following macro statement or just a percent => pop mode and exit.
                         // Error for statement case has already been emitted by `lex_macro_call`
@@ -682,7 +1256,7 @@ impl<'src> Lexer<'src> {
                 }
             }
             '%' => {
-                match self.lex_macro_call(true) {
+                match self.lex_macro_call(true, false) {
                     MacroKwType::MacroStat => {
                         // Hit a following macro statement => pop mode and exit.
                         // Error has already been emitted by the `lex_macro_call`
@@ -837,7 +1411,7 @@ impl<'src> Lexer<'src> {
                 }
             }
             '%' => {
-                match self.lex_macro_call(true) {
+                match self.lex_macro_call(true, false) {
                     MacroKwType::MacroStat => {
                         // Hit a following macro statement => pop mode and exit.
                         // Error has already been emitted by the `lex_macro_call`
@@ -1097,7 +1671,7 @@ impl<'src> Lexer<'src> {
                     return;
                 }
 
-                match self.lex_macro_call(true) {
+                match self.lex_macro_call(true, false) {
                     MacroKwType::MacroStat => {
                         // Hit a following macro statement => pop mode and exit.
                         // Error has already been emitted by the `lex_macro_call`
@@ -1981,10 +2555,7 @@ impl<'src> Lexer<'src> {
         // if it may be the start of the datalines (must preceeded by `;` on default channel),
         // then we need to peek forward to find a `;`. Only of we find it, we can be sure
         // that this is indeed a datalines start token.
-        if let Some((tok_info, _)) = self
-            .buffer
-            .last_token_info_if(|&t| t.channel() == TokenChannel::DEFAULT)
-        {
+        if let Some(tok_info) = self.buffer.last_token_info_on_default_channel() {
             if tok_info.token_type() != TokenType::SEMI {
                 // the previous character is not a semicolon
                 return false;
@@ -2198,62 +2769,12 @@ impl<'src> Lexer<'src> {
         // we must have consumed the entire literal
         debug_assert!(!self.cursor.peek().map_or(false, |c| c.is_ascii_digit()));
 
-        // Parse as f64. SAS uses 8 bytes and all numbers are stored as f64
-        // so it is impossible to have a valid literal that would overflow
-        // the f64 range.
-        let number = self.pending_token_text();
+        let ((tok_type, payload), error) = parse_numeric(self.pending_token_text());
 
-        let Ok(fvalue) = f64::from_str(number) else {
-            self.emit_token(
-                TokenChannel::DEFAULT,
-                TokenType::IntegerLiteral,
-                Payload::Integer(0),
-            );
+        self.emit_token(TokenChannel::DEFAULT, tok_type, payload);
 
-            self.emit_error(ErrorType::InvalidNumericLiteral);
-            return;
-        };
-
-        // See if it is an integer
-        if fvalue.fract() == 0.0 && fvalue.abs() < u64::MAX as f64 {
-            // For integers we need to emit different tokens, depending on
-            // the presence of the dot as we use different token types.
-            // The later is unfortunatelly necesasry due to SAS numeric formats
-            // context sensitivity and no way of disambiguating between a number `1.`
-            // and the same numeric format `1.`
-
-            // Leading 0 - we can emit the integer token, can't be a format
-            #[allow(clippy::cast_sign_loss)]
-            let payload = Payload::Integer(fvalue as u64);
-
-            // Unwrap here is safe, as we know the length is > 0
-            // but we still provide default value to avoid panics
-            match *number.as_bytes().first().unwrap_or(&b'_') {
-                b'0' => {
-                    self.emit_token(TokenChannel::DEFAULT, TokenType::IntegerLiteral, payload);
-                }
-                _ => {
-                    if number.contains('.') {
-                        self.emit_token(
-                            TokenChannel::DEFAULT,
-                            TokenType::IntegerDotLiteral,
-                            payload,
-                        );
-                    } else {
-                        self.emit_token(TokenChannel::DEFAULT, TokenType::IntegerLiteral, payload);
-                    }
-                }
-            }
-        } else {
-            // And for floats, similarly it is important whether it
-            // it was created from scientific notation or not, but
-            // this function only handles the decimal literals, so
-            // no need to check for that
-            self.emit_token(
-                TokenChannel::DEFAULT,
-                TokenType::FloatLiteral,
-                Payload::Float(fvalue),
-            );
+        if let Some(error) = error {
+            self.emit_error(error);
         }
     }
 
@@ -2621,15 +3142,18 @@ impl<'src> Lexer<'src> {
     /// Arguments:
     /// - allow_quote_call: bool - if `false`, macro quote functions will
     ///     not be lexed as macro calls.
+    /// - allow_stat_to_follow: bool - if `false`, automatically emits an
+    ///     error if a statement is encountered, without consuming the statement itself.
     ///
     /// Returns `MacroKwType`, which will indicate if the token was a macro call,
     /// a macro statement keyword is following (not lexed) or something else.
     ///
     /// NOTE: If `allow_quote_call` is `false` the return will be `MacroKwType::None`!
-    ///
-    /// Automatically emits an error if a statement is encountered,
-    /// without consuming the statement itself.
-    fn lex_macro_call(&mut self, allow_quote_call: bool) -> MacroKwType {
+    fn lex_macro_call(
+        &mut self,
+        allow_quote_call: bool,
+        allow_stat_to_follow: bool,
+    ) -> MacroKwType {
         debug_assert_eq!(self.cursor.peek(), Some('%'));
 
         if !is_valid_sas_name_start(self.cursor.peek_next()) {
@@ -2645,10 +3169,15 @@ impl<'src> Lexer<'src> {
                 (TokenType::MacroIdentifier, 0)
             });
 
-        if !is_macro_stat(tok_type) {
+        if !is_macro_stat_tok_type(tok_type) {
             // A macro call (or technically a label, but see the docs for
             // `lex_macro_call_stat_or_label` for the explanation)
-            if !allow_quote_call && is_macro_quote_call(tok_type) {
+            if !allow_quote_call && is_macro_quote_call_tok_type(tok_type) {
+                // As of today this checked for macro text expressions that
+                // are in places of identifiers. SAS emits an error in this case
+                // as quote functions create invisible quote chars that are not valid
+                // in identifiers. But for now we do not emit error here unlike
+                // for statements...just lazy.
                 return MacroKwType::None;
             }
 
@@ -2661,13 +3190,15 @@ impl<'src> Lexer<'src> {
 
         // Must be a macro statement
 
-        // This would lead to breaking SAS session with:
-        // ERROR: Open code statement recursion detected.
-        // so we emit an error here in addition to missing )
-        // that will emit during mode stack pop
-        self.emit_error(ErrorType::SASSessionUnrecoverableError(
-            "ERROR: Open code statement recursion detected.",
-        ));
+        if !allow_stat_to_follow {
+            // This would lead to breaking SAS session with:
+            // ERROR: Open code statement recursion detected.
+            // so we emit an error here in addition to missing )
+            // that will emit during mode stack pop
+            self.emit_error(ErrorType::SASSessionUnrecoverableError(
+                "ERROR: Open code statement recursion detected.",
+            ));
+        }
 
         MacroKwType::MacroStat
     }
@@ -2688,6 +3219,7 @@ impl<'src> Lexer<'src> {
     /// may be text!
     ///
     /// We obviously can't do that, so we will assume that the macro call is with arguments.
+    #[inline(always)]
     fn maybe_expect_macro_call_args(&mut self) {
         // Checkpoint the current state
         self.checkpoint();
@@ -2703,6 +3235,7 @@ impl<'src> Lexer<'src> {
     /// A helper to populate the expected states for the %str/%nrstr call
     ///
     /// Should be called after adding the %str/%nrstr token
+    #[inline(always)]
     fn expect_macro_str_call_args(&mut self, is_nrstr: bool) {
         // Populate the expected states for the %str/%nrstr call
         // in reverse order, as the lexer will unwind the stack
@@ -2778,61 +3311,95 @@ impl<'src> Lexer<'src> {
                 (TokenType::MacroIdentifier, 0)
             });
 
-        if kw_tok_type == TokenType::MacroIdentifier {
-            // custom macro call or label
-            self.emit_token(
-                TokenChannel::DEFAULT,
-                TokenType::MacroIdentifier,
-                Payload::None,
-            );
-
-            self.maybe_expect_macro_call_args();
-            return;
-        }
-
         self.dispatch_macro_call_or_stat(kw_tok_type);
     }
 
     fn dispatch_macro_call_or_stat(&mut self, kw_tok_type: TokenType) {
+        // Emit the token for the keyword itself
+
+        // We use hidden channel for the %str/%nrstr and the wrapping parens
+        // since this is a pure compile time directive in SAS which just allows
+        // having a macro text expression with things that would otherwise be
+        // interpreted as macro calls or removed (like spaces). For all
+        // other cases we emit on default channel.
+        self.emit_token(
+            if [TokenType::KwmStr, TokenType::KwmNrStr].contains(&kw_tok_type) {
+                TokenChannel::HIDDEN
+            } else {
+                TokenChannel::DEFAULT
+            },
+            kw_tok_type,
+            Payload::None,
+        );
+
+        // Now populate the following mode stack
         match kw_tok_type {
             // Built-in Macro functions
             TokenType::KwmStr | TokenType::KwmNrStr => {
-                // Add the token
-                // We use hidden channel for the %str/%nrstr and the wrapping parens
-                // since this is a pure compile time directive in SAS which just allows
-                // having a macro text expression with things that would otherwise be
-                // interpreted as macro calls or removed (like spaces)
-                self.emit_token(TokenChannel::HIDDEN, kw_tok_type, Payload::None);
-
-                // Populate the expected states for the %str/%nrstr() call
                 self.expect_macro_str_call_args(kw_tok_type == TokenType::KwmNrStr);
             }
-            tok_type if !is_macro_stat(tok_type) => {
-                // TODO!!!!!! PLACEHOLDER
-                self.emit_token(TokenChannel::DEFAULT, kw_tok_type, Payload::None);
-
+            TokenType::KwmEval | TokenType::KwmSysevalf => {
+                self.push_mode(LexerMode::ExpectSymbol(
+                    ')',
+                    TokenType::RPAREN,
+                    TokenChannel::DEFAULT,
+                ));
+                // The handler fo arguments will push the mode for the comma, etc.
+                self.push_mode(LexerMode::MacroEval(
+                    MacroEvalExprFlags::new(
+                        kw_tok_type == TokenType::KwmSysevalf,
+                        false,
+                        false,
+                        false,
+                    ),
+                    0,
+                ));
+                // Leading insiginificant WS before the first argument
+                self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+                self.push_mode(LexerMode::ExpectSymbol(
+                    '(',
+                    TokenType::LPAREN,
+                    TokenChannel::DEFAULT,
+                ));
+                // Leading insiginificant WS before opening parenthesis
+                self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+            }
+            // Custom macro or label
+            TokenType::MacroIdentifier => {
                 self.maybe_expect_macro_call_args();
+            }
+            tok_type if !is_macro_stat_tok_type(tok_type) => {
+                // TODO!!!!!! PLACEHOLDER - should be exhaustive
+                // All built-ins have arguments, so we may avoid the `maybe` version
+
+                self.push_mode(LexerMode::ExpectSymbol(
+                    ')',
+                    TokenType::RPAREN,
+                    TokenChannel::DEFAULT,
+                ));
+                // The handler fo arguments will push the mode for the comma, etc.
+                self.push_mode(LexerMode::MacroCallArgOrValue(0));
+                // Leading insiginificant WS before the first argument
+                self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+                self.push_mode(LexerMode::ExpectSymbol(
+                    '(',
+                    TokenType::LPAREN,
+                    TokenChannel::DEFAULT,
+                ));
+                // Leading insiginificant WS before opening parenthesis
+                self.push_mode(LexerMode::WsOrCStyleCommentOnly);
             }
             // Macro statements
             TokenType::KwmEnd | TokenType::KwmReturn => {
-                // Add the token
-                self.emit_token(TokenChannel::DEFAULT, kw_tok_type, Payload::None);
-
                 // Super easy, just expect the closing semi
                 self.push_mode(LexerMode::ExpectSemiOrEOF);
             }
             TokenType::KwmPut | TokenType::KwmGoto => {
-                // Add the token
-                self.emit_token(TokenChannel::DEFAULT, kw_tok_type, Payload::None);
-
                 self.push_mode(LexerMode::ExpectSemiOrEOF);
                 self.push_mode(LexerMode::MacroSemiTerminatedTextExpr);
                 self.push_mode(LexerMode::WsOrCStyleCommentOnly);
             }
             TokenType::KwmLet => {
-                // Add the token
-                self.emit_token(TokenChannel::DEFAULT, kw_tok_type, Payload::None);
-
                 // following let we must have name, equal sign and expression.
                 // All maybe surrounded by insignificant whitespace! + the closing semi
                 // Also, SAS happily recovers after missing equal sign, with just a note
@@ -2853,8 +3420,10 @@ impl<'src> Lexer<'src> {
                 self.push_mode(LexerMode::WsOrCStyleCommentOnly);
             }
             _ => {
-                // TODO!!!!!! PLACEHOLDER
-                self.emit_token(TokenChannel::DEFAULT, kw_tok_type, Payload::None);
+                // TODO!!!!!! PLACEHOLDER - should be exhaustive
+                self.push_mode(LexerMode::ExpectSemiOrEOF);
+                self.push_mode(LexerMode::MacroSemiTerminatedTextExpr);
+                self.push_mode(LexerMode::WsOrCStyleCommentOnly);
             }
         }
     }

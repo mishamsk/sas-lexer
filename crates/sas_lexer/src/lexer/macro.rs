@@ -7,7 +7,7 @@ use super::{
     cursor::Cursor,
     sas_lang::is_valid_sas_name_start,
     token_type::{
-        get_macro_quote_call_token_type_range, get_macro_stat_token_type_range, parse_macro_keyword,
+        parse_macro_keyword, MACRO_QUOTE_CALL_TOKEN_TYPE_RANGE, MACRO_STAT_TOKEN_TYPE_RANGE,
     },
 };
 
@@ -37,6 +37,13 @@ pub(super) fn is_macro_amp<I: Iterator<Item = char>>(mut chars: I) -> (bool, u32
     }
 }
 
+#[inline(always)]
+pub(super) fn is_macro_eval_quotable_op(c: char) -> bool {
+    // Expermientally shown to work! (ignores the %)
+    // e.g. `%^ 0` returned 1 (true)
+    ['~', '^', '='].contains(&c)
+}
+
 /// Predicate to check if an encountered percent is a start of macro expression
 /// or statement.
 ///
@@ -45,25 +52,43 @@ pub(super) fn is_macro_percent(follow_char: char, in_eval_context: bool) -> bool
     match follow_char {
         // Macro comment
         '*' => true,
-        // Expermientally shown to work! (ignores the %)
-        // e.g. `%^ 0` returned 1 (true)
-        | '~' | '^'
-        // Expermientally shown to kinda work! makes the expression false
-        // e.g. `0 %= 0` returned 0, and `%= eq %=` is false, but `%= or 1` is true
-        | '=' if in_eval_context => true,
-        c if is_valid_sas_name_start(c) => true,
+        c if is_valid_sas_name_start(c) || (in_eval_context && is_macro_eval_quotable_op(c)) => {
+            true
+        }
         _ => false,
     }
 }
 
-#[inline]
-pub(super) fn is_macro_stat(tok_type: TokenType) -> bool {
-    get_macro_stat_token_type_range().contains(&tok_type.into())
+#[inline(always)]
+pub(super) const fn is_macro_stat_tok_type(tok_type: TokenType) -> bool {
+    let tt_i = tok_type as u16;
+    MACRO_STAT_TOKEN_TYPE_RANGE.0 <= tt_i && MACRO_STAT_TOKEN_TYPE_RANGE.1 >= tt_i
 }
 
-#[inline]
-pub(super) fn is_macro_quote_call(tok_type: TokenType) -> bool {
-    get_macro_quote_call_token_type_range().contains(&tok_type.into())
+#[inline(always)]
+pub(super) const fn is_macro_quote_call_tok_type(tok_type: TokenType) -> bool {
+    let tt_i = tok_type as u16;
+    MACRO_QUOTE_CALL_TOKEN_TYPE_RANGE.0 <= tt_i && MACRO_QUOTE_CALL_TOKEN_TYPE_RANGE.1 >= tt_i
+}
+
+#[inline(always)]
+pub(super) const fn is_macro_eval_logical_op(tok_type: TokenType) -> bool {
+    matches!(
+        tok_type,
+        TokenType::LT
+            | TokenType::KwLT
+            | TokenType::LE
+            | TokenType::KwLE
+            | TokenType::ASSIGN
+            | TokenType::HASH
+            | TokenType::KwIN
+            | TokenType::NE
+            | TokenType::KwNE
+            | TokenType::GT
+            | TokenType::KwGT
+            | TokenType::GE
+            | TokenType::KwGE
+    )
 }
 
 /// Consumes the cursor starting at % and followed by a valid sas name start,
@@ -148,4 +173,100 @@ pub(super) fn lex_macro_call_stat_or_label(
         parse_macro_keyword(&ident).unwrap_or(TokenType::MacroIdentifier),
         cursor.char_offset() - start_char_offset,
     ))
+}
+
+/// Predicate to check if the following chracters are one of macro logical
+/// expression mnemonics (eq, ne, lt, le, gt, ge, and, or, not, in).
+///
+/// Must be passed an iterator that starts with the first character
+/// of the possible mnemonic.
+///
+/// Consumes the iterator! Pass a clone if you need to keep the original.
+/// Returns a tuple of:
+/// - `Option<TokenType>`: `Some(TokenType)` if the mnemonic is a macro logical
+///    expression mnemonic, `None` otherwise.
+/// - `u32`: number of symbols in mnemonic besides the start char.
+pub(super) fn is_macro_eval_mnemonic<I: Iterator<Item = char>>(
+    mut chars: I,
+) -> (Option<TokenType>, u32) {
+    // We must check not just the keyword, but also that it is followed by a
+    // non-identifier character
+    let Some(start_char) = chars.next() else {
+        return (None, 0);
+    };
+
+    debug_assert!(matches!(
+        start_char,
+        'e' | 'n' | 'l' | 'g' | 'a' | 'o' | 'i' | 'E' | 'N' | 'L' | 'G' | 'A' | 'O' | 'I'
+    ));
+
+    let Some(next_char) = chars.next() else {
+        return (None, 0);
+    };
+
+    let second_next_char = chars.next().unwrap_or(' ');
+    let second_next_non_id = !is_xid_continue(second_next_char);
+
+    match (start_char, next_char, second_next_non_id) {
+        // Simple cases
+        ('e' | 'E', 'q' | 'Q', true) => (Some(TokenType::KwEQ), 1),
+        ('i' | 'I', 'n' | 'N', true) => (Some(TokenType::KwIN), 1),
+        ('o' | 'O', 'r' | 'R', true) => (Some(TokenType::KwOR), 1),
+        // Now two symbol, but with options
+        ('l' | 'L', 't' | 'T', true) => (Some(TokenType::KwLT), 1),
+        ('l' | 'L', 'e' | 'E', true) => (Some(TokenType::KwLE), 1),
+        ('g' | 'G', 't' | 'T', true) => (Some(TokenType::KwGT), 1),
+        ('g' | 'G', 'e' | 'E', true) => (Some(TokenType::KwGE), 1),
+        ('a' | 'A', 'n' | 'N', false) if ['d', 'D'].contains(&second_next_char) => {
+            if !is_xid_continue(chars.next().unwrap_or(' ')) {
+                (Some(TokenType::KwAND), 2)
+            } else {
+                (None, 0)
+            }
+        }
+        ('n' | 'N', 'e' | 'E', true) => (Some(TokenType::KwNE), 1),
+        ('n' | 'N', 'o' | 'O', false) if ['t', 'T'].contains(&second_next_char) => {
+            if !is_xid_continue(chars.next().unwrap_or(' ')) {
+                (Some(TokenType::KwNOT), 2)
+            } else {
+                (None, 0)
+            }
+        }
+        _ => (None, 0),
+    }
+}
+
+/// Predicate to do a lookahead and check if the following `%ccc` is strictly
+/// a macro statement keyword.
+///
+/// Must be passed an iterator that starts with the first % character
+///
+/// Consumes the iterator! Pass a clone if you need to keep the original.
+/// Returns a tuple of:
+/// - `Option<TokenType>`: `Some(TokenType)` if the mnemonic is a macro logical
+///    expression mnemonic, `None` otherwise.
+/// - `u32`: number of symbols in mnemonic besides the start char.
+pub(super) fn is_macro_stat<I: Iterator<Item = char> + Clone>(chars: I) -> bool {
+    debug_assert!(chars.clone().next().map_or(false, |c| c == '%'));
+
+    // Unfortunatelly this one needs a very inefficient lookahead
+    // to check if we have any statement upfront.
+    let ident = chars
+        .map(|c| {
+            // For simplicity of code, given rare realistic usage of unicode,
+            // we just replace unicode with empty char, which will effectivly
+            // make the following logic correct, since the first non-ascii
+            // char guarantees this is not a statement keyword
+            if !c.is_ascii() {
+                ' '
+            } else {
+                c.to_ascii_uppercase()
+            }
+        })
+        .take_while(|c| matches!(c, 'a'..='z' | 'A'..='Z' | '0'..='9' | '_'))
+        .collect::<SmolStr>();
+
+    parse_macro_keyword(&ident)
+        .and_then(|tok_type| Some(is_macro_stat_tok_type(tok_type)))
+        .unwrap_or(false)
 }

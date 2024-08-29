@@ -98,10 +98,10 @@ pub(super) struct TokenInfo {
 }
 
 impl TokenInfo {
-    #[must_use]
-    pub(super) fn channel(&self) -> TokenChannel {
-        self.channel
-    }
+    // #[must_use]
+    // pub(super) fn channel(&self) -> TokenChannel {
+    //     self.channel
+    // }
 
     #[must_use]
     pub(super) fn token_type(&self) -> TokenType {
@@ -383,25 +383,35 @@ impl WorkTokenizedBuffer {
         self.token_infos.last()
     }
 
-    pub(super) fn last_token_info_if<F>(&self, mut predicate: F) -> Option<(&TokenInfo, TokenIdx)>
-    where
-        F: FnMut(&TokenInfo) -> bool,
-    {
-        let len = self.token_count();
-        self.token_infos
-            .iter()
-            .rev()
-            .enumerate()
-            .find_map(|(i, info)| {
-                if predicate(info) {
-                    // See `token_count` for explanation why truncation is kinda safe
-                    #[allow(clippy::cast_possible_truncation)]
-                    Some((info, TokenIdx::new(len - 1 - i as u32)))
-                } else {
-                    None
-                }
-            })
+    pub(super) fn last_token_info_on_default_channel(&self) -> Option<&TokenInfo> {
+        self.token_infos.iter().rev().find_map(|tok_info| {
+            if tok_info.channel == TokenChannel::DEFAULT {
+                Some(tok_info)
+            } else {
+                None
+            }
+        })
     }
+
+    // pub(super) fn last_token_info_if<F>(&self, mut predicate: F) -> Option<(&TokenInfo, TokenIdx)>
+    // where
+    //     F: FnMut(&TokenInfo) -> bool,
+    // {
+    //     let len = self.token_count();
+    //     self.token_infos
+    //         .iter()
+    //         .rev()
+    //         .enumerate()
+    //         .find_map(|(i, info)| {
+    //             if predicate(info) {
+    //                 // See `token_count` for explanation why truncation is kinda safe
+    //                 #[allow(clippy::cast_possible_truncation)]
+    //                 Some((info, TokenIdx::new(len - 1 - i as u32)))
+    //             } else {
+    //                 None
+    //             }
+    //         })
+    // }
 
     #[inline]
     #[must_use]
