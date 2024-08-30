@@ -3448,6 +3448,15 @@ impl<'src> Lexer<'src> {
                 self.push_mode(LexerMode::MacroLetVarName(false));
                 self.push_mode(LexerMode::WsOrCStyleCommentOnly);
             }
+            TokenType::KwmIf => {
+                // The handler fo arguments will push the mode for the comma, etc.
+                self.push_mode(LexerMode::MacroEval(
+                    MacroEvalExprFlags::new(false, false, true, true),
+                    0,
+                ));
+                // Leading insiginificant WS before expression
+                self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+            }
             _ => {
                 // TODO!!!!!! PLACEHOLDER - should be exhaustive
                 self.push_mode(LexerMode::ExpectSemiOrEOF);
