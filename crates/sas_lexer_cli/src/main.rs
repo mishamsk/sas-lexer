@@ -1,6 +1,7 @@
 #![allow(clippy::print_stderr, clippy::print_stdout)]
 
 use clap::Parser;
+use sas_lexer::error::ErrorType;
 use std::io::Write;
 
 use sas_lexer::error::ErrorInfo;
@@ -29,6 +30,10 @@ struct Cli {
     #[arg(short, long)]
     print: bool,
 
+    /// Print only errors and totals only if errors were found.
+    #[arg(short, long)]
+    err_only: bool,
+
     /// Turn debugging information on
     #[arg(short, long, action = clap::ArgAction::Count)]
     debug: u8,
@@ -54,28 +59,53 @@ where
     }
 }
 
-fn lex_and_print(source: &String, print: bool) {
+fn lex_and_print(source: &String, print: bool, err_only: bool) {
     let result = catch_unwind(|| match lex(source) {
         Ok((tok_buffer, errors)) => {
             let tokens: Vec<TokenIdx> = tok_buffer.into_iter().collect();
 
             let total_tokens = tokens.len();
-            let total_errors = errors.len();
+            let (c_int, c_unknown, c_user) =
+                errors
+                    .iter()
+                    .fold((0, 0, 0), |(c_int, c_unknown, c_user), e| {
+                        match e.error_type() {
+                            ErrorType::InternalError(_) => (c_int + 1, c_unknown, c_user),
+                            ErrorType::UnknownCharacter(_) => (c_int, c_unknown + 1, c_user),
+                            _ => (c_int, c_unknown, c_user + 1),
+                        }
+                    });
 
             if print {
                 let stdout = std::io::stdout();
                 let mut lock = stdout.lock();
 
-                writeln!(lock, "Tokens:").unwrap();
-                print_tokens(&mut lock, tokens, &tok_buffer, source);
+                if !err_only {
+                    writeln!(lock, "Tokens:").unwrap();
+                    print_tokens(&mut lock, tokens, &tok_buffer, source);
+                }
 
                 if errors.len() > 0 {
                     writeln!(lock, "Errors:").unwrap();
-                    print_errors(&mut lock, errors, &tok_buffer, source);
+                    print_errors(&mut lock, errors.clone(), &tok_buffer, source);
                 }
             }
 
-            println!("Done! Found {total_tokens} tokens. Had {total_errors} errors!");
+            if !err_only || errors.len() > 0 {
+                println!("Done! Found {total_tokens} tokens.");
+
+                if c_int > 0 {
+                    println!("Internal errors: {c_int}");
+                }
+
+                if c_unknown > 0 {
+                    println!("Unknown characters: {c_unknown}");
+                }
+
+                if c_user > 0 {
+                    println!("User errors: {c_user}");
+                }
+            }
         }
         Err(error) => eprintln!("Error: {error}"),
     });
@@ -99,7 +129,7 @@ fn main() -> io::Result<()> {
                 if entry_path.extension().and_then(|ext| ext.to_str()) == Some("sas") {
                     if let Ok(contents) = fs::read_to_string(entry_path) {
                         println!("Lexing file: {}", entry_path.display());
-                        lex_and_print(&contents, false); // Always pass false for cli.print
+                        lex_and_print(&contents, false, cli.err_only); // Always pass false for cli.print
                     } else {
                         eprintln!("Failed to read file: {}", entry_path.display());
                     }
@@ -110,7 +140,7 @@ fn main() -> io::Result<()> {
 
             println!("Lexing file: {file_path_str}");
 
-            lex_and_print(&contents, cli.print);
+            lex_and_print(&contents, cli.print, cli.err_only);
         } else {
             let file_path_str = source_path.to_str().unwrap_or("<invalid path>");
 
@@ -124,7 +154,7 @@ fn main() -> io::Result<()> {
             match io::stdin().read_line(&mut buffer) {
                 Ok(0) => {
                     println!("Lexing from stdin...");
-                    lex_and_print(&buffer, cli.print);
+                    lex_and_print(&buffer, cli.print, cli.err_only);
 
                     buffer.clear();
                 }
