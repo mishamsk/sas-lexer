@@ -53,6 +53,9 @@ impl Display for ErrorType {
     }
 }
 
+pub(super) const OPEN_CODE_RECURSION_ERR: ErrorType =
+    ErrorType::SASSessionUnrecoverableError("ERROR: Open code statement recursion detected.");
+
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct ErrorInfo {
     error_type: ErrorType,

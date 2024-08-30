@@ -14,7 +14,7 @@ pub(crate) mod token_type;
 use buffer::{LineIdx, Payload, TokenizedBuffer, WorkTokenizedBuffer};
 use channel::TokenChannel;
 use cursor::EOF_CHAR;
-use error::{ErrorInfo, ErrorType};
+use error::{ErrorInfo, ErrorType, OPEN_CODE_RECURSION_ERR};
 use numeric::{parse_numeric, parse_numeric_hex_str};
 use r#macro::{
     is_macro_amp, is_macro_eval_logical_op, is_macro_eval_mnemonic, is_macro_eval_quotable_op,
@@ -87,8 +87,10 @@ enum LexerMode {
     /// Default mode aka open code (non macro)
     #[default]
     Default,
-    /// String expression, aka double quoted string mode
-    StringExpr,
+    /// String expression, aka double quoted string mode.
+    /// `bool` flag indicates if statement is allowed and should be lexed,
+    /// which is a thing in open code, but not in macro expressions
+    StringExpr(bool),
     /// Insignificant WS/comment space. E.g. between macro name and parens in a call
     /// this is the mode where we want to lex all consecutive whitespace and comments
     /// and then return to the previous mode
@@ -387,7 +389,7 @@ impl<'src> Lexer<'src> {
         }
     }
 
-    fn emit_error(&mut self, error: ErrorType) {
+    fn prep_error_info_at_cur_offset(&self, error: ErrorType) -> ErrorInfo {
         let last_line_char_offset = if let Some(line_info) = self.buffer.last_line_info() {
             line_info.start().get()
         } else {
@@ -396,14 +398,24 @@ impl<'src> Lexer<'src> {
 
         let last_char_offset = self.cur_char_offset().into();
 
-        self.errors.push(ErrorInfo::new(
+        ErrorInfo::new(
             error,
             self.cur_byte_offset().into(),
             last_char_offset,
             self.buffer.line_count(),
             last_char_offset - last_line_char_offset,
             self.buffer.last_token(),
-        ));
+        )
+    }
+
+    #[inline(always)]
+    fn emit_error(&mut self, error: ErrorType) {
+        self.errors.push(self.prep_error_info_at_cur_offset(error));
+    }
+
+    #[inline(always)]
+    fn emit_error_info(&mut self, error_info: ErrorInfo) {
+        self.errors.push(error_info);
     }
 
     /// Main lexing loop, responsible for driving the lexing forwards
@@ -471,7 +483,7 @@ impl<'src> Lexer<'src> {
                         }
                     }
                 }
-                LexerMode::StringExpr => {
+                LexerMode::StringExpr(_) => {
                     // This may happen if we have unbalanced `"` or `'` as the last character
                     self.handle_unterminated_str_expr(Payload::None);
                 }
@@ -571,7 +583,7 @@ impl<'src> Lexer<'src> {
                 self.pop_mode();
             }
             LexerMode::Default => self.dispatch_mode_default(next_char),
-            LexerMode::StringExpr => self.dispatch_mode_str_expr(next_char),
+            LexerMode::StringExpr(allow_stat) => self.dispatch_mode_str_expr(next_char, allow_stat),
             LexerMode::MacroEval(flags, pnl) => {
                 self.dispatch_mode_macro_eval(next_char, flags, pnl)
             }
@@ -632,7 +644,7 @@ impl<'src> Lexer<'src> {
                 self.lex_ws();
             }
             '\'' => self.lex_single_quoted_str(),
-            '"' => self.lex_string_expression_start(),
+            '"' => self.lex_string_expression_start(true),
             ';' => {
                 self.cursor.advance();
                 self.emit_token(TokenChannel::DEFAULT, TokenType::SEMI, Payload::None);
@@ -653,10 +665,18 @@ impl<'src> Lexer<'src> {
                 }
             }
             '%' => {
-                if !self.lex_macro_any() {
-                    // Not a macro, just a percent
-                    self.cursor.advance();
-                    self.emit_token(TokenChannel::DEFAULT, TokenType::PERCENT, Payload::None);
+                match self.cursor.peek_next() {
+                    '*' => {
+                        self.lex_macro_comment();
+                    }
+                    c if is_valid_sas_name_start(c) => {
+                        self.lex_macro_identifier();
+                    }
+                    _ => {
+                        // Not a macro, just a percent
+                        self.cursor.advance();
+                        self.emit_token(TokenChannel::DEFAULT, TokenType::PERCENT, Payload::None);
+                    }
                 }
             }
             '0'..='9' => {
@@ -692,7 +712,7 @@ impl<'src> Lexer<'src> {
                 self.lex_single_quoted_str();
             }
             '"' => {
-                self.lex_string_expression_start();
+                self.lex_string_expression_start(false);
             }
             '/' => {
                 if self.cursor.peek_next() == '*' {
@@ -1239,7 +1259,7 @@ impl<'src> Lexer<'src> {
         // Dispatch the "big" categories
         match next_char {
             '\'' => self.lex_single_quoted_str(),
-            '"' => self.lex_string_expression_start(),
+            '"' => self.lex_string_expression_start(false),
             '/' => {
                 if self.cursor.peek_next() == '*' {
                     self.lex_cstyle_comment();
@@ -1394,7 +1414,7 @@ impl<'src> Lexer<'src> {
         // Dispatch the "big" categories
         match next_char {
             '\'' => self.lex_single_quoted_str(),
-            '"' => self.lex_string_expression_start(),
+            '"' => self.lex_string_expression_start(false),
             '/' => {
                 if self.cursor.peek_next() == '*' {
                     self.lex_cstyle_comment();
@@ -1648,7 +1668,7 @@ impl<'src> Lexer<'src> {
         // Dispatch the "big" categories
         match next_char {
             '\'' => self.lex_single_quoted_str(),
-            '"' => self.lex_string_expression_start(),
+            '"' => self.lex_string_expression_start(false),
             '/' => {
                 if self.cursor.peek_next() == '*' {
                     self.lex_cstyle_comment();
@@ -1948,7 +1968,7 @@ impl<'src> Lexer<'src> {
     }
 
     #[inline(always)]
-    fn lex_string_expression_start(&mut self) {
+    fn lex_string_expression_start(&mut self, allow_stat: bool) {
         debug_assert_eq!(self.cursor.peek(), Some('"'));
 
         self.cursor.advance();
@@ -1957,7 +1977,7 @@ impl<'src> Lexer<'src> {
             TokenType::StringExprStart,
             Payload::None,
         );
-        self.push_mode(LexerMode::StringExpr);
+        self.push_mode(LexerMode::StringExpr(allow_stat));
     }
 
     fn lex_single_quoted_str(&mut self) {
@@ -2119,8 +2139,8 @@ impl<'src> Lexer<'src> {
         tok_type
     }
 
-    fn dispatch_mode_str_expr(&mut self, next_char: char) {
-        debug_assert_eq!(self.mode(), LexerMode::StringExpr);
+    fn dispatch_mode_str_expr(&mut self, next_char: char, allow_stat: bool) {
+        debug_assert!(matches!(self.mode(), LexerMode::StringExpr(s) if s == allow_stat));
 
         self.start_token();
 
@@ -2193,10 +2213,35 @@ impl<'src> Lexer<'src> {
                 }
             }
             '%' => {
-                if !self.lex_macro_any() {
-                    // just a percent. consume and continue
-                    self.cursor.advance();
-                    self.lex_str_expr_text();
+                match self.cursor.peek_next() {
+                    c if is_valid_sas_name_start(c) => {
+                        if !allow_stat {
+                            // In macro context, nested statements cause open code recursion error
+                            // but it seems like they are still half-handled. I.e. they are yanked
+                            // from the string expression like in open code, but not actually
+                            // executed. Still from lexing perspective, it is more robust to
+                            // lex them.
+                            // We have to first save the error info at the last byte offset,
+                            // and only then lex the macro identifier to report at the correct position
+                            let err_info =
+                                self.prep_error_info_at_cur_offset(OPEN_CODE_RECURSION_ERR);
+
+                            self.lex_macro_identifier();
+
+                            if self.buffer.last_token_info().is_some_and(|tok_info| {
+                                is_macro_stat_tok_type(tok_info.token_type())
+                            }) {
+                                self.emit_error_info(err_info);
+                            }
+                        } else {
+                            self.lex_macro_identifier();
+                        }
+                    }
+                    _ => {
+                        // just a percent. consume and continue
+                        self.cursor.advance();
+                        self.lex_str_expr_text();
+                    }
                 }
             }
             EOF_CHAR => {
@@ -2335,7 +2380,7 @@ impl<'src> Lexer<'src> {
 
     fn handle_unterminated_str_expr(&mut self, payload: Payload) {
         debug_assert_eq!(self.cursor.peek(), None);
-        debug_assert_eq!(self.mode(), LexerMode::StringExpr);
+        debug_assert!(matches!(self.mode(), LexerMode::StringExpr(_)));
 
         // This will handle the unterminated string expression
         // Both the case of a real string expression and a string literal
@@ -3118,26 +3163,6 @@ impl<'src> Lexer<'src> {
         true
     }
 
-    /// Checks whether the current % starts a macro comment, statement,
-    /// label or call and lexes them is so.
-    ///
-    /// Returns `true` or `false` indicating whether anything has been lexed.
-    fn lex_macro_any(&mut self) -> bool {
-        debug_assert_eq!(self.cursor.peek(), Some('%'));
-
-        match self.cursor.peek_next() {
-            '*' => {
-                self.lex_macro_comment();
-                true
-            }
-            c if is_valid_sas_name_start(c) => {
-                self.lex_macro_identifier();
-                true
-            }
-            _ => false,
-        }
-    }
-
     /// Similar to `lex_macro_any`, but allowing only macro calls and
     /// auto-emitting error on macro statements. Use in contexts
     /// where only macro calls are appropriate.
@@ -3201,9 +3226,7 @@ impl<'src> Lexer<'src> {
             // ERROR: Open code statement recursion detected.
             // so we emit an error here in addition to missing )
             // that will emit during mode stack pop
-            self.emit_error(ErrorType::SASSessionUnrecoverableError(
-                "ERROR: Open code statement recursion detected.",
-            ));
+            self.emit_error(OPEN_CODE_RECURSION_ERR);
         }
 
         MacroKwType::MacroStat
@@ -3435,7 +3458,12 @@ impl<'src> Lexer<'src> {
     }
 }
 
-/// Lex the source code and return the tokenized buffer
+/// Lex the source code and return the tokenized buffer.
+///
+/// Known differences from the SAS lexer:
+/// - String expressions in macro context are lexed as in open code,
+///  for example literals will be lexed as literals, also SAS lexes them
+///  as macro text expressions, verbatim.
 ///
 /// # Arguments
 /// * `source: &str` - The source code to lex

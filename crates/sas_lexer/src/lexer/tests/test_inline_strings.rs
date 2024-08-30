@@ -4,6 +4,7 @@ use crate::Payload;
 use crate::{error::ErrorType, lex, TokenChannel, TokenType};
 use rstest::rstest;
 
+use super::super::error::OPEN_CODE_RECURSION_ERR;
 use super::super::token_type::{KEYWORDS, MKEYWORDS};
 use super::util::{assert_lexing, mangle_case, ErrorTestCase, TokenTestCase};
 
@@ -278,11 +279,56 @@ fn test_string_expr_with_macro_no_escape(
         ("\"", TokenType::StringExprEnd, Payload::None, "\""),
     ]
 )]
+#[case::with_unlexed_macro_comment("\"%* not a comment;\"",
+    vec![
+        ("\"%* not a comment;\"", TokenType::StringLiteral),        
+    ]
+)]
+#[case::with_unlexed_macro_comment_in_macro("%put \"%* not a comment;\"",
+    vec![
+        ("%put", TokenType::KwmPut),
+        (" ", TokenType::WS),
+        ("\"%* not a comment;\"", TokenType::StringLiteral),        
+        ("", TokenType::SEMI),
+    ]
+)]
+#[case::with_unlexed_cstyle_comment("\"/*not a comment*/\"",
+    vec![
+        ("\"/*not a comment*/\"", TokenType::StringLiteral),        
+    ]
+)]
 fn test_complex_string_expr(
     #[case] contents: &str,
     #[case] expected_token: Vec<impl TokenTestCase>,
 ) {
     assert_lexing(contents, expected_token, NO_ERRORS);
+}
+
+#[rstest]
+#[case::macro_stat_inside("%put \"%let v=1;\";",
+    vec![
+        ("%put", TokenType::KwmPut),
+        (" ", TokenType::WS),
+        ("\"", TokenType::StringExprStart),        
+        ("%let", TokenType::KwmLet),
+        (" ", TokenType::WS),
+        ("v", TokenType::Identifier),
+        ("=", TokenType::ASSIGN),
+        ("1", TokenType::MacroString),
+        (";", TokenType::SEMI),
+        ("\"", TokenType::StringExprEnd),
+        (";", TokenType::SEMI),        
+        ],
+    vec![
+        (OPEN_CODE_RECURSION_ERR, 6),
+        ]
+)]
+fn test_string_expr_error_recovery(
+    #[case] contents: &str,
+    #[case] expected_token: Vec<impl TokenTestCase>,
+    #[case] expected_error: Vec<impl ErrorTestCase>,
+) {
+    assert_lexing(contents, expected_token, expected_error);
 }
 
 #[rstest]
@@ -1396,7 +1442,7 @@ fn test_macro_str_call(#[case] contents: &str, #[case] expected_token: Vec<impl 
         (";", TokenType::SEMI, TokenChannel::DEFAULT),
         ],
     vec![
-        (ErrorType::SASSessionUnrecoverableError("ERROR: Open code statement recursion detected."), 6),
+        (OPEN_CODE_RECURSION_ERR, 6),
         (ErrorType::MissingExpectedChar(')'), 6)
         ]
 )]
