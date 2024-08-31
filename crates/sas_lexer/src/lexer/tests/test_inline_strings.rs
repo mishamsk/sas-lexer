@@ -733,13 +733,24 @@ fn test_numeric_literal_range() {
         (";", TokenType::SEMI),
         ]
 )]
+#[case::text_expr_name_xid_cont_after_macro("%let &mv.9=1;",
+    vec![
+        ("%let", TokenType::KwmLet),
+        (" ", TokenType::WS),
+        ("&mv.", TokenType::MacroVarExpr),
+        ("9", TokenType::MacroString),
+        ("=", TokenType::ASSIGN),
+        ("1", TokenType::MacroString),        
+        (";", TokenType::SEMI),
+        ]
+)]
 #[case::dot_delim_mvar_in_name("%let a&b.c=2;",
     vec![
         ("%let", TokenType::KwmLet),
         (" ", TokenType::WS),
         ("a", TokenType::Identifier),
         ("&b.", TokenType::MacroVarExpr),
-        ("c", TokenType::Identifier),
+        ("c", TokenType::MacroString),
         ("=", TokenType::ASSIGN),
         ("2", TokenType::MacroString),
         (";", TokenType::SEMI),
@@ -838,7 +849,7 @@ fn test_numeric_literal_range() {
         ("%t", TokenType::MacroIdentifier),
         ("(", TokenType::LPAREN),
         (")", TokenType::RPAREN),
-        ("a2", TokenType::Identifier),
+        ("a2", TokenType::MacroString),
         ("=", TokenType::ASSIGN),
         ("1", TokenType::MacroString),
         (";", TokenType::SEMI),
@@ -871,7 +882,7 @@ fn test_numeric_literal_range() {
         (" ", TokenType::WS),
         ("_9", TokenType::Identifier),
         ("/*com*/", TokenType::CStyleComment),
-        ("v", TokenType::Identifier),
+        ("v", TokenType::MacroString),
         ("=", TokenType::ASSIGN),
         ("1", TokenType::MacroString),
         (";", TokenType::SEMI),
@@ -935,7 +946,7 @@ fn test_numeric_literal_range() {
        (" " ,TokenType::WS),
        ("(" ,TokenType::LPAREN),
        (")" ,TokenType::RPAREN),
-       ("_post" ,TokenType::Identifier),
+       ("_post" ,TokenType::MacroString),
        ("=" ,TokenType::ASSIGN),
        ("v" ,TokenType::MacroString),
        (";" ,TokenType::SEMI),
