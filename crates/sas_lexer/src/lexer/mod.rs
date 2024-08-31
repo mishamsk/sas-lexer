@@ -1069,6 +1069,13 @@ impl<'src> Lexer<'src> {
 
                     if error.is_none() {
                         self.emit_token(TokenChannel::DEFAULT, tok_type, payload);
+                    } else {
+                        // Emit as macro string
+                        self.emit_token(
+                            TokenChannel::DEFAULT,
+                            TokenType::MacroString,
+                            Payload::None,
+                        );
                     };
                 } else {
                     // Try integer/float depending on the flag
@@ -1105,6 +1112,13 @@ impl<'src> Lexer<'src> {
                                 );
                             }
                         }
+                    } else {
+                        // Emit as macro string
+                        self.emit_token(
+                            TokenChannel::DEFAULT,
+                            TokenType::MacroString,
+                            Payload::None,
+                        );
                     };
                 }
             } else {
@@ -3472,7 +3486,7 @@ impl<'src> Lexer<'src> {
                 self.push_mode(LexerMode::MacroEval(
                     MacroEvalExprFlags::new(
                         kw_tok_type == TokenType::KwmSysevalf,
-                        false,
+                        kw_tok_type == TokenType::KwmSysevalf,
                         false,
                         false,
                     ),
