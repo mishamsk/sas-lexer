@@ -1060,8 +1060,11 @@ impl<'src> Lexer<'src> {
 
         if macro_string.len() > 0 {
             if try_lexing_numeric {
-                // Try parsing
-                if macro_string.as_bytes().ends_with(&[b'x', b'X']) {
+                // Try parsing.
+                // Safety: we've checked above that the string is not empty
+                if [b'x', b'X'].contains(&macro_string.as_bytes()[macro_string.len() - 1])
+                    && (b'0'..=b'9').contains(&macro_string.as_bytes()[0])
+                {
                     // Try hex
                     let ((tok_type, payload), error) = parse_numeric_hex_str(
                         macro_string.get(..macro_string.len() - 1).unwrap_or(""),

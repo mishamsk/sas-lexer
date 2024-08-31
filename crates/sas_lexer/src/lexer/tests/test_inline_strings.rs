@@ -1840,36 +1840,36 @@ fn test_macro_goto(#[case] contents: &str, #[case] expected_token: Vec<impl Toke
 }
 
 #[rstest]
-#[case("**", TokenType::STAR2)]
-#[case("+", TokenType::PLUS)]
-#[case("-", TokenType::MINUS)]
-#[case("¬", TokenType::NOT)]
-#[case("^", TokenType::NOT)]
-#[case("~", TokenType::NOT)]
-#[case("nOt", TokenType::KwNOT)]
-#[case("*", TokenType::STAR)]
-#[case("/", TokenType::FSLASH)]
-#[case("<", TokenType::LT)]
-#[case("Lt", TokenType::KwLT)]
-#[case("<=", TokenType::LE)]
-#[case("Le", TokenType::KwLE)]
-#[case("=", TokenType::ASSIGN)]
-#[case("Eq", TokenType::KwEQ)]
-#[case("#", TokenType::HASH)] // IN op in sas macro
-#[case("In", TokenType::KwIN)]
-#[case("¬=", TokenType::NE)]
-#[case("^=", TokenType::NE)]
-#[case("~=", TokenType::NE)]
-#[case("Ne", TokenType::KwNE)]
-#[case(">", TokenType::GT)]
-#[case("Gt", TokenType::KwGT)]
-#[case(">=", TokenType::GE)]
-#[case("Ge", TokenType::KwGE)]
-#[case("&", TokenType::AMP)] // AND op in sas macro
-#[case("&&&", TokenType::AMP)] // multiples should also work
-#[case("AnD", TokenType::KwAND)]
-#[case("|", TokenType::PIPE)] // OR op in sas macro
-#[case("Or", TokenType::KwOR)]
+#[case::star2_op("**", TokenType::STAR2)]
+#[case::plus_op("+", TokenType::PLUS)]
+#[case::minus_op("-", TokenType::MINUS)]
+#[case::not_op("¬", TokenType::NOT)]
+#[case::not_op("^", TokenType::NOT)]
+#[case::not_op("~", TokenType::NOT)]
+#[case::kwnot_op("nOt", TokenType::KwNOT)]
+#[case::star_op("*", TokenType::STAR)]
+#[case::fslash_op("/", TokenType::FSLASH)]
+#[case::lt_op("<", TokenType::LT)]
+#[case::kwlt_op("Lt", TokenType::KwLT)]
+#[case::le_op("<=", TokenType::LE)]
+#[case::kwle_op("Le", TokenType::KwLE)]
+#[case::assign_op("=", TokenType::ASSIGN)]
+#[case::kweq_op("Eq", TokenType::KwEQ)]
+#[case::hash_op("#", TokenType::HASH)] // IN op in sas macro
+#[case::kwin_op("In", TokenType::KwIN)]
+#[case::ne_op("¬=", TokenType::NE)]
+#[case::ne_op("^=", TokenType::NE)]
+#[case::ne_op("~=", TokenType::NE)]
+#[case::kwne_op("Ne", TokenType::KwNE)]
+#[case::gt_op(">", TokenType::GT)]
+#[case::kwgt_op("Gt", TokenType::KwGT)]
+#[case::ge_op(">=", TokenType::GE)]
+#[case::kwge_op("Ge", TokenType::KwGE)]
+#[case::amp_op("&", TokenType::AMP)] // AND op in sas macro
+#[case::amp_op("&&&", TokenType::AMP)] // multiples should also work
+#[case::kwand_op("AnD", TokenType::KwAND)]
+#[case::pipe_op("|", TokenType::PIPE)] // OR op in sas macro
+#[case::kwor_op("Or", TokenType::KwOR)]
 fn test_macro_integer_eval_expr_all_ops_simple(
     #[case] op_str: &str,
     #[case] expected_op_token: TokenType,
@@ -1925,16 +1925,16 @@ fn test_macro_integer_eval_expr_not_real_ops(#[case] op_str: &str) {
 }
 
 #[rstest]
-#[case("not")]
-#[case("lt")]
-#[case("le")]
-#[case("eq")]
-#[case("in")]
-#[case("ne")]
-#[case("gt")]
-#[case("ge")]
-#[case("and")]
-#[case("or")]
+#[case::not_mnemonic("not")]
+#[case::lt_mnemonic("lt")]
+#[case::le_mnemonic("le")]
+#[case::eq_mnemonic("eq")]
+#[case::in_mnemonic("in")]
+#[case::ne_mnemonic("ne")]
+#[case::gt_mnemonic("gt")]
+#[case::ge_mnemonic("ge")]
+#[case::and_mnemonic("and")]
+#[case::or_mnemonic("or")]
 fn test_macro_strings_with_mnemonics_eval_expr(#[case] op_str: &str) {
     assert_lexing(
         format!("%eVaL(pre{op_str} gt {op_str}post and p{op_str}e)").as_str(),
@@ -1968,26 +1968,62 @@ fn test_macro_strings_with_mnemonics_eval_expr(#[case] op_str: &str) {
     );
 }
 
-// fn test_macro_strings_with_mnemonics_eval_expr(
-//     #[case] expr_str: &str,
-//     #[case] expected_tokens: Vec<impl TokenTestCase>,
-// ) {
-//     let mut all_expected_tokens = vec![
-//         ("%eval", TokenType::KwmEval, Payload::None),
-//         ("(", TokenType::LPAREN, Payload::None),
-//     ];
+#[rstest]
+#[case::not_integer_1("1 2 ~= 3 4", 
+    vec![
+        ("1 2", TokenType::MacroString, Payload::None),
+        (" ", TokenType::WS, Payload::None),            
+        ("~=", TokenType::NE, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("3 4", TokenType::MacroString, Payload::None),
+    ]
+)]
+#[case::not_integer_2("1.2 ~= 3.4", 
+    vec![
+        ("1.2", TokenType::MacroString, Payload::None),
+        (" ", TokenType::WS, Payload::None),            
+        ("~=", TokenType::NE, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("3.4", TokenType::MacroString, Payload::None),
+    ]
+)]
+#[case::hex_integer_literals("0FFx < 9ffX",
+    vec![
+        ("0FFx", TokenType::IntegerLiteral, Payload::Integer(255)),
+        (" ", TokenType::WS, Payload::None),            
+        ("<", TokenType::LT, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("9ffX", TokenType::IntegerLiteral, Payload::Integer(2559)),        
+    ]
+)]
+#[case::not_hex_integer_literals("0_FFx eq fffX",
+    vec![
+        ("0_FFx", TokenType::MacroString, Payload::None),
+        (" ", TokenType::WS, Payload::None),            
+        ("eq", TokenType::KwEQ, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("fffX", TokenType::MacroString, Payload::None),        
+    ]
+)]
+fn test_macro_eval_expr(
+    #[case] expr_str: &str,
+    #[case] expected_tokens: Vec<(&str, TokenType, Payload)>,
+) {
+    let mut all_expected_tokens = vec![
+        ("%eval", TokenType::KwmEval, Payload::None),
+        ("(", TokenType::LPAREN, Payload::None),
+    ];
 
-//     all_expected_tokens.extend(expected_tokens);
-//     all_expected_tokens.push((")", TokenType::RPAREN, Payload::None));
+    all_expected_tokens.extend(expected_tokens);
+    all_expected_tokens.push((")", TokenType::RPAREN, Payload::None));
 
-//     assert_lexing(
-//         format!("%eval({expr_str})").as_str(),
-//         all_expected_tokens,
-//         NO_ERRORS,
-//     );
-// }
+    assert_lexing(
+        format!("%eval({expr_str})").as_str(),
+        all_expected_tokens,
+        NO_ERRORS,
+    );
+}
 // TODO:
-// - test that mnemonics (such as ne) as part of a string are not lexed as operators accidently
 // - ws around operators should be hidden but between parts of a operand text expression - not
 // - something that starts as integer, but is not (e.g. `1 2` or any decimal in regular eval ctx) should become a string, not integer of float
 // - hex literals should be supported as integers
