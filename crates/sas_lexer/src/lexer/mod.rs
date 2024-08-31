@@ -1229,7 +1229,7 @@ impl<'src> Lexer<'src> {
                     }
                 }
             }
-            c if is_valid_sas_name_start(c) => {
+            c if is_valid_sas_name_start(c) || (!first && is_xid_continue(c)) => {
                 // A macro string in place of macro identifier
                 // Consume as identifier, no reserved words here,
                 // so we do not need the full lex_identifier logic
@@ -1237,7 +1237,16 @@ impl<'src> Lexer<'src> {
 
                 // Add token, but do not pop the mode, as we may have a full macro text expression
                 // that generates an identifier
-                self.emit_token(TokenChannel::DEFAULT, TokenType::Identifier, Payload::None);
+                self.emit_token(
+                    TokenChannel::DEFAULT,
+                    // True identifier is only possible if this is the first (and only) token.
+                    if first {
+                        TokenType::Identifier
+                    } else {
+                        TokenType::MacroString
+                    },
+                    Payload::None,
+                );
 
                 update_mode(self);
             }
@@ -3422,10 +3431,34 @@ impl<'src> Lexer<'src> {
             TokenType::KwmEnd | TokenType::KwmReturn => {
                 // Super easy, just expect the closing semi
                 self.push_mode(LexerMode::ExpectSemiOrEOF);
+                self.push_mode(LexerMode::WsOrCStyleCommentOnly);
             }
             TokenType::KwmPut | TokenType::KwmGoto => {
                 self.push_mode(LexerMode::ExpectSemiOrEOF);
                 self.push_mode(LexerMode::MacroSemiTerminatedTextExpr);
+                self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+            }
+            TokenType::KwmUntil | TokenType::KwmWhile => {
+                self.push_mode(LexerMode::ExpectSemiOrEOF);
+                self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+                self.push_mode(LexerMode::ExpectSymbol(
+                    ')',
+                    TokenType::RPAREN,
+                    TokenChannel::DEFAULT,
+                ));
+                // The handler fo arguments will push the mode for the comma, etc.
+                self.push_mode(LexerMode::MacroEval(
+                    MacroEvalExprFlags::new(false, false, false, false),
+                    0,
+                ));
+                // Leading insiginificant WS before the first argument
+                self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+                self.push_mode(LexerMode::ExpectSymbol(
+                    '(',
+                    TokenType::LPAREN,
+                    TokenChannel::DEFAULT,
+                ));
+                // Leading insiginificant WS before opening parenthesis
                 self.push_mode(LexerMode::WsOrCStyleCommentOnly);
             }
             TokenType::KwmLet => {
