@@ -1890,22 +1890,6 @@ fn test_macro_integer_eval_expr_all_ops_simple(
     );
 }
 
-// TODO:
-// - test that mnemonics as part of str are not lexed
-// - ws around ops vs in the operands
-// - something that starts as integer, but is not (e.g. `1 2` or any decimal in regular eval ctx)
-// X other symbols are not lexed as symbols
-// - inline macro, string literals and expressions
-// - if implemented - the "empty macro string"
-// - expression delimiters (parens, commas) and ws around them
-// - %sysevalf mode
-// - at least one test that eval mode is in all expected places (stats etc)
-// - inline comments
-// - complex nested expressions with () etc
-
-// #[case("(", TokenType::LPAREN)]
-// #[case(")", TokenType::RPAREN)]
-
 #[rstest]
 #[case(";")]
 #[case("%")]
@@ -1939,3 +1923,81 @@ fn test_macro_integer_eval_expr_not_real_ops(#[case] op_str: &str) {
         NO_ERRORS,
     );
 }
+
+#[rstest]
+#[case("not")]
+#[case("lt")]
+#[case("le")]
+#[case("eq")]
+#[case("in")]
+#[case("ne")]
+#[case("gt")]
+#[case("ge")]
+#[case("and")]
+#[case("or")]
+fn test_macro_strings_with_mnemonics_eval_expr(#[case] op_str: &str) {
+    assert_lexing(
+        format!("%eVaL(pre{op_str} gt {op_str}post and p{op_str}e)").as_str(),
+        vec![
+            ("%eVaL", TokenType::KwmEval, Payload::None),
+            ("(", TokenType::LPAREN, Payload::None),
+            (
+                format!("pre{op_str}").as_ref(),
+                TokenType::MacroString,
+                Payload::None,
+            ),
+            (" ", TokenType::WS, Payload::None),
+            ("gt", TokenType::KwGT, Payload::None),
+            (" ", TokenType::WS, Payload::None),
+            (
+                format!("{op_str}post").as_ref(),
+                TokenType::MacroString,
+                Payload::None,
+            ),
+            (" ", TokenType::WS, Payload::None),
+            ("and", TokenType::KwAND, Payload::None),
+            (" ", TokenType::WS, Payload::None),
+            (
+                format!("p{op_str}e").as_ref(),
+                TokenType::MacroString,
+                Payload::None,
+            ),
+            (")", TokenType::RPAREN, Payload::None),
+        ],
+        NO_ERRORS,
+    );
+}
+
+// fn test_macro_strings_with_mnemonics_eval_expr(
+//     #[case] expr_str: &str,
+//     #[case] expected_tokens: Vec<impl TokenTestCase>,
+// ) {
+//     let mut all_expected_tokens = vec![
+//         ("%eval", TokenType::KwmEval, Payload::None),
+//         ("(", TokenType::LPAREN, Payload::None),
+//     ];
+
+//     all_expected_tokens.extend(expected_tokens);
+//     all_expected_tokens.push((")", TokenType::RPAREN, Payload::None));
+
+//     assert_lexing(
+//         format!("%eval({expr_str})").as_str(),
+//         all_expected_tokens,
+//         NO_ERRORS,
+//     );
+// }
+// TODO:
+// - test that mnemonics (such as ne) as part of a string are not lexed as operators accidently
+// - ws around operators should be hidden but between parts of a operand text expression - not
+// - something that starts as integer, but is not (e.g. `1 2` or any decimal in regular eval ctx) should become a string, not integer of float
+// - hex literals should be supported as integers
+// - decimals should be sexed as float in sysevalf, the rest should match eval
+// - in sysevalf, comma should terminate the expression and second argument for the function should be supported (vexed as macro string)
+// - inline macro calls and macro vars, string literals and expressions all should be correctly lexed
+// - for logical operators (such as <, >, ~=, =) if left or right operand is missing (just whitespace) a token with MacroStringEmpty token type should be emitted with no text
+// - expression delimiters (parens, commas) should also have hidden WS around them
+// - tests with inline comments
+// - tests for non-trivial complex expressions with parenthesized, mixture of mnemonics, arithmetic and logical operands, whitespace and comments etc
+
+// #[case("(", TokenType::LPAREN)]
+// #[case(")", TokenType::RPAREN)]
