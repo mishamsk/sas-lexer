@@ -126,10 +126,16 @@ enum LexerMode {
     /// See `MacroEvalExprFlags` for the packed flags.
     /// u32 value is the current parenthesis nesting level, see `MacroCallArgOrValue`
     MacroEval(MacroEvalExprFlags, u32),
-    /// Mode for lexing right after %let/%local/%global, where
+    /// Mode for dispatching various types of macro DO statements.
+    /// Nothing is lexed in this mode, rather the stack is populated
+    /// based on the lookahead.
+    MacroDo,
+    /// Mode for lexing right after %let/%local/%global/%do, where
     /// we expect a variable name expression. Boolean flag indicates if we
-    /// have found at least one token of the variable name
-    MacroLetVarName(bool),
+    /// have found at least one token of the variable name.
+    /// ErrorType is used to supply relevant error message, if any is
+    /// emitted by SAS if no name is found.
+    MacroVarNameExpr(bool, Option<ErrorType>),
     /// Mode for lexing unrestricted macro text expressions terminated by semi.
     /// These are used for %let initializations, %put, etc.
     MacroSemiTerminatedTextExpr,
@@ -448,8 +454,9 @@ impl<'src> Lexer<'src> {
                     // emit an error and the token
                     self.lex_expected_token(None, *expected_char, *tok_type, *tok_channel);
                 }
-                LexerMode::ExpectSemiOrEOF => {
-                    // If we were expecting a semicolon or EOF - emit a virtual semicolon for parser convenience
+                LexerMode::ExpectSemiOrEOF | LexerMode::MacroDo => {
+                    // If we were expecting a semicolon or EOF - emit a virtual semicolon for parser convenience.
+                    // The trailing %DO behaves the same way
                     self.start_token();
                     self.emit_token(TokenChannel::DEFAULT, TokenType::SEMI, Payload::None);
                 }
@@ -487,11 +494,11 @@ impl<'src> Lexer<'src> {
                     // This may happen if we have unbalanced `"` or `'` as the last character
                     self.handle_unterminated_str_expr(Payload::None);
                 }
-                LexerMode::MacroLetVarName(_) => {
-                    // This may happen if we have %let without a variable name in the end
-                    self.emit_error(ErrorType::MissingExpected(
-                        "ERROR: Expecting a variable name after %LET.",
-                    ));
+                LexerMode::MacroVarNameExpr(_, err) => {
+                    // This may happen if we have %let without a variable name in the end or similar
+                    if let Some(err) = err {
+                        self.emit_error(*err);
+                    }
                 }
             }
 
@@ -596,8 +603,11 @@ impl<'src> Lexer<'src> {
             LexerMode::MacroCallValue(pnl) => {
                 self.dispatch_macro_call_arg_or_value(next_char, pnl, false)
             }
-            LexerMode::MacroLetVarName(found_name) => {
-                self.dispatch_macro_ident_expr(next_char, !found_name)
+            LexerMode::MacroDo => {
+                self.dispatch_macro_do(next_char);
+            }
+            LexerMode::MacroVarNameExpr(found_name, err) => {
+                self.dispatch_macro_name_expr(next_char, !found_name, err)
             }
             LexerMode::MacroSemiTerminatedTextExpr => {
                 self.dispatch_macro_semi_term_text_expr(next_char)
@@ -1171,17 +1181,19 @@ impl<'src> Lexer<'src> {
         }
     }
 
-    fn dispatch_macro_ident_expr(&mut self, next_char: char, first: bool) {
-        debug_assert!(matches!(self.mode(), LexerMode::MacroLetVarName(_)));
+    fn dispatch_macro_name_expr(&mut self, next_char: char, first: bool, err: Option<ErrorType>) {
+        debug_assert!(
+            matches!(self.mode(), LexerMode::MacroVarNameExpr(f, e) if f == !first && e == err)
+        );
 
         self.start_token();
 
         let pop_mode_and_check = |lexer: &mut Lexer| {
             if first {
                 // This is straight from what SAS emits
-                lexer.emit_error(ErrorType::MissingExpected(
-                    "ERROR: Expecting a variable name after %LET.",
-                ));
+                if let Some(err) = err {
+                    lexer.emit_error(err);
+                }
             }
 
             lexer.pop_mode();
@@ -1194,7 +1206,7 @@ impl<'src> Lexer<'src> {
         let start_mode_index = self.mode_stack.len() - 1;
 
         let update_mode = |lexer: &mut Lexer| {
-            if let Some(LexerMode::MacroLetVarName(found_name)) =
+            if let Some(LexerMode::MacroVarNameExpr(found_name, _)) =
                 lexer.mode_stack.get_mut(start_mode_index)
             {
                 *found_name = true;
@@ -3352,6 +3364,80 @@ impl<'src> Lexer<'src> {
         self.dispatch_macro_call_or_stat(kw_tok_type);
     }
 
+    /// Performs look-ahead to disambiguate between:
+    /// - %do;
+    /// - %do while;
+    /// - %do until;
+    /// - %do var=...;
+    ///
+    /// Sets the appropriate mode stack for the following tokens.
+    fn dispatch_macro_do(&mut self, next_char: char) {
+        debug_assert!(self
+            .buffer
+            .last_token_info()
+            .is_some_and(|ti| ti.token_type() == TokenType::KwmDo),);
+
+        // Whatever goes next, this mode is done
+        self.pop_mode();
+
+        // We need to look ahead to determine the type of the %do statement.
+        // We are already past all WS and comments after the %do keyword
+        match next_char {
+            ';' => {
+                // %do;
+                self.push_mode(LexerMode::ExpectSemiOrEOF);
+            }
+            '%' if is_valid_sas_name_start(self.cursor.peek_next()) => {
+                self.lex_macro_identifier();
+
+                // This may be both %do while/until or %do %mcall_that_creates_iter_var
+                // so we need to fork on the type of the last token. For until/while
+                // we do nothin, for the macro call we
+                // do the same as for all other symbols, except that we know we've
+                // found at least the start of the variable name
+                if self.buffer.last_token_info().is_some_and(|ti| {
+                    ![TokenType::KwmUntil, TokenType::KwmWhile].contains(&ti.token_type())
+                }) {
+                    self.push_mode(LexerMode::MacroEval(
+                        MacroEvalExprFlags::new(false, false, true, true),
+                        0,
+                    ));
+                    self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+                    self.push_mode(LexerMode::ExpectSymbol(
+                        '=',
+                        TokenType::ASSIGN,
+                        TokenChannel::DEFAULT,
+                    ));
+                    self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+                    // Note the difference from below. We aready lexed one part of the var name expr,
+                    // so we pass `true` and do not pass error, since it won't ever be emitted anyway
+                    self.push_mode(LexerMode::MacroVarNameExpr(true, None));
+                }
+            }
+            _ => {
+                // %do var=...; A mix of %let and %if expression
+                self.push_mode(LexerMode::MacroEval(
+                    MacroEvalExprFlags::new(false, false, true, true),
+                    0,
+                ));
+                self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+                self.push_mode(LexerMode::ExpectSymbol(
+                    '=',
+                    TokenType::ASSIGN,
+                    TokenChannel::DEFAULT,
+                ));
+                self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+                self.push_mode(LexerMode::MacroVarNameExpr(
+                    false,
+                    Some(ErrorType::MissingExpected(
+                        "ERROR: An unexpected semicolon occurred in the %DO statement.\n\
+                        ERROR: A dummy macro will be compiled.",
+                    )),
+                ));
+            }
+        }
+    }
+
     fn dispatch_macro_call_or_stat(&mut self, kw_tok_type: TokenType) {
         // Emit the token for the keyword itself
 
@@ -3438,6 +3524,21 @@ impl<'src> Lexer<'src> {
                 self.push_mode(LexerMode::MacroSemiTerminatedTextExpr);
                 self.push_mode(LexerMode::WsOrCStyleCommentOnly);
             }
+            TokenType::KwmDo => {
+                // First skip WS and comments, then put lexer into do dispatch mode
+                self.push_mode(LexerMode::MacroDo);
+                self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+            }
+            TokenType::KwmTo | TokenType::KwmBy => {
+                self.push_mode(LexerMode::ExpectSemiOrEOF);
+                // The handler fo arguments will push the mode for the comma, etc.
+                self.push_mode(LexerMode::MacroEval(
+                    MacroEvalExprFlags::new(false, false, kw_tok_type == TokenType::KwmTo, true),
+                    0,
+                ));
+                // Leading insiginificant WS before opening parenthesis
+                self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+            }
             TokenType::KwmUntil | TokenType::KwmWhile => {
                 self.push_mode(LexerMode::ExpectSemiOrEOF);
                 self.push_mode(LexerMode::WsOrCStyleCommentOnly);
@@ -3478,7 +3579,12 @@ impl<'src> Lexer<'src> {
                     TokenChannel::DEFAULT,
                 ));
                 self.push_mode(LexerMode::WsOrCStyleCommentOnly);
-                self.push_mode(LexerMode::MacroLetVarName(false));
+                self.push_mode(LexerMode::MacroVarNameExpr(
+                    false,
+                    Some(ErrorType::MissingExpected(
+                        "ERROR: Expecting a variable name after %LET.",
+                    )),
+                ));
                 self.push_mode(LexerMode::WsOrCStyleCommentOnly);
             }
             TokenType::KwmIf => {
