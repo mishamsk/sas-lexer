@@ -2005,6 +2005,78 @@ fn test_macro_strings_with_mnemonics_eval_expr(#[case] op_str: &str) {
         ("fffX", TokenType::MacroString, Payload::None),        
     ]
 )]
+#[case::ws_handling_str_literals("'a' 'b' = 'c'",
+    vec![
+        ("'a'", TokenType::StringLiteral, Payload::None),
+        (" ", TokenType::MacroString, Payload::None),            
+        ("'b'", TokenType::StringLiteral, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("=", TokenType::ASSIGN, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("'c'", TokenType::StringLiteral, Payload::None),
+    ]
+)]
+#[case::ws_handling_and_str_expr("\"a&mv%m (/*c*/)\" &mv = a",
+    vec![
+        ("\"", TokenType::StringExprStart, Payload::None),
+        ("a", TokenType::StringExprText, Payload::None),
+        ("&mv", TokenType::MacroVarExpr, Payload::None),
+        ("%m", TokenType::MacroIdentifier, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("(", TokenType::LPAREN, Payload::None),
+        ("/*c*/", TokenType::CStyleComment, Payload::None),
+        (")", TokenType::RPAREN, Payload::None),
+        ("\"", TokenType::StringExprEnd, Payload::None),
+        (" ", TokenType::MacroString, Payload::None),
+        ("&mv", TokenType::MacroVarExpr, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("=", TokenType::ASSIGN, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("a", TokenType::MacroString, Payload::None),
+    ]
+)]
+#[case::int_broken_by_comment("1/*c*/2",
+    vec![
+        ("1", TokenType::MacroString, Payload::None),
+        ("/*c*/", TokenType::CStyleComment, Payload::None),
+        ("2", TokenType::IntegerLiteral, Payload::Integer(2)),
+    ]
+)]
+#[case::all_in_expr(" (\n🔥>  &m.v)*/*c*/(\t3 * ( 5-0ffx) ) eq %m.suf \"\"", 
+    vec![
+        (" ", TokenType::WS, Payload::None),
+        ("(", TokenType::LPAREN, Payload::None),
+        ("\n", TokenType::WS, Payload::None),
+        ("🔥", TokenType::MacroString, Payload::None),
+        (">", TokenType::GT, Payload::None),
+        ("  ", TokenType::WS, Payload::None),
+        ("&m.", TokenType::MacroVarExpr, Payload::None),
+        ("v", TokenType::MacroString, Payload::None),
+        (")", TokenType::RPAREN, Payload::None),
+        ("*", TokenType::STAR, Payload::None),
+        ("/*c*/", TokenType::CStyleComment, Payload::None),
+        ("(", TokenType::LPAREN, Payload::None),
+        ("\t", TokenType::WS, Payload::None),
+        ("3", TokenType::IntegerLiteral, Payload::Integer(3)),
+        (" ", TokenType::WS, Payload::None),
+        ("*", TokenType::STAR, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("(", TokenType::LPAREN, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("5", TokenType::IntegerLiteral, Payload::Integer(5)),
+        ("-", TokenType::MINUS, Payload::None),
+        ("0ffx", TokenType::IntegerLiteral, Payload::Integer(255)),
+        (")", TokenType::RPAREN, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        (")", TokenType::RPAREN, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("eq", TokenType::KwEQ, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("%m", TokenType::MacroIdentifier, Payload::None),
+        (".suf ", TokenType::MacroString, Payload::None),        
+        ("\"\"", TokenType::StringLiteral, Payload::None),
+    ]
+)]
 fn test_macro_eval_expr(
     #[case] expr_str: &str,
     #[case] expected_tokens: Vec<(&str, TokenType, Payload)>,
@@ -2025,15 +2097,11 @@ fn test_macro_eval_expr(
 }
 // TODO:
 // - ws around operators should be hidden but between parts of a operand text expression - not
-// - something that starts as integer, but is not (e.g. `1 2` or any decimal in regular eval ctx) should become a string, not integer of float
-// - hex literals should be supported as integers
 // - decimals should be sexed as float in sysevalf, the rest should match eval
 // - in sysevalf, comma should terminate the expression and second argument for the function should be supported (vexed as macro string)
 // - inline macro calls and macro vars, string literals and expressions all should be correctly lexed
 // - for logical operators (such as <, >, ~=, =) if left or right operand is missing (just whitespace) a token with MacroStringEmpty token type should be emitted with no text
 // - expression delimiters (parens, commas) should also have hidden WS around them
-// - tests with inline comments
-// - tests for non-trivial complex expressions with parenthesized, mixture of mnemonics, arithmetic and logical operands, whitespace and comments etc
 
 // #[case("(", TokenType::LPAREN)]
 // #[case(")", TokenType::RPAREN)]
