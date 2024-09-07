@@ -139,7 +139,7 @@ pub enum TokenType {
     KwmQLowcase, // QLOWCASE
     KwmQScan,    // QSCAN
     KwmQSubstr,  // QSUBSTR
-    KwmQsysfunc, // QSYSFUNC
+    KwmQSysfunc, // QSYSFUNC
     KwmQUpcase,  // QUPCASE
     // NLS functions (masking)
     KwmQKCmpres, // QKCMPRES
