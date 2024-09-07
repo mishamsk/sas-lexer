@@ -1,5 +1,5 @@
 use phf::phf_map;
-use sas_lexer_macro::{FromU16, KeywordMap, MacroKeywordMap, ToU16};
+use sas_lexer_macro::{KeywordMap, MacroKeywordMap};
 use strum::{Display, EnumCount, EnumIter};
 
 /// What you expect - the token types.
@@ -11,21 +11,11 @@ use strum::{Display, EnumCount, EnumIter};
 /// Naming also is used to autogenerate static hash maps
 /// for regular keywords and macro keywords.
 #[derive(
-    Debug,
-    PartialEq,
-    Eq,
-    Clone,
-    Copy,
-    EnumCount,
-    EnumIter,
-    ToU16,
-    FromU16,
-    Display,
-    KeywordMap,
-    MacroKeywordMap,
+    Debug, PartialEq, Eq, Clone, Copy, EnumCount, EnumIter, Display, KeywordMap, MacroKeywordMap,
 )]
 #[kw_map_name = "KEYWORDS"]
 #[kwm_map_name = "MKEYWORDS"]
+#[repr(u16)]
 pub enum TokenType {
     EOF,
     UNKNOWN,
@@ -336,33 +326,6 @@ pub enum TokenType {
     KwPut,
 }
 
-#[derive(Default)]
-pub(super) struct TokenFlags {
-    bits: [u64; (TokenType::COUNT + 63) / 64],
-}
-
-impl TokenFlags {
-    pub(super) fn set(&mut self, tok_type: TokenType) {
-        let index = tok_type as u16;
-        let (word, bit) = ((index / 64) as usize, index % 64);
-
-        assert!(word < self.bits.len());
-
-        self.bits[word] |= 1 << bit;
-    }
-
-    pub(super) fn contains(&self, tok_type: TokenType) -> bool {
-        let index = tok_type as u16;
-        let (word, bit) = ((index / 64) as usize, index % 64);
-
-        assert!(word < self.bits.len());
-
-        self.bits[word] & (1 << bit) != 0
-    }
-
-    // Add other useful methods if needed
-}
-
 pub(super) fn parse_keyword<S: AsRef<str>>(ident: S) -> Option<TokenType> {
     KEYWORDS.get(ident.as_ref()).copied()
 }
@@ -477,54 +440,13 @@ mod tests {
     #[test]
     fn test_eof_u16_conversion() {
         assert_eq!(TokenType::EOF as u16, 0);
-        assert_eq!(Some(TokenType::EOF), TokenType::from_u16(0));
     }
 
     #[test]
     fn test_all_tokens_round_trip() {
-        for i in 0..=u16::MAX {
-            match TokenType::from_u16(i) {
-                Some(token) => {
-                    assert_eq!(i, token as u16);
-                }
-                None => {
-                    assert_eq!(
-                        i as usize,
-                        TokenType::COUNT,
-                        "Unexpected number of tokens: {i}"
-                    );
-                    break;
-                }
-            };
-        }
-    }
-
-    #[test]
-    fn test_token_flags() {
-        // Test setting and checking individual flags
-        for token_type in TokenType::iter() {
-            let mut flags = TokenFlags::default();
-            flags.set(token_type);
-
-            assert!(flags.contains(token_type));
-
-            for other_token_type in TokenType::iter() {
-                if other_token_type != token_type {
-                    assert!(!flags.contains(other_token_type));
-                }
-            }
-        }
-
-        // Do a spot test for a few tokens
-        let mut flags = TokenFlags::default();
-        flags.set(TokenType::KwEQ);
-        flags.set(TokenType::KwIN);
-        flags.set(TokenType::KwAllVar);
-
-        assert!(flags.contains(TokenType::KwEQ));
-        assert!(flags.contains(TokenType::KwIN));
-        assert!(flags.contains(TokenType::KwAllVar));
-        assert!(!flags.contains(TokenType::KwCorr));
-        assert!(!flags.contains(TokenType::KwmAbort));
+        assert_eq!(
+            (0..TokenType::COUNT as u16).into_iter().collect::<Vec<_>>(),
+            TokenType::iter().map(|t| t as u16).collect::<Vec<_>>()
+        );
     }
 }

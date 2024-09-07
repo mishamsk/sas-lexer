@@ -384,13 +384,10 @@ impl WorkTokenizedBuffer {
     }
 
     pub(super) fn last_token_info_on_default_channel(&self) -> Option<&TokenInfo> {
-        self.token_infos.iter().rev().find_map(|tok_info| {
-            if tok_info.channel == TokenChannel::DEFAULT {
-                Some(tok_info)
-            } else {
-                None
-            }
-        })
+        self.token_infos
+            .iter()
+            .rev()
+            .find(|tok_info| tok_info.channel == TokenChannel::DEFAULT)
     }
 
     // pub(super) fn last_token_info_if<F>(&self, mut predicate: F) -> Option<(&TokenInfo, TokenIdx)>

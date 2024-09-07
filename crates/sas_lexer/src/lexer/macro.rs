@@ -37,7 +37,7 @@ pub(super) fn is_macro_amp<I: Iterator<Item = char>>(mut chars: I) -> (bool, u32
     }
 }
 
-#[inline(always)]
+#[inline]
 pub(super) fn is_macro_eval_quotable_op(c: char) -> bool {
     // Expermientally shown to work! (ignores the %)
     // e.g. `%^ 0` returned 1 (true)
@@ -59,19 +59,19 @@ pub(super) fn is_macro_percent(follow_char: char, in_eval_context: bool) -> bool
     }
 }
 
-#[inline(always)]
+#[inline]
 pub(super) const fn is_macro_stat_tok_type(tok_type: TokenType) -> bool {
     let tt_i = tok_type as u16;
     MACRO_STAT_TOKEN_TYPE_RANGE.0 <= tt_i && MACRO_STAT_TOKEN_TYPE_RANGE.1 >= tt_i
 }
 
-#[inline(always)]
+#[inline]
 pub(super) const fn is_macro_quote_call_tok_type(tok_type: TokenType) -> bool {
     let tt_i = tok_type as u16;
     MACRO_QUOTE_CALL_TOKEN_TYPE_RANGE.0 <= tt_i && MACRO_QUOTE_CALL_TOKEN_TYPE_RANGE.1 >= tt_i
 }
 
-#[inline(always)]
+#[inline]
 pub(super) const fn is_macro_eval_logical_op(tok_type: TokenType) -> bool {
     matches!(
         tok_type,
@@ -218,18 +218,18 @@ pub(super) fn is_macro_eval_mnemonic<I: Iterator<Item = char>>(
         ('g' | 'G', 't' | 'T', true) => (Some(TokenType::KwGT), 1),
         ('g' | 'G', 'e' | 'E', true) => (Some(TokenType::KwGE), 1),
         ('a' | 'A', 'n' | 'N', false) if ['d', 'D'].contains(&second_next_char) => {
-            if !is_xid_continue(chars.next().unwrap_or(' ')) {
-                (Some(TokenType::KwAND), 2)
-            } else {
+            if is_xid_continue(chars.next().unwrap_or(' ')) {
                 (None, 0)
+            } else {
+                (Some(TokenType::KwAND), 2)
             }
         }
         ('n' | 'N', 'e' | 'E', true) => (Some(TokenType::KwNE), 1),
         ('n' | 'N', 'o' | 'O', false) if ['t', 'T'].contains(&second_next_char) => {
-            if !is_xid_continue(chars.next().unwrap_or(' ')) {
-                (Some(TokenType::KwNOT), 2)
-            } else {
+            if is_xid_continue(chars.next().unwrap_or(' ')) {
                 (None, 0)
+            } else {
+                (Some(TokenType::KwNOT), 2)
             }
         }
         _ => (None, 0),
@@ -257,16 +257,14 @@ pub(super) fn is_macro_stat<I: Iterator<Item = char> + Clone>(chars: I) -> bool 
             // we just replace unicode with empty char, which will effectivly
             // make the following logic correct, since the first non-ascii
             // char guarantees this is not a statement keyword
-            if !c.is_ascii() {
-                ' '
-            } else {
+            if c.is_ascii() {
                 c.to_ascii_uppercase()
+            } else {
+                ' '
             }
         })
         .take_while(|c| matches!(c, 'a'..='z' | 'A'..='Z' | '0'..='9' | '_'))
         .collect::<SmolStr>();
 
-    parse_macro_keyword(&ident)
-        .and_then(|tok_type| Some(is_macro_stat_tok_type(tok_type)))
-        .unwrap_or(false)
+    parse_macro_keyword(&ident).is_some_and(is_macro_stat_tok_type)
 }

@@ -84,11 +84,9 @@ impl<'a> Cursor<'a> {
                     self.char_offset += i;
                     return;
                 }
-            } else {
-                if self.chars.next().is_none() {
-                    self.char_offset += i;
-                    return;
-                }
+            } else if self.chars.next().is_none() {
+                self.char_offset += i;
+                return;
             }
         }
 

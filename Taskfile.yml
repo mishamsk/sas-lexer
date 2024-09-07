@@ -1,0 +1,47 @@
+version: "3"
+
+dotenv:
+  - .env
+
+tasks:
+  build:rel:
+    sources:
+      - crates/**/*.*
+      - Cargo.toml
+      - Cargo.lock
+    generates:
+      - target/**/*.*
+    cmds:
+      - cargo build --release
+
+  perf:cur:
+    deps:
+      - build:rel
+    cmds:
+      - hyperfine -N -w 10 "target/release/sas-lexer {{.PERF_ALL_SAMPLES}}"
+      - hyperfine -N -w 5 "target/release/sas-lexer {{.PERF_LARGE_SAMPLE}}"
+
+  perf:compare:
+    desc: Compare the performance of the current build with the given SHA
+    deps:
+      - build:rel
+    preconditions:
+      # Check that the working directory is clean, no staged or unstaged changes
+      - git diff --quiet
+    requires:
+      vars:
+        - SHA
+    cmds:
+      # Create a tempdir for current build
+      - mkdir -p tmpdir/
+      - defer: rm -rf tmpdir/
+      # Copy the current build to the tempdir
+      - cp target/release/sas-lexer tmpdir/
+      # Checkout the given SHA
+      - git checkout {{.SHA}}
+      - defer: git checkout -
+      # Build the given SHA
+      - cargo build --release
+      # Compare the performance of the current build with the given SHA
+      - hyperfine -w 10 "tmpdir/sas-lexer {{.PERF_ALL_SAMPLES}}" "target/release/sas-lexer {{.PERF_ALL_SAMPLES}}"
+      - hyperfine -w 5 "tmpdir/sas-lexer {{.PERF_LARGE_SAMPLE}}" "target/release/sas-lexer {{.PERF_LARGE_SAMPLE}}"

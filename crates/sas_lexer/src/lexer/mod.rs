@@ -32,6 +32,12 @@ use crate::TokenIdx;
 
 const BOM: char = '\u{feff}';
 
+#[derive(Debug, Clone, Copy)]
+enum EvalNumericMode {
+    Integer,
+    Float,
+}
+
 /// Packed flags for macro eval expressions (arithmetic/logical)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct MacroEvalExprFlags(u8);
@@ -43,13 +49,13 @@ impl MacroEvalExprFlags {
     const TERMINATE_ON_SEMI_MASK: u8 = 0b0000_1000;
 
     const fn new(
-        float_mode: bool,
+        numeric_mode: EvalNumericMode,
         terminate_on_comma: bool,
         terminate_on_stat: bool,
         terminate_on_semi: bool,
     ) -> Self {
         let mut bits = 0;
-        if float_mode {
+        if matches!(numeric_mode, EvalNumericMode::Float) {
             bits |= Self::FLOAT_MODE_MASK;
         }
         if terminate_on_comma {
@@ -61,22 +67,22 @@ impl MacroEvalExprFlags {
         if terminate_on_semi {
             bits |= Self::TERMINATE_ON_SEMI_MASK;
         }
-        Self { 0: bits }
+        Self(bits)
     }
 
-    const fn float_mode(&self) -> bool {
+    const fn float_mode(self) -> bool {
         self.0 & Self::FLOAT_MODE_MASK != 0
     }
 
-    const fn terminate_on_comma(&self) -> bool {
+    const fn terminate_on_comma(self) -> bool {
         self.0 & Self::TERMINATE_ON_COMMA_MASK != 0
     }
 
-    const fn terminate_on_stat(&self) -> bool {
+    const fn terminate_on_stat(self) -> bool {
         self.0 & Self::TERMINATE_ON_STAT_MASK != 0
     }
 
-    const fn terminate_on_semi(&self) -> bool {
+    const fn terminate_on_semi(self) -> bool {
         self.0 & Self::TERMINATE_ON_SEMI_MASK != 0
     }
 }
@@ -133,7 +139,7 @@ enum LexerMode {
     /// Mode for lexing right after %let/%local/%global/%do, where
     /// we expect a variable name expression. Boolean flag indicates if we
     /// have found at least one token of the variable name.
-    /// ErrorType is used to supply relevant error message, if any is
+    /// `ErrorType` is used to supply relevant error message, if any is
     /// emitted by SAS if no name is found.
     MacroVarNameExpr(bool, Option<ErrorType>),
     /// Mode for lexing unrestricted macro text expressions terminated by semi.
@@ -414,12 +420,12 @@ impl<'src> Lexer<'src> {
         )
     }
 
-    #[inline(always)]
+    #[inline]
     fn emit_error(&mut self, error: ErrorType) {
         self.errors.push(self.prep_error_info_at_cur_offset(error));
     }
 
-    #[inline(always)]
+    #[inline]
     fn emit_error_info(&mut self, error_info: ErrorInfo) {
         self.errors.push(error_info);
     }
@@ -473,7 +479,7 @@ impl<'src> Lexer<'src> {
                 | LexerMode::MacroEval(_, pnl) => {
                     // If the parens nesting level is > 0, we should emit the missing number of
                     // closing parens to balance it out
-                    let pnl = pnl.clone(); // do not ask...borrow checker!
+                    let pnl = *pnl; // do not ask...borrow checker!
 
                     if pnl > 0 {
                         self.emit_error(ErrorType::MissingExpected(
@@ -576,6 +582,7 @@ impl<'src> Lexer<'src> {
             LexerMode::ExpectSemiOrEOF => {
                 self.start_token();
                 // In reality we ca
+                #[allow(clippy::if_not_else)]
                 if next_char != ';' {
                     // Not a EOF and not a ';' => expected token not found.
                     // Emit an error which will point at previous token.
@@ -592,25 +599,25 @@ impl<'src> Lexer<'src> {
             LexerMode::Default => self.dispatch_mode_default(next_char),
             LexerMode::StringExpr(allow_stat) => self.dispatch_mode_str_expr(next_char, allow_stat),
             LexerMode::MacroEval(flags, pnl) => {
-                self.dispatch_mode_macro_eval(next_char, flags, pnl)
+                self.dispatch_mode_macro_eval(next_char, flags, pnl);
             }
             LexerMode::MacroStrQuotedExpr(mask_macro, pnl) => {
                 self.dispatch_macro_str_quoted_expr(next_char, mask_macro, pnl);
             }
             LexerMode::MacroCallArgOrValue(pnl) => {
-                self.dispatch_macro_call_arg_or_value(next_char, pnl, true)
+                self.dispatch_macro_call_arg_or_value(next_char, pnl, true);
             }
             LexerMode::MacroCallValue(pnl) => {
-                self.dispatch_macro_call_arg_or_value(next_char, pnl, false)
+                self.dispatch_macro_call_arg_or_value(next_char, pnl, false);
             }
             LexerMode::MacroDo => {
                 self.dispatch_macro_do(next_char);
             }
             LexerMode::MacroVarNameExpr(found_name, err) => {
-                self.dispatch_macro_name_expr(next_char, !found_name, err)
+                self.dispatch_macro_name_expr(next_char, !found_name, err);
             }
             LexerMode::MacroSemiTerminatedTextExpr => {
-                self.dispatch_macro_semi_term_text_expr(next_char)
+                self.dispatch_macro_semi_term_text_expr(next_char);
             }
         }
     }
@@ -750,7 +757,6 @@ impl<'src> Lexer<'src> {
                         // Error has already been emitted by the `lex_macro_call`
                         // if macro stat is not allowed
                         self.pop_mode();
-                        return;
                     }
                     MacroKwType::None => {
                         // Either a string % or the quoted op.
@@ -803,13 +809,13 @@ impl<'src> Lexer<'src> {
         // Helper function to emit the token and update the mode if needed
         let update_parens_nesting = |lexer: &mut Lexer, increment: bool| {
             if let Some(LexerMode::MacroEval(_, pnl)) = lexer.mode_stack.last_mut() {
-                if !increment {
+                if increment {
+                    *pnl = pnl.wrapping_add_signed(1);
+                } else {
                     // If our logic is correct, it should be impossible for the symbol
                     // lex function to decrement the parens nesting level below 0
                     debug_assert!(*pnl > 0);
                     *pnl = pnl.wrapping_add_signed(-1);
-                } else {
-                    *pnl = pnl.wrapping_add_signed(1);
                 }
             };
         };
@@ -1015,12 +1021,11 @@ impl<'src> Lexer<'src> {
                     if let (Some(_), _) = is_macro_eval_mnemonic(self.cursor.chars()) {
                         // Found a mnemonic, break
                         break;
-                    } else {
-                        // String continues. Reset the ws mark & integer literal, advance
-                        try_lexing_numeric = false;
-                        ws_mark = None;
-                        self.cursor.advance();
                     }
+                    // String continues. Reset the ws mark & integer literal, advance
+                    try_lexing_numeric = false;
+                    ws_mark = None;
+                    self.cursor.advance();
                 }
                 _ => {
                     // Not a terminator, just a regular character in the string
@@ -1048,8 +1053,7 @@ impl<'src> Lexer<'src> {
             .get(
                 self.cur_token_byte_offset.into()
                     ..ws_mark
-                        .and_then(|m| Some(m.0))
-                        .unwrap_or_else(|| self.cur_byte_offset())
+                        .map_or_else(|| self.cur_byte_offset(), |m| m.0)
                         .into(),
             )
             .unwrap_or_else(|| {
@@ -1058,12 +1062,13 @@ impl<'src> Lexer<'src> {
                 ""
             });
 
-        if macro_string.len() > 0 {
+        if !macro_string.is_empty() {
             if try_lexing_numeric {
                 // Try parsing.
                 // Safety: we've checked above that the string is not empty
+                #[allow(clippy::indexing_slicing)]
                 if [b'x', b'X'].contains(&macro_string.as_bytes()[macro_string.len() - 1])
-                    && (b'0'..=b'9').contains(&macro_string.as_bytes()[0])
+                    && macro_string.as_bytes()[0].is_ascii_digit()
                 {
                     // Try hex
                     let ((tok_type, payload), error) = parse_numeric_hex_str(
@@ -1144,7 +1149,7 @@ impl<'src> Lexer<'src> {
     ///
     /// For IN docs say:
     /// > ** When you use the IN operator, both operands must contain a value.
-    /// > If the operand contains a null value, an error is generated.`
+    /// > If the operand contains a null value, an error is generated.
     ///
     /// So we also emit an error mimicking SAS
     ///
@@ -1200,7 +1205,7 @@ impl<'src> Lexer<'src> {
 
     fn dispatch_macro_name_expr(&mut self, next_char: char, first: bool, err: Option<ErrorType>) {
         debug_assert!(
-            matches!(self.mode(), LexerMode::MacroVarNameExpr(f, e) if f == !first && e == err)
+            matches!(self.mode(), LexerMode::MacroVarNameExpr(f, e) if f != first && e == err)
         );
 
         self.start_token();
@@ -1251,7 +1256,6 @@ impl<'src> Lexer<'src> {
                         // Hit a following macro statement or just a percent => pop mode and exit.
                         // Error for statement case has already been emitted by `lex_macro_call`
                         pop_mode_and_check(self);
-                        return;
                     }
                     MacroKwType::MacroCallOrLabel => {
                         update_mode(self);
@@ -1325,7 +1329,6 @@ impl<'src> Lexer<'src> {
                         // Hit a following macro statement => pop mode and exit.
                         // Error has already been emitted by the `lex_macro_call`
                         self.pop_mode();
-                        return;
                     }
                     MacroKwType::None => {
                         // Just a percent, consume and continue lexing the string
@@ -1480,7 +1483,6 @@ impl<'src> Lexer<'src> {
                         // Hit a following macro statement => pop mode and exit.
                         // Error has already been emitted by the `lex_macro_call`
                         self.pop_mode();
-                        return;
                     }
                     MacroKwType::None => {
                         // Just a percent, consume and continue lexing the string
@@ -1740,7 +1742,6 @@ impl<'src> Lexer<'src> {
                         // Hit a following macro statement => pop mode and exit.
                         // Error has already been emitted by the `lex_macro_call`
                         self.pop_mode();
-                        return;
                     }
                     MacroKwType::None => {
                         // Just a percent, consume and continue lexing the string
@@ -1958,14 +1959,14 @@ impl<'src> Lexer<'src> {
     }
 
     fn lex_ws(&mut self) {
-        debug_assert!(self.cursor.peek().map_or(false, |c| c.is_whitespace()));
+        debug_assert!(self.cursor.peek().map_or(false, char::is_whitespace));
 
         loop {
             if let Some('\n') = self.cursor.advance() {
                 self.add_line();
             }
 
-            if !self.cursor.peek().map_or(false, |c| c.is_whitespace()) {
+            if !self.cursor.peek().map_or(false, char::is_whitespace) {
                 break;
             }
         }
@@ -2005,7 +2006,7 @@ impl<'src> Lexer<'src> {
         self.emit_error(ErrorType::UnterminatedComment);
     }
 
-    #[inline(always)]
+    #[inline]
     fn lex_string_expression_start(&mut self, allow_stat: bool) {
         debug_assert_eq!(self.cursor.peek(), Some('"'));
 
@@ -2253,7 +2254,9 @@ impl<'src> Lexer<'src> {
             '%' => {
                 match self.cursor.peek_next() {
                     c if is_valid_sas_name_start(c) => {
-                        if !allow_stat {
+                        if allow_stat {
+                            self.lex_macro_identifier();
+                        } else {
                             // In macro context, nested statements cause open code recursion error
                             // but it seems like they are still half-handled. I.e. they are yanked
                             // from the string expression like in open code, but not actually
@@ -2271,8 +2274,6 @@ impl<'src> Lexer<'src> {
                             }) {
                                 self.emit_error_info(err_info);
                             }
-                        } else {
-                            self.lex_macro_identifier();
                         }
                     }
                     _ => {
@@ -3209,9 +3210,9 @@ impl<'src> Lexer<'src> {
     /// and lexes it if so.
     ///
     /// Arguments:
-    /// - allow_quote_call: bool - if `false`, macro quote functions will
+    /// - `allow_quote_call`: bool - if `false`, macro quote functions will
     ///     not be lexed as macro calls.
-    /// - allow_stat_to_follow: bool - if `false`, automatically emits an
+    /// - `allow_stat_to_follow`: bool - if `false`, automatically emits an
     ///     error if a statement is encountered, without consuming the statement itself.
     ///
     /// Returns `MacroKwType`, which will indicate if the token was a macro call,
@@ -3286,7 +3287,7 @@ impl<'src> Lexer<'src> {
     /// may be text!
     ///
     /// We obviously can't do that, so we will assume that the macro call is with arguments.
-    #[inline(always)]
+    #[inline]
     fn maybe_expect_macro_call_args(&mut self) {
         // Checkpoint the current state
         self.checkpoint();
@@ -3302,7 +3303,7 @@ impl<'src> Lexer<'src> {
     /// A helper to populate the expected states for the %str/%nrstr call
     ///
     /// Should be called after adding the %str/%nrstr token
-    #[inline(always)]
+    #[inline]
     fn expect_macro_str_call_args(&mut self, is_nrstr: bool) {
         // Populate the expected states for the %str/%nrstr call
         // in reverse order, as the lexer will unwind the stack
@@ -3416,7 +3417,7 @@ impl<'src> Lexer<'src> {
                     ![TokenType::KwmUntil, TokenType::KwmWhile].contains(&ti.token_type())
                 }) {
                     self.push_mode(LexerMode::MacroEval(
-                        MacroEvalExprFlags::new(false, false, true, true),
+                        MacroEvalExprFlags::new(EvalNumericMode::Integer, false, true, true),
                         0,
                     ));
                     self.push_mode(LexerMode::WsOrCStyleCommentOnly);
@@ -3434,7 +3435,7 @@ impl<'src> Lexer<'src> {
             _ => {
                 // %do var=...; A mix of %let and %if expression
                 self.push_mode(LexerMode::MacroEval(
-                    MacroEvalExprFlags::new(false, false, true, true),
+                    MacroEvalExprFlags::new(EvalNumericMode::Integer, false, true, true),
                     0,
                 ));
                 self.push_mode(LexerMode::WsOrCStyleCommentOnly);
@@ -3488,7 +3489,11 @@ impl<'src> Lexer<'src> {
                 // The handler fo arguments will push the mode for the comma, etc.
                 self.push_mode(LexerMode::MacroEval(
                     MacroEvalExprFlags::new(
-                        kw_tok_type == TokenType::KwmSysevalf,
+                        if kw_tok_type == TokenType::KwmSysevalf {
+                            EvalNumericMode::Float
+                        } else {
+                            EvalNumericMode::Integer
+                        },
                         kw_tok_type == TokenType::KwmSysevalf,
                         false,
                         false,
@@ -3550,7 +3555,12 @@ impl<'src> Lexer<'src> {
                 self.push_mode(LexerMode::ExpectSemiOrEOF);
                 // The handler fo arguments will push the mode for the comma, etc.
                 self.push_mode(LexerMode::MacroEval(
-                    MacroEvalExprFlags::new(false, false, kw_tok_type == TokenType::KwmTo, true),
+                    MacroEvalExprFlags::new(
+                        EvalNumericMode::Integer,
+                        false,
+                        kw_tok_type == TokenType::KwmTo,
+                        true,
+                    ),
                     0,
                 ));
                 // Leading insiginificant WS before opening parenthesis
@@ -3566,7 +3576,7 @@ impl<'src> Lexer<'src> {
                 ));
                 // The handler fo arguments will push the mode for the comma, etc.
                 self.push_mode(LexerMode::MacroEval(
-                    MacroEvalExprFlags::new(false, false, false, false),
+                    MacroEvalExprFlags::new(EvalNumericMode::Integer, false, false, false),
                     0,
                 ));
                 // Leading insiginificant WS before the first argument
@@ -3607,7 +3617,7 @@ impl<'src> Lexer<'src> {
             TokenType::KwmIf => {
                 // The handler fo arguments will push the mode for the comma, etc.
                 self.push_mode(LexerMode::MacroEval(
-                    MacroEvalExprFlags::new(false, false, true, true),
+                    MacroEvalExprFlags::new(EvalNumericMode::Integer, false, true, true),
                     0,
                 ));
                 // Leading insiginificant WS before expression
@@ -3627,8 +3637,8 @@ impl<'src> Lexer<'src> {
 ///
 /// Known differences from the SAS lexer:
 /// - String expressions in macro context are lexed as in open code,
-///  for example literals will be lexed as literals, also SAS lexes them
-///  as macro text expressions, verbatim.
+///     for example literals will be lexed as literals, also SAS lexes them
+///     as macro text expressions, verbatim.
 ///
 /// # Arguments
 /// * `source: &str` - The source code to lex
