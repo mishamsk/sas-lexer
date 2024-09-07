@@ -29,20 +29,18 @@ pub(super) fn parse_numeric(number: &str) -> ((TokenType, Payload), Option<Error
         // and the same numeric format `1.`
 
         // Leading 0 - we can emit the integer token, can't be a format
-        #[allow(clippy::cast_sign_loss)]
+        #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
         let payload = Payload::Integer(fvalue as u64);
 
         // Unwrap here is safe, as we know the length is > 0
         // but we still provide default value to avoid panics
         match *number.as_bytes().first().unwrap_or(&b'_') {
-            b'0' => {
-                return ((TokenType::IntegerLiteral, payload), None);
-            }
+            b'0' => ((TokenType::IntegerLiteral, payload), None),
             _ => {
                 if number.contains('.') {
-                    return ((TokenType::IntegerDotLiteral, payload), None);
+                    ((TokenType::IntegerDotLiteral, payload), None)
                 } else {
-                    return ((TokenType::IntegerLiteral, payload), None);
+                    ((TokenType::IntegerLiteral, payload), None)
                 }
             }
         }
@@ -51,7 +49,7 @@ pub(super) fn parse_numeric(number: &str) -> ((TokenType, Payload), Option<Error
         // it was created from scientific notation or not, but
         // this function only handles the decimal literals, so
         // no need to check for that
-        return ((TokenType::FloatLiteral, Payload::Float(fvalue)), None);
+        ((TokenType::FloatLiteral, Payload::Float(fvalue)), None)
     }
 }
 
