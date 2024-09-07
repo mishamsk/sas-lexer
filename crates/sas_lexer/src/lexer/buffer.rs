@@ -1,6 +1,8 @@
 use std::fmt;
 use std::ops::Range;
 
+use serde::Serialize;
+
 use super::channel::TokenChannel;
 use super::token_type::TokenType;
 
@@ -35,7 +37,8 @@ impl LineIdx {
 }
 
 /// Enum representing varios types of extra data associated with a token.
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Clone, Copy, Serialize)]
+#[serde(untagged)]
 pub enum Payload {
     None,
     /// Stores parsed integer value. We do not parse -N as a single token
@@ -468,6 +471,55 @@ impl WorkTokenizedBuffer {
     }
 }
 
+/// A struct with all token information usable without the `TokenizedBuffer` in
+/// mostly ANTLR compatible format.
+#[derive(Debug, Serialize)]
+pub struct ResolvedAntlrTokenInfo {
+    /// Channel of the token.
+    channel: u8,
+
+    /// Type of the token. This is the same as regular `TokenType`, except that EOF is -1
+    /// which forces us to use i16.
+    token_type: i16,
+
+    /// Token index
+    token_index: u32,
+
+    /// Zero-based char index of the token start in the source string.
+    /// Char here means a Unicode code point, not graphemes. This is
+    /// what Python uses to index strings, and IDEs show for cursor position.
+    /// u32 as we only support 4gb files
+    start: u32,
+
+    /// Zero-based char index of the token end. Unlike ANTLR, this will
+    /// point to the character after the token. This was we avoid the need
+    /// to use i64 for the end index, which seems ridiculous just to support
+    /// super rare cases of first token being empty
+    /// (which in ANTLR will have stop=-1)
+    stop: u32,
+
+    /// Starting line of the token, 1-based.    
+    line: u32,
+
+    /// Zero-based column of the token start on the start line.
+    column: u32,
+
+    /// Even though ANTLR tokens do not have the end line, it is calculated
+    /// in the parser on most tokens eventually, since it is easy to
+    /// calculate here in lexer we store it.
+    end_line: u32,
+
+    /// Even though ANTLR tokens do not have the end column, it is calculated
+    /// in the parser on most tokens eventually, since it is easy to
+    /// calculate here in lexer we store it.
+    end_column: u32,
+
+    /// Extra data associated with the token. Unlike regular ANTLR tokens,
+    /// we do some string and numeric literals parsing in the lexer, so we
+    /// store the parsed values here.
+    payload: Payload,
+}
+
 /// A special structure produced by the lexer that stores the full information
 /// about lexed tokens and lines.
 /// A struct of arrays, used to optimize memory usage and cache locality.
@@ -634,10 +686,14 @@ impl TokenizedBuffer {
         Ok(next_token_line_idx.0
             // lines are 1-based, but line indexes are 0-based.
             // If the next token starts not at the start of the next line,
-            // means this token ends on the next token line, =>
+            // means this token ends on the next token start line, =>
             // we need to add 1 to the line count. Otherwise it must be on the previous line,
-            // so we don't need to add anything.
-            + u32::from(next_tok_inf.byte_offset > next_token_line_info.byte_offset))
+            // so we don't need to add 1.
+            + u32::from(next_tok_inf.byte_offset > next_token_line_info.byte_offset
+                // another possibility is empty tokens at the start of the line,
+                // in this case the end on the same line as the next token (which is also
+                // their start line of course)
+                || self.get_token_start_byte_offset(token) == self.get_token_end_byte_offset(token)))
     }
 
     /// Returns column number of the token start, zero-based.
@@ -777,6 +833,72 @@ impl TokenizedBuffer {
         self.string_literals_buffer
             .get(start..stop)
             .ok_or("String literal range out of bounds")
+    }
+
+    /// Returns a vector of `ResolvedAntlrTokenInfo` that can be used
+    /// by a downstream ANTLR parser.
+    #[must_use]
+    #[allow(clippy::indexing_slicing)]
+    pub fn into_antlr_token_vec(&self) -> Vec<ResolvedAntlrTokenInfo> {
+        // SAFETY: this is theoretically possible, but extremely unlikely
+        // that even 4gb source file will yield > u32::MAX tokens
+        let mut tok_idx = 0u32;
+
+        // SAFETY: EOF must exist, so this should never fail
+        let mut cur_tok = &self.token_infos[0];
+
+        let tok_count = self.token_infos.len();
+
+        let mut vec = Vec::with_capacity(tok_count);
+
+        if tok_count > 1 {
+            for next_tok in &self.token_infos[1..tok_count] {
+                let next_tok_line_info = &self.line_infos[next_tok.line.0 as usize];
+
+                // See `get_token_end_line` for explanation why this is counted this way
+                let cur_tok_end_line_idx = next_tok.line.0
+                    - u32::from(
+                        next_tok.byte_offset == next_tok_line_info.byte_offset
+                            && cur_tok.byte_offset < next_tok.byte_offset,
+                    );
+
+                vec.push(ResolvedAntlrTokenInfo {
+                    channel: cur_tok.channel as u8,
+                    // This can't be EOF, so it is safe to cast
+                    token_type: cur_tok.token_type as i16,
+                    token_index: tok_idx,
+                    start: cur_tok.start.get(),
+                    stop: next_tok.start.get(),
+                    line: cur_tok.line.0 + 1,
+                    column: cur_tok.start.get()
+                        - self.line_infos[cur_tok.line.0 as usize].start.get(),
+                    end_line: cur_tok_end_line_idx + 1,
+                    end_column: next_tok.start.get()
+                        - self.line_infos[cur_tok_end_line_idx as usize].start.get(),
+                    payload: cur_tok.payload,
+                });
+
+                cur_tok = next_tok;
+                tok_idx += 1;
+            }
+        }
+
+        // Now add the EOF token. cur_tok will point to it
+        vec.push(ResolvedAntlrTokenInfo {
+            channel: cur_tok.channel as u8,
+            // This can't be EOF, so it is safe to cast
+            token_type: -1,
+            token_index: tok_idx,
+            start: cur_tok.start.get(),
+            stop: cur_tok.start.get(),
+            line: cur_tok.line.0 + 1,
+            column: cur_tok.start.get() - self.line_infos[cur_tok.line.0 as usize].start.get(),
+            end_line: cur_tok.line.0 + 1,
+            end_column: cur_tok.start.get() - self.line_infos[cur_tok.line.0 as usize].start.get(),
+            payload: cur_tok.payload,
+        });
+
+        vec
     }
 }
 

@@ -157,7 +157,10 @@ pub fn generate_keyword_map(input: TokenStream) -> TokenStream {
             })
         });
 
-    assert!(variant_code.clone().count() != 0, "No variants found that start with 'Kw'");
+    assert!(
+        variant_code.clone().count() != 0,
+        "No variants found that start with 'Kw'"
+    );
 
     let expanded = quote! {
         pub(crate) static #kw_map_name: phf::Map<&'static str, #name> = phf_map! {
