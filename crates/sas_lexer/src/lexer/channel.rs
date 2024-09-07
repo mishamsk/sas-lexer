@@ -1,6 +1,7 @@
 use strum::Display;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Display, Default)]
+#[repr(u8)]
 pub enum TokenChannel {
     #[strum(serialize = "<D>")]
     #[default]
@@ -9,14 +10,4 @@ pub enum TokenChannel {
     COMMENT,
     #[strum(serialize = "<H>")]
     HIDDEN, // whitespace and other things to skip
-}
-
-impl From<TokenChannel> for u8 {
-    fn from(variant: TokenChannel) -> Self {
-        match variant {
-            TokenChannel::DEFAULT => 0,
-            TokenChannel::COMMENT => 1,
-            TokenChannel::HIDDEN => 2,
-        }
-    }
 }
