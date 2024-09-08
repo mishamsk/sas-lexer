@@ -1,0 +1,64 @@
+[build-system]
+requires = ["maturin>=1.5,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "sas-lexer-rust"
+version = "0.1.0"
+requires-python = ">=3.11"
+classifiers = [
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: Implementation :: PyPy",
+    "Private :: Do Not Upload",
+]
+dependencies = ["msgspec==0.18.6"]
+
+[tool.uv]
+dev-dependencies = [
+    "ipython>=8.27.0",
+    "mypy>=1.11.2",
+    "pytest>=8.3.2",
+    "ruff>=0.6.4",
+]
+
+[tool.maturin]
+manifest-path = "crates/sas_lexer_py/Cargo.toml"
+module-name = "sas_lexer._sas_lexer_rust"
+python-source = "src"
+strip = true
+profile = "release"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = [
+    "A",
+    "ARG",
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "FBT",
+    "I",    # isort
+    "B",    # bugbear
+    "N",
+    "PERF",
+    "SLF",
+    "PTH",
+    "TCH",
+    "PLC",
+    "PLE",
+    "PLR",
+    "PLW",
+    "RUF",
+]
+ignore = [
+    "E501",    # line too long, handled by ruff format    
+    "PLC0105", # We are ok with TypeVars without variance in name
+]
+
+
+# Avoid trying to fix flake8-bugbear (`B`) violations.
+# unfixable = ["B"]
