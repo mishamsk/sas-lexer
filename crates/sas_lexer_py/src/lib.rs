@@ -7,7 +7,7 @@ use sas_lexer::lex;
 
 /// TODO
 #[pyfunction]
-fn lex_str<'py>(py: Python<'py>, src: Bound<'py, PyString>) -> PyResult<Bound<'py, PyBytes>> {
+fn lex_str<'py>(py: Python<'py>, src: &Bound<'py, PyString>) -> PyResult<Bound<'py, PyBytes>> {
     let src: &str = src.extract()?;
 
     let (buf, _) = lex(&src).map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
@@ -15,7 +15,7 @@ fn lex_str<'py>(py: Python<'py>, src: Bound<'py, PyString>) -> PyResult<Bound<'p
     let tok_vec = buf.into_antlr_token_vec();
 
     let data = rmp_serde::encode::to_vec(&tok_vec)
-        .map_err(|e| PyRuntimeError::new_err(format!("Failed to serialize to msgpack: {}", e)))?;
+        .map_err(|e| PyRuntimeError::new_err(format!("Failed to serialize to msgpack: {e}")))?;
 
     Ok(PyBytes::new_bound(py, &data))
 }

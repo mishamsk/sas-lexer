@@ -44,9 +44,9 @@ enum MacroEvalNumericMode {
 }
 
 /// Macro arithmetic/logical expressions may be in maro call
-/// argument position (e.g. in `%scan``) or not (e.g. in `%if`).
+/// argument position (e.g. in `%scan`) or not (e.g. in `%if`).
 /// And in argument position, they may be followed by a regular
-/// macro argument (e.g. in `%scan``) or another expression (e.g. in `%SUBSTR`).
+/// macro argument (e.g. in `%scan`) or another expression (e.g. in `%SUBSTR`).
 /// `None` implies that `,` is lexed as a macro string while
 /// for other cases it is lexed as a terminator.
 ///

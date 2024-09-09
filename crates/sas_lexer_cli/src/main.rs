@@ -141,7 +141,7 @@ fn lex_and_print(source: &String, print: bool, err_only: bool) {
 }
 
 fn generate_tokens_file() -> String {
-    let mut result = String::with_capacity(TokenType::COUNT as usize * 40);
+    let mut result = String::with_capacity(TokenType::COUNT * 40);
     let conv = Converter::new()
         .from_case(Case::Pascal)
         .remove_boundaries(&[Boundary::LowerDigit, Boundary::UpperDigit])
@@ -213,7 +213,7 @@ fn main() -> io::Result<()> {
             if let Some(grammar_path) = grammar {
                 fs::write(grammar_path, tokens_file)?;
             } else {
-                println!("{}", tokens_file);
+                println!("{tokens_file}");
             }
         }
     }
