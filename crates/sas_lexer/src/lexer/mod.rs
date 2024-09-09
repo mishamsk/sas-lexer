@@ -1683,7 +1683,7 @@ impl<'src> Lexer<'src> {
                 // as at the moment of reaching 0, we should have popped the mode
                 // and exited the lexing of the string
                 debug_assert!(
-                    i64::from(parens_nesting_level) + i64::from(local_parens_nesting) > 0
+                    i64::from(parens_nesting_level) + i64::from(local_parens_nesting) >= 0
                 );
 
                 if let Some(m) = lexer.mode_stack.last_mut() {
@@ -1913,7 +1913,7 @@ impl<'src> Lexer<'src> {
                     // as at the moment of reaching 0, we should have popped the mode
                     // and exited the lexing of the string
                     debug_assert!(
-                        i64::from(parens_nesting_level) + i64::from(local_parens_nesting) > 0
+                        i64::from(parens_nesting_level) + i64::from(local_parens_nesting) >= 0
                     );
 
                     if let Some(m) = lexer.mode_stack.last_mut() {

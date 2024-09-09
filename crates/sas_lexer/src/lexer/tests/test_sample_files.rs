@@ -43,11 +43,11 @@ fn test_snapshots(#[files("src/lexer/tests/samples/**/*.sas")] path: PathBuf) {
         errors_snapshot
         "###);
     } else {
-        let error_strins = errors
+        let error_strings = errors
             .iter()
             .map(|error| error_to_string(error, &tok_buffer, &contents).to_string())
             .collect::<Vec<String>>();
-        assert_yaml_snapshot!("errors_snapshot", error_strins);
+        assert_yaml_snapshot!("errors_snapshot", error_strings);
     }
 }
 
