@@ -2104,6 +2104,143 @@ fn test_macro_eval_expr(
 }
 
 #[rstest]
+#[case::comma_and_semi("1,eQ;", 
+    vec![
+        ("1", TokenType::IntegerLiteral, Payload::Integer(1)),
+        (",", TokenType::COMMA, Payload::None),        
+        ("eQ;", TokenType::MacroString, Payload::None),
+    ]
+)]
+#[case::not_integer_1("1 2 ~= 3 4", 
+    vec![
+        ("1 2", TokenType::MacroString, Payload::None),
+        (" ", TokenType::WS, Payload::None),            
+        ("~=", TokenType::NE, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("3 4", TokenType::MacroString, Payload::None),
+    ]
+)]
+#[case::float("1.2 ~= 3.4", 
+    vec![
+        ("1.2", TokenType::FloatLiteral, Payload::Float(1.2)),
+        (" ", TokenType::WS, Payload::None),            
+        ("~=", TokenType::NE, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("3.4", TokenType::FloatLiteral, Payload::Float(3.4)),
+    ]
+)]
+#[case::hex_integer_literals("0FFx < 9ffX",
+    vec![
+        ("0FFx", TokenType::IntegerLiteral, Payload::Integer(255)),
+        (" ", TokenType::WS, Payload::None),            
+        ("<", TokenType::LT, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("9ffX", TokenType::IntegerLiteral, Payload::Integer(2559)),        
+    ]
+)]
+#[case::not_hex_integer_literals("0_FFx eq fffX",
+    vec![
+        ("0_FFx", TokenType::MacroString, Payload::None),
+        (" ", TokenType::WS, Payload::None),            
+        ("eq", TokenType::KwEQ, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("fffX", TokenType::MacroString, Payload::None),        
+    ]
+)]
+#[case::ws_handling_str_literals("'a' 'b' = 'c'",
+    vec![
+        ("'a'", TokenType::StringLiteral, Payload::None),
+        (" ", TokenType::MacroString, Payload::None),            
+        ("'b'", TokenType::StringLiteral, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("=", TokenType::ASSIGN, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("'c'", TokenType::StringLiteral, Payload::None),
+    ]
+)]
+#[case::ws_handling_and_str_expr("\"a&mv%m (/*c*/)\" &mv = a",
+    vec![
+        ("\"", TokenType::StringExprStart, Payload::None),
+        ("a", TokenType::StringExprText, Payload::None),
+        ("&mv", TokenType::MacroVarExpr, Payload::None),
+        ("%m", TokenType::MacroIdentifier, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("(", TokenType::LPAREN, Payload::None),
+        ("/*c*/", TokenType::CStyleComment, Payload::None),
+        (")", TokenType::RPAREN, Payload::None),
+        ("\"", TokenType::StringExprEnd, Payload::None),
+        (" ", TokenType::MacroString, Payload::None),
+        ("&mv", TokenType::MacroVarExpr, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("=", TokenType::ASSIGN, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("a", TokenType::MacroString, Payload::None),
+    ]
+)]
+#[case::int_broken_by_comment("1/*c*/2",
+    vec![
+        ("1", TokenType::MacroString, Payload::None),
+        ("/*c*/", TokenType::CStyleComment, Payload::None),
+        ("2", TokenType::IntegerLiteral, Payload::Integer(2)),
+    ]
+)]
+#[case::all_in_expr(" (\n🔥>  &m.v)*/*c*/(\t3 * ( 5.1-0ffx) ) eq %m.suf \"\"", 
+    vec![
+        (" ", TokenType::WS, Payload::None),
+        ("(", TokenType::LPAREN, Payload::None),
+        ("\n", TokenType::WS, Payload::None),
+        ("🔥", TokenType::MacroString, Payload::None),
+        (">", TokenType::GT, Payload::None),
+        ("  ", TokenType::WS, Payload::None),
+        ("&m.", TokenType::MacroVarExpr, Payload::None),
+        ("v", TokenType::MacroString, Payload::None),
+        (")", TokenType::RPAREN, Payload::None),
+        ("*", TokenType::STAR, Payload::None),
+        ("/*c*/", TokenType::CStyleComment, Payload::None),
+        ("(", TokenType::LPAREN, Payload::None),
+        ("\t", TokenType::WS, Payload::None),
+        ("3", TokenType::IntegerLiteral, Payload::Integer(3)),
+        (" ", TokenType::WS, Payload::None),
+        ("*", TokenType::STAR, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("(", TokenType::LPAREN, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("5.1", TokenType::FloatLiteral, Payload::Float(5.1)),
+        ("-", TokenType::MINUS, Payload::None),
+        ("0ffx", TokenType::IntegerLiteral, Payload::Integer(255)),
+        (")", TokenType::RPAREN, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        (")", TokenType::RPAREN, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("eq", TokenType::KwEQ, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("%m", TokenType::MacroIdentifier, Payload::None),
+        (".suf ", TokenType::MacroString, Payload::None),        
+        ("\"\"", TokenType::StringLiteral, Payload::None),
+    ]
+)]
+fn test_macro_eval_float_expr(
+    #[case] expr_str: &str,
+    #[case] expected_tokens: Vec<(&str, TokenType, Payload)>,
+) {
+    let mut all_expected_tokens = vec![
+        ("%sysevalf", TokenType::KwmSysevalf, Payload::None),
+        ("(", TokenType::LPAREN, Payload::None),
+    ];
+
+    all_expected_tokens.extend(expected_tokens);
+    all_expected_tokens.push((",", TokenType::COMMA, Payload::None));
+    all_expected_tokens.push(("ceil", TokenType::MacroString, Payload::None));
+    all_expected_tokens.push((")", TokenType::RPAREN, Payload::None));
+
+    assert_lexing(
+        format!("%sysevalf({expr_str},ceil)").as_str(),
+        all_expected_tokens,
+        NO_ERRORS,
+    );
+}
+
+#[rstest]
 fn test_macro_eval_empty_logical_operand(
     #[values(
         vec![
@@ -2378,6 +2515,4 @@ fn test_macro_eval_empty_logical_operand(
         NO_ERRORS,
     );
 }
-// TODO:
-// - decimals should be sexed as float in sysevalf, the rest should match eval
-// - in sysevalf, comma should terminate the expression and second argument for the function should be supported (vexed as macro string)
+
