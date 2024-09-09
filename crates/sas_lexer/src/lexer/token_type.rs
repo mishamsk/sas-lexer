@@ -1,5 +1,5 @@
 use phf::phf_map;
-use sas_lexer_macro::{KeywordMap, MacroKeywordMap};
+use sas_lexer_macro::{KeywordMap, MacroKeywordMap, TokenTypeSubset};
 use strum::{Display, EnumCount, EnumIter};
 
 /// What you expect - the token types.
@@ -11,11 +11,24 @@ use strum::{Display, EnumCount, EnumIter};
 /// Naming also is used to autogenerate static hash maps
 /// for regular keywords and macro keywords.
 #[derive(
-    Debug, PartialEq, Eq, Clone, Copy, EnumCount, EnumIter, Display, KeywordMap, MacroKeywordMap,
+    Debug,
+    PartialEq,
+    Eq,
+    Clone,
+    Copy,
+    PartialOrd,
+    Ord,
+    EnumCount,
+    EnumIter,
+    Display,
+    KeywordMap,
+    MacroKeywordMap,
+    TokenTypeSubset,
 )]
 #[kw_map_name = "KEYWORDS"]
 #[kwm_map_name = "MKEYWORDS"]
 #[repr(u16)]
+#[subset(name = TokenTypeMacroCallOrStat, start = MacroIdentifier, end = KwmList)]
 pub enum TokenType {
     EOF,
     UNKNOWN,
@@ -100,9 +113,11 @@ pub enum TokenType {
     // ----------------MACRO TOKENS----------------
     MacroComment,     // %* ...;
     MacroVarExpr,     // &&mvar&another. etc.
-    MacroIdentifier,  // %macro_name
     MacroString,      // %let var = macro_string;
     MacroStringEmpty, // implicit empty macro string in logical expr `%eval(= rhs)`
+    // From here and on to KwmList are the token type subset `TokenTypeMacroCallOrStat`
+    // DO NOT ADD ANYTHING IN BETWEEN
+    MacroIdentifier, // %macro_name
     // Macro built in function keywords
     // Non masking versions
     KwmEval,          // EVAL
@@ -367,6 +382,22 @@ mod tests {
         // Check a couple of keywords in main map are NOT in the macro map
         assert_eq!(parse_macro_keyword("EQ"), None);
         assert_eq!(parse_macro_keyword("_NULL_"), None);
+    }
+
+    #[test]
+    fn test_macro_stat_or_call_token_subset() {
+        for stat_tok_type in TokenTypeMacroCallOrStat::iter() {
+            assert_eq!(stat_tok_type as u16, TokenType::from(stat_tok_type) as u16);
+        }
+
+        assert_eq!(
+            TokenTypeMacroCallOrStat::iter()
+                .filter(|t| !matches!(*t, TokenTypeMacroCallOrStat::MacroIdentifier))
+                .map(TokenType::from)
+                .collect::<Vec<_>>()
+                .sort(),
+            MKEYWORDS.values().copied().collect::<Vec<_>>().sort()
+        );
     }
 
     #[test]

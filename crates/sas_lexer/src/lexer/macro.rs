@@ -7,7 +7,8 @@ use super::{
     cursor::Cursor,
     sas_lang::is_valid_sas_name_start,
     token_type::{
-        parse_macro_keyword, MACRO_QUOTE_CALL_TOKEN_TYPE_RANGE, MACRO_STAT_TOKEN_TYPE_RANGE,
+        parse_macro_keyword, TokenTypeMacroCallOrStat, MACRO_QUOTE_CALL_TOKEN_TYPE_RANGE,
+        MACRO_STAT_TOKEN_TYPE_RANGE,
     },
 };
 
@@ -111,7 +112,7 @@ pub(super) const fn is_macro_eval_logical_op(tok_type: TokenType) -> bool {
 /// Error in this function means a bug, but is returned for safety
 pub(super) fn lex_macro_call_stat_or_label(
     cursor: &mut Cursor,
-) -> Result<(TokenType, u32), &'static str> {
+) -> Result<(TokenTypeMacroCallOrStat, u32), &'static str> {
     debug_assert_eq!(cursor.peek(), Some('%'));
     debug_assert!(is_valid_sas_name_start(cursor.peek_next()));
 
@@ -145,7 +146,7 @@ pub(super) fn lex_macro_call_stat_or_label(
     // must be a macro call
     if !is_ascii {
         return Ok((
-            TokenType::MacroIdentifier,
+            TokenTypeMacroCallOrStat::MacroIdentifier,
             cursor.char_offset() - start_char_offset,
         ));
     }
@@ -170,10 +171,12 @@ pub(super) fn lex_macro_call_stat_or_label(
         );
     }
 
-    Ok((
-        parse_macro_keyword(&ident).unwrap_or(TokenType::MacroIdentifier),
-        cursor.char_offset() - start_char_offset,
-    ))
+    parse_macro_keyword(&ident)
+        .map_or(Ok(TokenTypeMacroCallOrStat::MacroIdentifier), |t| {
+            TokenTypeMacroCallOrStat::try_from(t)
+        })
+        .map(|t| (t, cursor.char_offset() - start_char_offset))
+        .map_err(|_| "Unexpected error in `parse_macro_keyword` - not a keyword returned")
 }
 
 /// Predicate to check if the following chracters are one of macro logical

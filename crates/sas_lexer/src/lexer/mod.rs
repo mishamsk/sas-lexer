@@ -26,7 +26,7 @@ use sas_lang::is_valid_sas_name_start;
 use smol_str::SmolStr;
 use std::{cmp::min, str::FromStr};
 use text::{ByteOffset, CharOffset};
-use token_type::{parse_keyword, TokenType};
+use token_type::{parse_keyword, TokenType, TokenTypeMacroCallOrStat};
 use unicode_ident::{is_xid_continue, is_xid_start};
 
 use crate::TokenIdx;
@@ -3355,13 +3355,13 @@ impl<'src> Lexer<'src> {
         let (tok_type, advance_by) = lex_macro_call_stat_or_label(&mut self.cursor.clone())
             .unwrap_or_else(|err| {
                 self.emit_error(ErrorType::InternalError(err));
-                (TokenType::MacroIdentifier, 0)
+                (TokenTypeMacroCallOrStat::MacroIdentifier, 0)
             });
 
-        if !is_macro_stat_tok_type(tok_type) {
+        if !is_macro_stat_tok_type(tok_type.into()) {
             // A macro call (or technically a label, but see the docs for
             // `lex_macro_call_stat_or_label` for the explanation)
-            if !allow_quote_call && is_macro_quote_call_tok_type(tok_type) {
+            if !allow_quote_call && is_macro_quote_call_tok_type(tok_type.into()) {
                 // As of today this checked for macro text expressions that
                 // are in places of identifiers. SAS emits an error in this case
                 // as quote functions create invisible quote chars that are not valid
@@ -3495,7 +3495,7 @@ impl<'src> Lexer<'src> {
         let (kw_tok_type, _) =
             lex_macro_call_stat_or_label(&mut self.cursor).unwrap_or_else(|err| {
                 self.emit_error(ErrorType::InternalError(err));
-                (TokenType::MacroIdentifier, 0)
+                (TokenTypeMacroCallOrStat::MacroIdentifier, 0)
             });
 
         self.dispatch_macro_call_or_stat(kw_tok_type);
@@ -3588,7 +3588,7 @@ impl<'src> Lexer<'src> {
         }
     }
 
-    fn dispatch_macro_call_or_stat(&mut self, kw_tok_type: TokenType) {
+    fn dispatch_macro_call_or_stat(&mut self, kw_tok_type: TokenTypeMacroCallOrStat) {
         // Emit the token for the keyword itself
 
         // We use hidden channel for the %str/%nrstr and the wrapping parens
@@ -3597,22 +3597,27 @@ impl<'src> Lexer<'src> {
         // interpreted as macro calls or removed (like spaces). For all
         // other cases we emit on default channel.
         self.emit_token(
-            if [TokenType::KwmStr, TokenType::KwmNrStr].contains(&kw_tok_type) {
+            if [
+                TokenTypeMacroCallOrStat::KwmStr,
+                TokenTypeMacroCallOrStat::KwmNrStr,
+            ]
+            .contains(&kw_tok_type)
+            {
                 TokenChannel::HIDDEN
             } else {
                 TokenChannel::DEFAULT
             },
-            kw_tok_type,
+            kw_tok_type.into(),
             Payload::None,
         );
 
         // Now populate the following mode stack
         match kw_tok_type {
             // Built-in Macro functions
-            TokenType::KwmStr | TokenType::KwmNrStr => {
-                self.expect_macro_str_call_args(kw_tok_type == TokenType::KwmNrStr);
+            TokenTypeMacroCallOrStat::KwmStr | TokenTypeMacroCallOrStat::KwmNrStr => {
+                self.expect_macro_str_call_args(kw_tok_type == TokenTypeMacroCallOrStat::KwmNrStr);
             }
-            TokenType::KwmEval | TokenType::KwmSysevalf => {
+            TokenTypeMacroCallOrStat::KwmEval | TokenTypeMacroCallOrStat::KwmSysevalf => {
                 self.push_mode(LexerMode::ExpectSymbol(
                     ')',
                     TokenType::RPAREN,
@@ -3622,12 +3627,12 @@ impl<'src> Lexer<'src> {
                 // argument as needed
                 self.push_mode(LexerMode::MacroEval(
                     MacroEvalExprFlags::new(
-                        if kw_tok_type == TokenType::KwmSysevalf {
+                        if kw_tok_type == TokenTypeMacroCallOrStat::KwmSysevalf {
                             MacroEvalNumericMode::Float
                         } else {
                             MacroEvalNumericMode::Integer
                         },
-                        if kw_tok_type == TokenType::KwmSysevalf {
+                        if kw_tok_type == TokenTypeMacroCallOrStat::KwmSysevalf {
                             MacroEvalNextArgumentMode::MacroArg
                         } else {
                             MacroEvalNextArgumentMode::None
@@ -3647,14 +3652,14 @@ impl<'src> Lexer<'src> {
                 // Leading insiginificant WS before opening parenthesis
                 self.push_mode(LexerMode::WsOrCStyleCommentOnly);
             }
-            TokenType::KwmScan
-            | TokenType::KwmQScan
-            | TokenType::KwmSubstr
-            | TokenType::KwmQSubstr
-            | TokenType::KwmKScan
-            | TokenType::KwmQKScan
-            | TokenType::KwmKSubstr
-            | TokenType::KwmQKSubstr => {
+            TokenTypeMacroCallOrStat::KwmScan
+            | TokenTypeMacroCallOrStat::KwmQScan
+            | TokenTypeMacroCallOrStat::KwmSubstr
+            | TokenTypeMacroCallOrStat::KwmQSubstr
+            | TokenTypeMacroCallOrStat::KwmKScan
+            | TokenTypeMacroCallOrStat::KwmQKScan
+            | TokenTypeMacroCallOrStat::KwmKSubstr
+            | TokenTypeMacroCallOrStat::KwmQKSubstr => {
                 self.push_mode(LexerMode::ExpectSymbol(
                     ')',
                     TokenType::RPAREN,
@@ -3667,10 +3672,10 @@ impl<'src> Lexer<'src> {
                         MacroEvalNumericMode::Integer,
                         if matches!(
                             kw_tok_type,
-                            TokenType::KwmScan
-                                | TokenType::KwmQScan
-                                | TokenType::KwmKScan
-                                | TokenType::KwmQKScan
+                            TokenTypeMacroCallOrStat::KwmScan
+                                | TokenTypeMacroCallOrStat::KwmQScan
+                                | TokenTypeMacroCallOrStat::KwmKScan
+                                | TokenTypeMacroCallOrStat::KwmQKScan
                         ) {
                             MacroEvalNextArgumentMode::MacroArg
                         } else {
@@ -3700,10 +3705,10 @@ impl<'src> Lexer<'src> {
                 self.push_mode(LexerMode::WsOrCStyleCommentOnly);
             }
             // Custom macro or label
-            TokenType::MacroIdentifier => {
+            TokenTypeMacroCallOrStat::MacroIdentifier => {
                 self.maybe_expect_macro_call_args();
             }
-            tok_type if !is_macro_stat_tok_type(tok_type) => {
+            tok_type if !is_macro_stat_tok_type(tok_type.into()) => {
                 // TODO!!!!!! PLACEHOLDER - should be exhaustive
                 // All built-ins have arguments, so we may avoid the `maybe` version
 
@@ -3725,32 +3730,32 @@ impl<'src> Lexer<'src> {
                 self.push_mode(LexerMode::WsOrCStyleCommentOnly);
             }
             // Macro statements
-            TokenType::KwmThen | TokenType::KwmElse => {
+            TokenTypeMacroCallOrStat::KwmThen | TokenTypeMacroCallOrStat::KwmElse => {
                 // Super easy, they effectively do nothing
             }
-            TokenType::KwmEnd | TokenType::KwmReturn => {
+            TokenTypeMacroCallOrStat::KwmEnd | TokenTypeMacroCallOrStat::KwmReturn => {
                 // Super easy, just expect the closing semi
                 self.push_mode(LexerMode::ExpectSemiOrEOF);
                 self.push_mode(LexerMode::WsOrCStyleCommentOnly);
             }
-            TokenType::KwmPut | TokenType::KwmGoto => {
+            TokenTypeMacroCallOrStat::KwmPut | TokenTypeMacroCallOrStat::KwmGoto => {
                 self.push_mode(LexerMode::ExpectSemiOrEOF);
                 self.push_mode(LexerMode::MacroSemiTerminatedTextExpr);
                 self.push_mode(LexerMode::WsOrCStyleCommentOnly);
             }
-            TokenType::KwmDo => {
+            TokenTypeMacroCallOrStat::KwmDo => {
                 // First skip WS and comments, then put lexer into do dispatch mode
                 self.push_mode(LexerMode::MacroDo);
                 self.push_mode(LexerMode::WsOrCStyleCommentOnly);
             }
-            TokenType::KwmTo | TokenType::KwmBy => {
+            TokenTypeMacroCallOrStat::KwmTo | TokenTypeMacroCallOrStat::KwmBy => {
                 self.push_mode(LexerMode::ExpectSemiOrEOF);
                 // The handler fo arguments will push the mode for the comma, etc.
                 self.push_mode(LexerMode::MacroEval(
                     MacroEvalExprFlags::new(
                         MacroEvalNumericMode::Integer,
                         MacroEvalNextArgumentMode::None,
-                        kw_tok_type == TokenType::KwmTo,
+                        kw_tok_type == TokenTypeMacroCallOrStat::KwmTo,
                         true,
                     ),
                     0,
@@ -3758,7 +3763,7 @@ impl<'src> Lexer<'src> {
                 // Leading insiginificant WS before opening parenthesis
                 self.push_mode(LexerMode::WsOrCStyleCommentOnly);
             }
-            TokenType::KwmUntil | TokenType::KwmWhile => {
+            TokenTypeMacroCallOrStat::KwmUntil | TokenTypeMacroCallOrStat::KwmWhile => {
                 self.push_mode(LexerMode::ExpectSemiOrEOF);
                 self.push_mode(LexerMode::WsOrCStyleCommentOnly);
                 self.push_mode(LexerMode::ExpectSymbol(
@@ -3785,7 +3790,7 @@ impl<'src> Lexer<'src> {
                 // Leading insiginificant WS before opening parenthesis
                 self.push_mode(LexerMode::WsOrCStyleCommentOnly);
             }
-            TokenType::KwmLet => {
+            TokenTypeMacroCallOrStat::KwmLet => {
                 // following let we must have name, equal sign and expression.
                 // All maybe surrounded by insignificant whitespace! + the closing semi
                 // Also, SAS happily recovers after missing equal sign, with just a note
@@ -3810,7 +3815,7 @@ impl<'src> Lexer<'src> {
                 ));
                 self.push_mode(LexerMode::WsOrCStyleCommentOnly);
             }
-            TokenType::KwmIf => {
+            TokenTypeMacroCallOrStat::KwmIf => {
                 self.push_mode(LexerMode::MacroEval(
                     MacroEvalExprFlags::new(
                         MacroEvalNumericMode::Integer,
