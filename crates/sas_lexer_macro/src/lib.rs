@@ -3,82 +3,9 @@ use proc_macro::TokenStream;
 use proc_macro2::Span;
 use quote::quote;
 use syn::{
-    parse_macro_input, punctuated::Punctuated, Data, DeriveInput, Expr, ExprLit, Ident, Lit,
+    parse_macro_input, punctuated::Punctuated, DeriveInput, Expr, ExprLit, Ident, Lit, LitInt,
     LitStr, Meta, MetaNameValue, Token,
 };
-
-/// # Panics
-/// Panics if the input is not an enum.
-#[proc_macro_derive(ToU16)]
-pub fn to_u16_conversions_derive(input: TokenStream) -> TokenStream {
-    let input = parse_macro_input!(input as DeriveInput);
-
-    let name = &input.ident;
-    let variants = if let Data::Enum(data_enum) = &input.data {
-        data_enum.variants.iter().collect::<Vec<_>>()
-    } else {
-        panic!("ToU16 can only be derived for enums");
-    };
-
-    let from_type_for_u16 = variants.iter().enumerate().map(|(i, variant)| {
-        let variant_ident = &variant.ident;
-        quote! {
-            #name::#variant_ident => #i as u16,
-        }
-    });
-
-    let expanded = quote! {
-        impl From<#name> for u16 {
-            fn from(token_type: #name) -> Self {
-                match token_type {
-                    #(#from_type_for_u16)*
-                }
-            }
-        }
-    };
-
-    TokenStream::from(expanded)
-}
-
-/// # Panics
-/// Panics if the input is not an enum.
-#[proc_macro_derive(FromU16)]
-pub fn from_u16_conversions_derive(input: TokenStream) -> TokenStream {
-    let input = parse_macro_input!(input as DeriveInput);
-
-    let name = &input.ident;
-    let variants = if let Data::Enum(data_enum) = &input.data {
-        data_enum.variants.iter().collect::<Vec<_>>()
-    } else {
-        panic!("FromU16 can only be derived for enums");
-    };
-
-    let from_u16_for_type = variants.iter().enumerate().map(|(i, variant)| {
-        let variant_ident = &variant.ident;
-        let i = u16::try_from(i).unwrap_or_else(|_| {
-            panic!(
-                "This macro doesn't support more than {} variants!",
-                u16::MAX
-            );
-        });
-        quote! {
-            #i => Some(#name::#variant_ident),
-        }
-    });
-
-    let expanded = quote! {
-        impl #name {
-            fn from_u16(value: u16) -> Option<Self> {
-                match value {
-                    #(#from_u16_for_type)*
-                    _ => None,
-                }
-            }
-        }
-    };
-
-    TokenStream::from(expanded)
-}
 
 /// # Panics
 /// Panics if the input is not an enum.
@@ -254,6 +181,123 @@ pub fn generate_macro_keyword_map(input: TokenStream) -> TokenStream {
         pub(crate) static #kwm_map_name: phf::Map<&'static str, #name> = phf_map! {
             #(#variant_code)*
         };
+    };
+
+    TokenStream::from(expanded)
+}
+
+/// # Panics
+/// Panics if the input is not an enum and other conditions are not met.
+#[proc_macro_derive(TokenTypeSubset, attributes(subset))]
+pub fn derive_token_type_subset(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+
+    // Get the name of the enum
+    let full_enum_name = &input.ident;
+
+    // Get the variants of the enum
+    let variants = if let syn::Data::Enum(data_enum) = input.data {
+        data_enum.variants
+    } else {
+        panic!("TokenTypeSubset can only be used on enums");
+    };
+
+    // Find the name of the subset enum, and start & end variants of the subset
+    // subset attr should be defined on the enum and has the following syntax:
+    // #[subset(name = "SubsetEnumName", start = "StartVariant", end = "EndVariant")]
+    let mut subset_enum_name = None;
+    let mut start_variant = None;
+    let mut end_variant = None;
+
+    for attr in &input.attrs {
+        if attr.path().is_ident("subset") {
+            if let Meta::List(meta_list) = &attr.meta {
+                for nested in meta_list
+                    .parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated)
+                    .expect("Expected comma separated attributes: name, start, end")
+                {
+                    if let Meta::NameValue(MetaNameValue {
+                        path: opt,
+                        value: Expr::Path(syn::ExprPath { path: value, .. }),
+                        ..
+                    }) = nested
+                    {
+                        let ident = value
+                            .get_ident()
+                            .expect("Expected identifier as the value of name, start, end")
+                            .clone();
+
+                        if opt.is_ident("name") {
+                            subset_enum_name = Some(ident);
+                        } else if opt.is_ident("start") {
+                            start_variant = Some(ident.to_string());
+                        } else if opt.is_ident("end") {
+                            end_variant = Some(ident.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let Some(subset_enum_name) = subset_enum_name else {
+        panic!("Missing subset name");
+    };
+
+    let Some(start_variant) = start_variant else {
+        panic!("Missing start variant");
+    };
+
+    let Some(end_variant) = end_variant else {
+        panic!("Missing end variant");
+    };
+
+    let mut in_range = false;
+    let mut subset_variants = Vec::new();
+    let mut subset_variant_int_values = Vec::new();
+
+    for (i, variant) in variants.iter().enumerate() {
+        let variant_name = variant.ident.to_string();
+        let var_ident = variant.ident.clone();
+
+        if variant_name == start_variant {
+            in_range = true;
+        }
+        if in_range {
+            let var_int_val = Lit::Int(LitInt::new(i.to_string().as_str(), var_ident.span()));
+            subset_variants.push(var_ident);
+            subset_variant_int_values.push(var_int_val);
+        }
+        if variant_name == end_variant {
+            break;
+        }
+    }
+
+    let expanded = quote! {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, EnumIter)]
+        #[repr(u16)]
+        pub enum #subset_enum_name {
+            #(#subset_variants = #subset_variant_int_values),*
+        }
+
+        impl From<#subset_enum_name> for #full_enum_name {
+            fn from(subset: #subset_enum_name) -> Self {
+                match subset {
+                    #(#subset_enum_name::#subset_variants => #full_enum_name::#subset_variants),*
+                }
+            }
+        }
+
+        impl std::convert::TryFrom<#full_enum_name> for #subset_enum_name {
+            type Error = ();
+
+            fn try_from(value: #full_enum_name) -> Result<Self, Self::Error> {
+                match value {
+                    #(#full_enum_name::#subset_variants => Ok(#subset_enum_name::#subset_variants),)*
+                    _ => Err(()),
+                }
+            }
+        }
     };
 
     TokenStream::from(expanded)
