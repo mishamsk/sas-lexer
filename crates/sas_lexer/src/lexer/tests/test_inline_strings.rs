@@ -2192,6 +2192,26 @@ fn test_macro_eval_empty_logical_operand(
             ("=", TokenType::MacroString),
             (")", TokenType::RPAREN),
         ],
+        // Didn't add q/k substr variations, unlikely to have bugs
+        // if the regular ones work
+        vec![
+            ("%substr", TokenType::KwmSubstr),
+            ("(", TokenType::LPAREN),
+            ("a", TokenType::MacroString),
+            (",", TokenType::COMMA),
+            ("#", TokenType::UNKNOWN),
+            (")", TokenType::RPAREN),
+        ],
+        vec![
+            ("%substr", TokenType::KwmSubstr),
+            ("(", TokenType::LPAREN),
+            ("a", TokenType::MacroString),
+            (",", TokenType::COMMA),
+            ("#", TokenType::UNKNOWN),
+            (",", TokenType::COMMA),
+            ("#", TokenType::UNKNOWN),            
+            (")", TokenType::RPAREN),
+        ],
         vec![
             ("%do", TokenType::KwmDo),
             (" ", TokenType::WS),
@@ -2281,6 +2301,37 @@ fn test_macro_eval_empty_logical_operand(
             ("#", TokenType::UNKNOWN, Payload::None),
             ("", TokenType::MacroStringEmpty, Payload::None),
         ],
+        // Two ops consecutive
+        vec![
+            ("", TokenType::MacroStringEmpty, Payload::None),
+            ("#", TokenType::UNKNOWN, Payload::None),
+            (" ", TokenType::WS, Payload::None),
+            ("", TokenType::MacroStringEmpty, Payload::None),
+            ("#", TokenType::UNKNOWN, Payload::None),
+            ("", TokenType::MacroStringEmpty, Payload::None),
+        ],
+        // Parentheses
+        vec![
+            ("(", TokenType::LPAREN, Payload::None),
+            ("", TokenType::MacroStringEmpty, Payload::None),
+            ("#", TokenType::UNKNOWN, Payload::None),
+            (" ", TokenType::WS, Payload::None),
+            ("1", TokenType::IntegerLiteral, Payload::Integer(1)),
+            (")", TokenType::RPAREN, Payload::None),
+            ("and", TokenType::KwAND, Payload::None),
+            ("(", TokenType::LPAREN, Payload::None),
+            ("1", TokenType::IntegerLiteral, Payload::Integer(1)),
+            (" ", TokenType::WS, Payload::None),
+            ("#", TokenType::UNKNOWN, Payload::None),
+            ("", TokenType::MacroStringEmpty, Payload::None),
+            (")", TokenType::RPAREN, Payload::None),
+            ("and", TokenType::KwAND, Payload::None),
+            ("(", TokenType::LPAREN, Payload::None),
+            ("", TokenType::MacroStringEmpty, Payload::None),
+            ("#", TokenType::UNKNOWN, Payload::None),
+            ("", TokenType::MacroStringEmpty, Payload::None),
+            (")", TokenType::RPAREN, Payload::None),
+        ],
     )] 
     expr_template: Vec<(&str, TokenType, Payload)>,
 ) {
@@ -2328,12 +2379,5 @@ fn test_macro_eval_empty_logical_operand(
     );
 }
 // TODO:
-// - ws around operators should be hidden but between parts of a operand text expression - not
 // - decimals should be sexed as float in sysevalf, the rest should match eval
 // - in sysevalf, comma should terminate the expression and second argument for the function should be supported (vexed as macro string)
-// - inline macro calls and macro vars, string literals and expressions all should be correctly lexed
-// - for logical operators (such as <, >, ~=, =) if left or right operand is missing (just whitespace) a token with MacroStringEmpty token type should be emitted with no text
-// - expression delimiters (parens, commas) should also have hidden WS around them
-
-// #[case("(", TokenType::LPAREN)]
-// #[case(")", TokenType::RPAREN)]
