@@ -2260,15 +2260,48 @@ fn test_macro_eval_empty_logical_operand(
         ("ge", TokenType::KwGE),
     )]
     (op_str, op_tok): (&str, TokenType),
+    #[values(
+        // LHS missing
+        vec![
+            ("", TokenType::MacroStringEmpty, Payload::None),
+            ("#", TokenType::UNKNOWN, Payload::None),
+            (" ", TokenType::WS, Payload::None),
+            ("1", TokenType::IntegerLiteral, Payload::Integer(1)),
+        ],
+        // RHS missing
+        vec![
+            ("1", TokenType::IntegerLiteral, Payload::Integer(1)),
+            (" ", TokenType::WS, Payload::None),
+            ("#", TokenType::UNKNOWN, Payload::None),
+            ("", TokenType::MacroStringEmpty, Payload::None),
+        ],
+        // Both missing
+        vec![
+            ("", TokenType::MacroStringEmpty, Payload::None),
+            ("#", TokenType::UNKNOWN, Payload::None),
+            ("", TokenType::MacroStringEmpty, Payload::None),
+        ],
+    )] 
+    expr_template: Vec<(&str, TokenType, Payload)>,
 ) {
     // we construct a complex expression, with lhs, rhs and both operands missing
     // then replace the placeholders in the test template with this expression and test
-    let expr_expected_tokens = vec![
-        ("", TokenType::MacroStringEmpty, Payload::None),
-        (op_str, op_tok, Payload::None),
-        (" ", TokenType::WS, Payload::None),
-        ("1", TokenType::IntegerLiteral, Payload::Integer(1)),
-    ];
+    let expr_expected_tokens = expr_template
+        .iter()
+        .map(|(snip, tok_type, payload)| {
+            (
+                match tok_type {
+                    TokenType::UNKNOWN => op_str,
+                    _ => *snip,
+                },
+                match tok_type {
+                    TokenType::UNKNOWN => op_tok,
+                    _ => *tok_type,
+                },                
+                *payload,
+            )
+        })
+        .collect::<Vec<_>>();
 
     let all_expected_tokens = template
         .iter()
