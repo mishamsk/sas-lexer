@@ -802,6 +802,7 @@ impl<'src> Lexer<'src> {
                         // Hit a following macro statement => pop mode and exit.
                         // Error has already been emitted by the `lex_macro_call`
                         // if macro stat is not allowed
+                        self.maybe_emit_empty_macro_string(None);
                         self.pop_mode();
 
                         // We need to handle one special case - an expression after
