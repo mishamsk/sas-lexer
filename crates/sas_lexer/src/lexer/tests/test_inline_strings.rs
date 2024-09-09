@@ -1969,6 +1969,13 @@ fn test_macro_strings_with_mnemonics_eval_expr(#[case] op_str: &str) {
 }
 
 #[rstest]
+#[case::comma_and_semi(",eQ;", 
+    vec![
+        (",", TokenType::MacroString, Payload::None),
+        ("eQ", TokenType::KwEQ, Payload::None),
+        (";", TokenType::MacroString, Payload::None),
+    ]
+)]
 #[case::not_integer_1("1 2 ~= 3 4", 
     vec![
         ("1 2", TokenType::MacroString, Payload::None),
@@ -2091,6 +2098,198 @@ fn test_macro_eval_expr(
 
     assert_lexing(
         format!("%eval({expr_str})").as_str(),
+        all_expected_tokens,
+        NO_ERRORS,
+    );
+}
+
+#[rstest]
+fn test_macro_eval_empty_logical_operand(
+    #[values(
+        vec![
+            ("%eval", TokenType::KwmEval),
+            ("(", TokenType::LPAREN),
+            ("#", TokenType::UNKNOWN),
+            (")", TokenType::RPAREN),
+        ],
+        vec![
+            ("%sysevalf", TokenType::KwmSysevalf),
+            ("(", TokenType::LPAREN),
+            ("#", TokenType::UNKNOWN),
+            (",", TokenType::COMMA),
+            ("ceil", TokenType::MacroString),
+            (")", TokenType::RPAREN),
+        ],
+        vec![
+            ("%scan", TokenType::KwmScan),
+            ("(", TokenType::LPAREN),
+            ("a", TokenType::MacroString),
+            (",", TokenType::COMMA),
+            ("#", TokenType::UNKNOWN),
+            (")", TokenType::RPAREN),
+        ],
+        vec![
+            ("%scan", TokenType::KwmScan),
+            ("(", TokenType::LPAREN),
+            ("a", TokenType::MacroString),
+            (",", TokenType::COMMA),
+            ("#", TokenType::UNKNOWN),
+            (",", TokenType::COMMA),
+            ("=", TokenType::MacroString),
+            (")", TokenType::RPAREN),
+        ],
+        vec![
+            ("%qscan", TokenType::KwmQScan),
+            ("(", TokenType::LPAREN),
+            ("a", TokenType::MacroString),
+            (",", TokenType::COMMA),
+            ("#", TokenType::UNKNOWN),
+            (")", TokenType::RPAREN),
+        ],
+        vec![
+            ("%qscan", TokenType::KwmQScan),
+            ("(", TokenType::LPAREN),
+            ("a", TokenType::MacroString),
+            (",", TokenType::COMMA),
+            ("#", TokenType::UNKNOWN),
+            (",", TokenType::COMMA),
+            ("=", TokenType::MacroString),
+            (")", TokenType::RPAREN),
+        ],
+        vec![
+            ("%kscan", TokenType::KwmKScan),
+            ("(", TokenType::LPAREN),
+            ("a", TokenType::MacroString),
+            (",", TokenType::COMMA),
+            ("#", TokenType::UNKNOWN),
+            (")", TokenType::RPAREN),
+        ],
+        vec![
+            ("%kscan", TokenType::KwmKScan),
+            ("(", TokenType::LPAREN),
+            ("a", TokenType::MacroString),
+            (",", TokenType::COMMA),
+            ("#", TokenType::UNKNOWN),
+            (",", TokenType::COMMA),
+            ("=", TokenType::MacroString),
+            (")", TokenType::RPAREN),
+        ],
+        vec![
+            ("%qKscan", TokenType::KwmQKScan),
+            ("(", TokenType::LPAREN),
+            ("a", TokenType::MacroString),
+            (",", TokenType::COMMA),
+            ("#", TokenType::UNKNOWN),
+            (")", TokenType::RPAREN),
+        ],
+        vec![
+            ("%qKscan", TokenType::KwmQKScan),
+            ("(", TokenType::LPAREN),
+            ("a", TokenType::MacroString),
+            (",", TokenType::COMMA),
+            ("#", TokenType::UNKNOWN),
+            (",", TokenType::COMMA),
+            ("=", TokenType::MacroString),
+            (")", TokenType::RPAREN),
+        ],
+        vec![
+            ("%do", TokenType::KwmDo),
+            (" ", TokenType::WS),
+            ("i", TokenType::Identifier),
+            ("=", TokenType::ASSIGN),
+            ("#", TokenType::UNKNOWN),
+            ("%to", TokenType::KwmTo),
+            (" ", TokenType::WS),
+            ("#", TokenType::UNKNOWN),
+            ("%by", TokenType::KwmBy),
+            (" ", TokenType::WS),
+            ("#", TokenType::UNKNOWN),
+            (";", TokenType::SEMI),
+        ],            
+        vec![
+            ("%do", TokenType::KwmDo),
+            (" ", TokenType::WS),
+            ("i", TokenType::Identifier),
+            ("=", TokenType::ASSIGN),
+            ("#", TokenType::UNKNOWN),
+            ("%to", TokenType::KwmTo),
+            (" ", TokenType::WS),
+            ("#", TokenType::UNKNOWN),
+            (";", TokenType::SEMI),            
+        ],
+        vec![
+            ("%do", TokenType::KwmDo),
+            (" ", TokenType::WS),
+            ("%until", TokenType::KwmUntil),
+            ("(", TokenType::LPAREN),
+            ("#", TokenType::UNKNOWN),
+            (")", TokenType::RPAREN),
+            (";", TokenType::SEMI),
+        ],
+        vec![
+            ("%do", TokenType::KwmDo),
+            (" ", TokenType::WS),
+            ("%WhIle", TokenType::KwmWhile),
+            ("(", TokenType::LPAREN),
+            ("#", TokenType::UNKNOWN),
+            (")", TokenType::RPAREN),
+            (";", TokenType::SEMI),
+        ],
+        vec![
+            ("%if", TokenType::KwmIf),
+            (" ", TokenType::WS),
+            ("#", TokenType::UNKNOWN),
+            ("%tHeN", TokenType::KwmThen),            
+        ],
+    )]
+    template: Vec<(&str, TokenType)>,
+    #[values(
+        ("<", TokenType::LT),
+        ("lt", TokenType::KwLT),
+        ("<=", TokenType::LE),
+        ("le", TokenType::KwLE),
+        ("=", TokenType::ASSIGN),
+        ("eq", TokenType::KwEQ),
+        ("#", TokenType::HASH),
+        ("in", TokenType::KwIN),
+        ("~=", TokenType::NE),
+        ("ne", TokenType::KwNE),
+        (">", TokenType::GT),
+        ("gt", TokenType::KwGT),
+        (">=", TokenType::GE),
+        ("ge", TokenType::KwGE),
+    )]
+    (op_str, op_tok): (&str, TokenType),
+) {
+    // we construct a complex expression, with lhs, rhs and both operands missing
+    // then replace the placeholders in the test template with this expression and test
+    let expr_expected_tokens = vec![
+        ("", TokenType::MacroStringEmpty, Payload::None),
+        (op_str, op_tok, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("1", TokenType::IntegerLiteral, Payload::Integer(1)),
+    ];
+
+    let all_expected_tokens = template
+        .iter()
+        .flat_map(|(snip, tok_type)| match tok_type {
+            TokenType::UNKNOWN => {
+                // Placeholder, here comes the expression
+                expr_expected_tokens.clone()
+            }
+            _ => {
+                // Regular template part, add payload
+                vec![(*snip, *tok_type, Payload::None)]
+            }
+        })
+        .collect::<Vec<_>>();
+
+    assert_lexing(
+        all_expected_tokens
+            .iter()
+            .map(|(snip, _, _)| *snip)
+            .collect::<String>()
+            .as_str(),
         all_expected_tokens,
         NO_ERRORS,
     );
