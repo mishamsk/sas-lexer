@@ -80,6 +80,7 @@ pub(super) const fn is_macro_eval_logical_op(tok_type: TokenType) -> bool {
             | TokenType::LE
             | TokenType::KwLE
             | TokenType::ASSIGN
+            | TokenType::KwEQ
             | TokenType::HASH
             | TokenType::KwIN
             | TokenType::NE
@@ -252,6 +253,8 @@ pub(super) fn is_macro_stat<I: Iterator<Item = char> + Clone>(chars: I) -> bool 
     // Unfortunatelly this one needs a very inefficient lookahead
     // to check if we have any statement upfront.
     let ident = chars
+        // Move past the % to the first character of the identifier
+        .skip(1)
         .map(|c| {
             // For simplicity of code, given rare realistic usage of unicode,
             // we just replace unicode with empty char, which will effectivly

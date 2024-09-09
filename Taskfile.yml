@@ -18,8 +18,8 @@ tasks:
     deps:
       - build:rel
     cmds:
-      - hyperfine -N -w 10 "target/release/sas-lexer {{.PERF_ALL_SAMPLES}}"
-      - hyperfine -N -w 5 "target/release/sas-lexer {{.PERF_LARGE_SAMPLE}}"
+      - hyperfine -N -w 10 "target/release/sas-lexer lex {{.PERF_ALL_SAMPLES}}"
+      - hyperfine -N -w 5 "target/release/sas-lexer lex {{.PERF_LARGE_SAMPLE}}"
 
   perf:compare:
     desc: Compare the performance of the current build with the given SHA
@@ -43,5 +43,5 @@ tasks:
       # Build the given SHA
       - cargo build --release
       # Compare the performance of the current build with the given SHA
-      - hyperfine -w 10 "tmpdir/sas-lexer {{.PERF_ALL_SAMPLES}}" "target/release/sas-lexer {{.PERF_ALL_SAMPLES}}"
-      - hyperfine -w 5 "tmpdir/sas-lexer {{.PERF_LARGE_SAMPLE}}" "target/release/sas-lexer {{.PERF_LARGE_SAMPLE}}"
+      - hyperfine -w 10 "tmpdir/sas-lexer lex {{.PERF_ALL_SAMPLES}}" "target/release/sas-lexer lex {{.PERF_ALL_SAMPLES}}"
+      - hyperfine -w 5 "tmpdir/sas-lexer lex {{.PERF_LARGE_SAMPLE}}" "target/release/sas-lexer lex {{.PERF_LARGE_SAMPLE}}"

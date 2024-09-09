@@ -28,6 +28,7 @@ module-name = "sas_lexer._sas_lexer_rust"
 python-source = "src"
 strip = true
 profile = "release"
+features = ["pyo3/extension-module"]
 
 [tool.ruff]
 line-length = 100
