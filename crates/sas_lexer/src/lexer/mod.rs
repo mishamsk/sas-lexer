@@ -3553,7 +3553,7 @@ impl<'src> Lexer<'src> {
                 self.push_mode(LexerMode::WsOrCStyleCommentOnly);
             }
             // The "simple" built-ins, that are lexed as macro calls without any special handling
-            // Even though we know that some of 
+            // Even though we know that some of them have speecific types or number of arguments
             TokenTypeMacroCallOrStat::KwmIndex
             | TokenTypeMacroCallOrStat::KwmKIndex
             | TokenTypeMacroCallOrStat::KwmLength
@@ -3568,6 +3568,16 @@ impl<'src> Lexer<'src> {
             | TokenTypeMacroCallOrStat::KwmQKUpcase
             | TokenTypeMacroCallOrStat::KwmSysmexecname
             | TokenTypeMacroCallOrStat::KwmSysprod
+            | TokenTypeMacroCallOrStat::KwmKCmpres
+            | TokenTypeMacroCallOrStat::KwmQKCmpres
+            | TokenTypeMacroCallOrStat::KwmKLeft
+            | TokenTypeMacroCallOrStat::KwmQKLeft
+            | TokenTypeMacroCallOrStat::KwmQuote
+            | TokenTypeMacroCallOrStat::KwmNrQuote
+            | TokenTypeMacroCallOrStat::KwmBquote
+            | TokenTypeMacroCallOrStat::KwmNrBquote
+            | TokenTypeMacroCallOrStat::KwmSuperq
+            | TokenTypeMacroCallOrStat::KwmUnquote
             // The following 6 are really one argument of var name expr only, but
             // decided to not do too much parsing-like validation here
             | TokenTypeMacroCallOrStat::KwmSymExist
@@ -3575,8 +3585,7 @@ impl<'src> Lexer<'src> {
             | TokenTypeMacroCallOrStat::KwmSymLocal
             | TokenTypeMacroCallOrStat::KwmSysget
             | TokenTypeMacroCallOrStat::KwmSysmacexec
-            | TokenTypeMacroCallOrStat::KwmSysmacexist
-            => {
+            | TokenTypeMacroCallOrStat::KwmSysmacexist => {
                 // All built-ins have arguments, so we may avoid the `maybe` version
                 self.push_mode(LexerMode::ExpectSymbol(
                     ')',
@@ -3584,7 +3593,9 @@ impl<'src> Lexer<'src> {
                     TokenChannel::DEFAULT,
                 ));
                 // The handler fo arguments will push the mode for the comma, etc.
-                self.push_mode(LexerMode::MacroCallArgOrValue(0));
+                // Built-ins do not allow named arguments, so we pass `MacroCallValue`
+                // right away
+                self.push_mode(LexerMode::MacroCallValue(true, 0));
                 // Leading insiginificant WS before the first argument
                 self.push_mode(LexerMode::WsOrCStyleCommentOnly);
                 self.push_mode(LexerMode::ExpectSymbol(
@@ -3597,14 +3608,8 @@ impl<'src> Lexer<'src> {
             }
             // No argument built-ins
             TokenTypeMacroCallOrStat::KwmSysmexecdepth => {}
-            // Custom macro or label
-            TokenTypeMacroCallOrStat::MacroIdentifier => {
-                self.maybe_expect_macro_call_args();
-            }
-            tok_type if !is_macro_stat_tok_type(tok_type.into()) => {
-                // TODO!!!!!! PLACEHOLDER - should be exhaustive
-                // All built-ins have arguments, so we may avoid the `maybe` version
-
+            // The special built-in beast, that allows named arguments
+            TokenTypeMacroCallOrStat::KwmValidchs => {
                 self.push_mode(LexerMode::ExpectSymbol(
                     ')',
                     TokenType::RPAREN,
@@ -3622,16 +3627,32 @@ impl<'src> Lexer<'src> {
                 // Leading insiginificant WS before opening parenthesis
                 self.push_mode(LexerMode::WsOrCStyleCommentOnly);
             }
-            // Macro statements
-            TokenTypeMacroCallOrStat::KwmThen | TokenTypeMacroCallOrStat::KwmElse => {
-                // Super easy, they effectively do nothing
+            // Custom macro or label
+            TokenTypeMacroCallOrStat::MacroIdentifier => {
+                self.maybe_expect_macro_call_args();
             }
-            TokenTypeMacroCallOrStat::KwmEnd | TokenTypeMacroCallOrStat::KwmReturn => {
-                // Super easy, just expect the closing semi
+            // Macro statements
+            TokenTypeMacroCallOrStat::KwmInclude
+            | TokenTypeMacroCallOrStat::KwmList
+            | TokenTypeMacroCallOrStat::KwmThen
+            | TokenTypeMacroCallOrStat::KwmElse => {
+                // Super easy, they effectively do nothing to mode stack
+            }
+            TokenTypeMacroCallOrStat::KwmEnd
+            | TokenTypeMacroCallOrStat::KwmReturn
+            | TokenTypeMacroCallOrStat::KwmRun => {
+                // Almost super easy, just expect the closing semi
                 self.push_mode(LexerMode::ExpectSemiOrEOF);
                 self.push_mode(LexerMode::WsOrCStyleCommentOnly);
             }
-            TokenTypeMacroCallOrStat::KwmPut | TokenTypeMacroCallOrStat::KwmGoto => {
+            TokenTypeMacroCallOrStat::KwmAbort
+            | TokenTypeMacroCallOrStat::KwmDisplay
+            | TokenTypeMacroCallOrStat::KwmGoto
+            | TokenTypeMacroCallOrStat::KwmInput
+            | TokenTypeMacroCallOrStat::KwmMend
+            | TokenTypeMacroCallOrStat::KwmPut
+            | TokenTypeMacroCallOrStat::KwmSysexec => {
+                // These we just lex as macro text expressions until the semi
                 self.push_mode(LexerMode::ExpectSemiOrEOF);
                 self.push_mode(LexerMode::MacroSemiTerminatedTextExpr);
                 self.push_mode(LexerMode::WsOrCStyleCommentOnly);

@@ -28,7 +28,7 @@ use strum::{Display, EnumCount, EnumIter};
 #[kw_map_name = "KEYWORDS"]
 #[kwm_map_name = "MKEYWORDS"]
 #[repr(u16)]
-#[subset(name = TokenTypeMacroCallOrStat, start = MacroIdentifier, end = KwmList)]
+#[subset(name = TokenTypeMacroCallOrStat, start = MacroIdentifier, end = KwmRun)]
 pub enum TokenType {
     EOF,
     UNKNOWN,
@@ -207,6 +207,7 @@ pub enum TokenType {
     #[keyword("INCLUDE", "INC")]
     KwmInclude, // INCLUDE or INC
     KwmList, // LIST
+    KwmRun,  // RUN
     // ----------------MACRO TOKENS (end) ----------------
     // Put pure non macro tokens after this line only
     Identifier,

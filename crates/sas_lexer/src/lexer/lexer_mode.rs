@@ -27,6 +27,16 @@ pub(super) enum MacroEvalNextArgumentMode {
 }
 
 /// Packed flags for macro eval expressions (arithmetic/logical)
+///
+/// The following flags are packed into a single byte:
+/// - Float mode (enabled in `%sysevalf`)
+/// - Terminate on comma (enabled where eval context is for a macro call
+///     argument)
+/// - Terminate on statement (enabled for expr after `%if`, `%to`, etc.)
+/// - Terminate on semicolon (enabled for expr after `%if`, `%by`, etc.)
+///     `%if` is there despite semi being a session error, because
+///     SAS will behave this way when trying to recover from error.
+/// - Followed by another expression (enabled for first expr in `%SUBSTR`)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct MacroEvalExprFlags(u8);
 
