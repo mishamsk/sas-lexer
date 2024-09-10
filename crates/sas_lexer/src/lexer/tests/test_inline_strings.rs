@@ -80,7 +80,7 @@ fn test_end_line_with_empty_tok() {
     let source = "%eval(\nne 1)";
 
     let expected_tokens = vec![
-        ("%eval",TokenType::KwmEval, Payload::None),
+        ("%eval", TokenType::KwmEval, Payload::None),
         ("(", TokenType::LPAREN, Payload::None),
         ("\n", TokenType::WS, Payload::None),
         ("", TokenType::MacroStringEmpty, Payload::None),
@@ -2392,7 +2392,7 @@ fn test_macro_eval_empty_logical_operand(
             (" ", TokenType::WS),
             ("#", TokenType::UNKNOWN),
             (";", TokenType::SEMI),
-        ],            
+        ],
         vec![
             ("%do", TokenType::KwmDo),
             (" ", TokenType::WS),
@@ -2527,7 +2527,7 @@ fn test_macro_eval_empty_logical_operand(
                 match tok_type {
                     TokenType::UNKNOWN => op_tok,
                     _ => *tok_type,
-                },                
+                },
                 *payload,
             )
         })

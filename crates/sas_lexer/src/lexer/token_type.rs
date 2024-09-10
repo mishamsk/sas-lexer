@@ -144,6 +144,7 @@ pub enum TokenType {
     KwmKIndex,   // KINDEX
     KwmKLeft,    // KLEFT
     KwmKLength,  // KLENGTH
+    KwmKLowcase, // KLLOWCASE
     KwmKScan,    // KSCAN
     KwmKSubstr,  // KSUBSTR
     KwmKUpcase,  // KUPCASE
@@ -157,11 +158,12 @@ pub enum TokenType {
     KwmQSysfunc, // QSYSFUNC
     KwmQUpcase,  // QUPCASE
     // NLS functions (masking)
-    KwmQKCmpres, // QKCMPRES
-    KwmQKLeft,   // QKLEFT
-    KwmQKScan,   // QKSCAN
-    KwmQKSubstr, // QKSUBSTR
-    KwmQKUpcase, // QKUPCASE
+    KwmQKCmpres,  // QKCMPRES
+    KwmQKLeft,    // QKLEFT
+    KwmQKLowcase, // QKLOWCASE
+    KwmQKScan,    // QKSCAN
+    KwmQKSubstr,  // QKSUBSTR
+    KwmQKUpcase,  // QKUPCASE
     // Runtime Quoting functions
     KwmBquote,   // BQUOTE
     KwmNrBquote, // NRBQUOTE
@@ -339,6 +341,13 @@ pub enum TokenType {
     // SAS Functions expecting formats as arguments
     KwInput,
     KwPut,
+}
+
+#[derive(PartialEq)]
+pub(super) enum MacroKwType {
+    None,
+    MacroCallOrLabel,
+    MacroStat,
 }
 
 pub(super) fn parse_keyword<S: AsRef<str>>(ident: S) -> Option<TokenType> {

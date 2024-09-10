@@ -176,7 +176,7 @@ pub(super) fn lex_macro_call_stat_or_label(
             TokenTypeMacroCallOrStat::try_from(t)
         })
         .map(|t| (t, cursor.char_offset() - start_char_offset))
-        .map_err(|_| "Unexpected error in `parse_macro_keyword` - not a keyword returned")
+        .map_err(|()| "Unexpected error in `parse_macro_keyword` - not a keyword returned")
 }
 
 /// Predicate to check if the following chracters are one of macro logical
