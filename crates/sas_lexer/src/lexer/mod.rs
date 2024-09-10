@@ -1244,7 +1244,14 @@ impl<'src> Lexer<'src> {
     /// or at any genuine end of expression, which may be comma, semi, statement keyword etc.
     /// In the latter case, `next_expr_tok_type` should be None
     fn maybe_emit_empty_macro_string(&mut self, next_expr_tok_type: Option<TokenType>) {
-        let expr_end = next_expr_tok_type.map_or(true, |tok_type| tok_type == TokenType::RPAREN);
+        let expr_end = next_expr_tok_type.map_or(true, |tok_type| {
+            matches!(
+                tok_type,
+                // right paren ends subexpression. AND and OR are lower precedence
+                // so they also "end" the current logical subexpression
+                TokenType::RPAREN | TokenType::KwAND | TokenType::KwOR
+            )
+        });
 
         let op_follows = next_expr_tok_type.is_some_and(is_macro_eval_logical_op);
 
@@ -1264,7 +1271,7 @@ impl<'src> Lexer<'src> {
                 } else if matches!(
                     prev_tok_type,
                     // These are all possible "starts", tokens preceeding
-                    // the start of an evaluated macro expr.
+                    // the start of an evaluated logical macro subexpression.
                     // See: https://documentation.sas.com/doc/en/pgmsascdc/9.4_3.5/mcrolref/n1alyfc9f4qrten10sd5qz5e1w5q.htm#p17exjo2c9f5e3n19jqgng0ho42u
                     TokenType::LPAREN
                         | TokenType::ASSIGN
@@ -1272,6 +1279,8 @@ impl<'src> Lexer<'src> {
                         | TokenType::KwmTo
                         | TokenType::KwmBy
                         | TokenType::COMMA
+                        | TokenType::KwAND
+                        | TokenType::KwOR
                 ) {
                     // if we are at the start of expression, or start of parenthesized subexpression
                     // the logic is more involved since if no operand is given in reality SAS will emit
