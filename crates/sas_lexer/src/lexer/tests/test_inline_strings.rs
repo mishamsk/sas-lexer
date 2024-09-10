@@ -75,6 +75,36 @@ fn test_column_count_with_bom() {
     );
 }
 
+#[test]
+fn test_end_line_with_empty_tok() {
+    let source = "%eval(\nne 1)";
+
+    let expected_tokens = vec![
+        ("%eval",TokenType::KwmEval, Payload::None),
+        ("(", TokenType::LPAREN, Payload::None),
+        ("\n", TokenType::WS, Payload::None),
+        ("", TokenType::MacroStringEmpty, Payload::None),
+        ("ne", TokenType::KwNE, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("1", TokenType::IntegerLiteral, Payload::Integer(1)),
+        (")", TokenType::RPAREN, Payload::None),
+    ];
+
+    assert_lexing(source, expected_tokens, NO_ERRORS);
+
+    let (buffer, _) = lex(&source).unwrap();
+
+    // Get the empty token MacroStringEmpty and check the end line
+    let token = buffer.into_iter().nth(3).unwrap();
+
+    assert_eq!(
+        buffer.get_token_end_line(token).expect("wrong token"),
+        2,
+        "Expected an end line 2, got {}",
+        buffer.get_token_end_line(token).expect("wrong token")
+    );
+}
+
 #[rstest]
 #[case::mixed_ws("\n\t \n", TokenType::WS)]
 #[case::cstyle_comment_single_line(
@@ -2469,7 +2499,19 @@ fn test_macro_eval_empty_logical_operand(
             ("", TokenType::MacroStringEmpty, Payload::None),
             (")", TokenType::RPAREN, Payload::None),
         ],
-    )] 
+        // No parentheses, split with logical
+        vec![
+            ("", TokenType::MacroStringEmpty, Payload::None),
+            ("#", TokenType::UNKNOWN, Payload::None),
+            (" ", TokenType::WS, Payload::None),            
+            ("", TokenType::MacroStringEmpty, Payload::None),
+            ("and", TokenType::KwAND, Payload::None),            
+            (" ", TokenType::WS, Payload::None),            
+            ("", TokenType::MacroStringEmpty, Payload::None),
+            ("#", TokenType::UNKNOWN, Payload::None),
+            ("", TokenType::MacroStringEmpty, Payload::None),            
+        ],
+    )]
     expr_template: Vec<(&str, TokenType, Payload)>,
 ) {
     // we construct a complex expression, with lhs, rhs and both operands missing
@@ -2516,3 +2558,57 @@ fn test_macro_eval_empty_logical_operand(
     );
 }
 
+#[rstest]
+#[case::do_to_no_by("%do i=1 %to 2  ;",
+    vec![
+        ("%do", TokenType::KwmDo, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("i", TokenType::Identifier, Payload::None),
+        ("=", TokenType::ASSIGN, Payload::None),
+        ("1", TokenType::IntegerLiteral, Payload::Integer(1)),
+        (" ", TokenType::WS, Payload::None),
+        ("%to", TokenType::KwmTo, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("2", TokenType::IntegerLiteral, Payload::Integer(2)),
+        ("  ", TokenType::WS, Payload::None),        
+        (";", TokenType::SEMI, Payload::None),
+        ]
+)]
+#[case::do_to_no_by_trailing_commnet("%do i=1 %to 2  /*c*/  ;",
+    vec![
+        ("%do", TokenType::KwmDo, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("i", TokenType::Identifier, Payload::None),
+        ("=", TokenType::ASSIGN, Payload::None),
+        ("1", TokenType::IntegerLiteral, Payload::Integer(1)),
+        (" ", TokenType::WS, Payload::None),
+        ("%to", TokenType::KwmTo, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        // Known limitation of our "predictive" lexer
+        ("2  ", TokenType::MacroString, Payload::None),        
+        ("/*c*/", TokenType::CStyleComment, Payload::None),
+        ("  ", TokenType::WS, Payload::None),
+        (";", TokenType::SEMI, Payload::None),
+        ]
+)]
+#[case::do_to_by("%do i=1 %to &mv %by 0ffx;",
+    vec![
+        ("%do", TokenType::KwmDo, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("i", TokenType::Identifier, Payload::None),
+        ("=", TokenType::ASSIGN, Payload::None),
+        ("1", TokenType::IntegerLiteral, Payload::Integer(1)),
+        (" ", TokenType::WS, Payload::None),
+        ("%to", TokenType::KwmTo, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("&mv", TokenType::MacroVarExpr, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("%by", TokenType::KwmBy, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("0ffx", TokenType::IntegerLiteral, Payload::Integer(255)),
+        (";", TokenType::SEMI, Payload::None),
+        ]
+)]
+fn test_macro_do(#[case] contents: &str, #[case] expected_token: Vec<impl TokenTestCase>) {
+    assert_lexing(contents, expected_token, NO_ERRORS);
+}
