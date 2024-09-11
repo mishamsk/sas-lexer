@@ -12,7 +12,7 @@ mod tests;
 mod text;
 pub(crate) mod token_type;
 
-use buffer::{LineIdx, Payload, TokenIdx, TokenizedBuffer, WorkTokenizedBuffer};
+use buffer::{LineIdx, Payload, TokenIdx, TokenInfo, TokenizedBuffer, WorkTokenizedBuffer};
 use channel::TokenChannel;
 use cursor::EOF_CHAR;
 use error::{ErrorInfo, ErrorType, OPEN_CODE_RECURSION_ERR};
@@ -358,10 +358,10 @@ impl<'src> Lexer<'src> {
                     // These are optional modes, meaning there can be no actual token lexed in it
                     // so we can safely pop them
                 }
-                LexerMode::MacroStrQuotedExpr(_, pnl)
-                | LexerMode::MacroCallArgOrValue(pnl)
-                | LexerMode::MacroCallValue(_, pnl)
-                | LexerMode::MacroEval(_, pnl) => {
+                LexerMode::MacroStrQuotedExpr { pnl, .. }
+                | LexerMode::MacroCallArgOrValue { pnl }
+                | LexerMode::MacroCallValue { pnl, .. }
+                | LexerMode::MacroEval { pnl, .. } => {
                     // If the parens nesting level is > 0, we should emit the missing number of
                     // closing parens to balance it out
                     let pnl = *pnl; // do not ask...borrow checker!
@@ -381,7 +381,7 @@ impl<'src> Lexer<'src> {
                         }
                     }
                 }
-                LexerMode::StringExpr(_) => {
+                LexerMode::StringExpr { .. } => {
                     // This may happen if we have unbalanced `"` or `'` as the last character
                     self.handle_unterminated_str_expr(Payload::None);
                 }
@@ -449,7 +449,7 @@ impl<'src> Lexer<'src> {
                         TokenChannel::DEFAULT,
                     ));
                     // The handler fo arguments will push the mode for the comma, etc.
-                    self.push_mode(LexerMode::MacroCallArgOrValue(0));
+                    self.push_mode(LexerMode::MacroCallArgOrValue { pnl: 0 });
                     // Leading insiginificant WS before the first argument
                     self.push_mode(LexerMode::WsOrCStyleCommentOnly);
                 } else {
@@ -482,18 +482,31 @@ impl<'src> Lexer<'src> {
                 self.pop_mode();
             }
             LexerMode::Default => self.dispatch_mode_default(next_char),
-            LexerMode::StringExpr(allow_stat) => self.dispatch_mode_str_expr(next_char, allow_stat),
-            LexerMode::MacroEval(flags, pnl) => {
-                self.dispatch_mode_macro_eval(next_char, flags, pnl);
+            LexerMode::StringExpr { allow_stat } => {
+                self.dispatch_mode_str_expr(next_char, allow_stat);
             }
-            LexerMode::MacroStrQuotedExpr(mask_macro, pnl) => {
+            LexerMode::MacroEval {
+                macro_eval_flags,
+                pnl,
+            } => {
+                self.dispatch_mode_macro_eval(next_char, macro_eval_flags, pnl);
+            }
+            LexerMode::MacroStrQuotedExpr { mask_macro, pnl } => {
                 self.dispatch_macro_str_quoted_expr(next_char, mask_macro, pnl);
             }
-            LexerMode::MacroCallArgOrValue(pnl) => {
+            LexerMode::MacroCallArgOrValue { pnl } => {
                 self.dispatch_macro_call_arg_or_value(next_char, pnl, true, true);
             }
-            LexerMode::MacroCallValue(pnas, pnl) => {
-                self.dispatch_macro_call_arg_or_value(next_char, pnl, false, pnas);
+            LexerMode::MacroCallValue {
+                populate_next_arg_stack,
+                pnl,
+            } => {
+                self.dispatch_macro_call_arg_or_value(
+                    next_char,
+                    pnl,
+                    false,
+                    populate_next_arg_stack,
+                );
             }
             LexerMode::MacroDo => {
                 self.dispatch_macro_do(next_char);
@@ -602,8 +615,9 @@ impl<'src> Lexer<'src> {
         parens_nesting_level: u32,
     ) {
         debug_assert!(matches!(
-            self.mode(),
-            LexerMode::MacroEval(f, pnl) if f == macro_eval_flags && pnl == parens_nesting_level
+           self.mode(),
+           LexerMode::MacroEval { macro_eval_flags: f, pnl }
+                if f == macro_eval_flags && pnl == parens_nesting_level
         ));
 
         self.start_token();
@@ -641,7 +655,7 @@ impl<'src> Lexer<'src> {
                         // Hit a following macro statement => pop mode and exit.
                         // Error has already been emitted by the `lex_macro_call`
                         // if macro stat is not allowed
-                        self.maybe_emit_empty_macro_string(None);
+                        self.maybe_emit_empty_macro_string_in_eval(None);
                         self.pop_mode();
 
                         // We need to handle one special case - an expression after
@@ -676,27 +690,30 @@ impl<'src> Lexer<'src> {
             }
             ')' if parens_nesting_level == 0 => {
                 // Found the end of the expression, pop the mode and return
-                self.maybe_emit_empty_macro_string(None);
+                self.maybe_emit_empty_macro_string_in_eval(None);
                 self.pop_mode();
             }
             ',' if macro_eval_flags.terminate_on_comma() => {
                 // Found the end of the expression, pop the mode and return
-                self.maybe_emit_empty_macro_string(None);
+                self.maybe_emit_empty_macro_string_in_eval(None);
                 self.pop_mode();
 
                 // Now push modes for the next argument
                 if macro_eval_flags.followed_by_expr() {
-                    self.push_mode(LexerMode::MacroEval(
-                        MacroEvalExprFlags::new(
+                    self.push_mode(LexerMode::MacroEval {
+                        macro_eval_flags: MacroEvalExprFlags::new(
                             MacroEvalNumericMode::Integer,
                             MacroEvalNextArgumentMode::None,
                             false,
                             false,
                         ),
-                        0,
-                    ));
+                        pnl: 0,
+                    });
                 } else {
-                    self.push_mode(LexerMode::MacroCallValue(true, 0));
+                    self.push_mode(LexerMode::MacroCallValue {
+                        populate_next_arg_stack: true,
+                        pnl: 0,
+                    });
                 }
                 self.cursor.advance();
                 self.emit_token(TokenChannel::DEFAULT, TokenType::COMMA, Payload::None);
@@ -705,7 +722,7 @@ impl<'src> Lexer<'src> {
             }
             ';' if macro_eval_flags.terminate_on_semi() => {
                 // Found the end of the expression, pop the mode and return
-                self.maybe_emit_empty_macro_string(None);
+                self.maybe_emit_empty_macro_string_in_eval(None);
                 self.pop_mode();
             }
             c => {
@@ -719,18 +736,22 @@ impl<'src> Lexer<'src> {
     }
 
     fn lex_macro_eval_operator(&mut self, next_char: char) -> bool {
-        debug_assert!(matches!(self.mode(), LexerMode::MacroEval(_, _)));
+        debug_assert!(matches!(self.mode(), LexerMode::MacroEval { .. }));
 
         // Helper function to emit the token and update the mode if needed
         let update_parens_nesting = |lexer: &mut Lexer, increment: bool| {
-            if let Some(LexerMode::MacroEval(_, pnl)) = lexer.mode_stack.last_mut() {
+            if let Some(LexerMode::MacroEval {
+                pnl: parens_nesting_level,
+                ..
+            }) = lexer.mode_stack.last_mut()
+            {
                 if increment {
-                    *pnl = pnl.wrapping_add_signed(1);
+                    *parens_nesting_level = parens_nesting_level.wrapping_add_signed(1);
                 } else {
                     // If our logic is correct, it should be impossible for the symbol
                     // lex function to decrement the parens nesting level below 0
-                    debug_assert!(*pnl > 0);
-                    *pnl = pnl.wrapping_add_signed(-1);
+                    debug_assert!(*parens_nesting_level > 0);
+                    *parens_nesting_level = parens_nesting_level.wrapping_add_signed(-1);
                 }
             };
         };
@@ -792,7 +813,7 @@ impl<'src> Lexer<'src> {
             _ => return false,
         };
 
-        self.maybe_emit_empty_macro_string(Some(tok_type));
+        self.maybe_emit_empty_macro_string_in_eval(Some(tok_type));
 
         self.cursor.advance_by(1 + extra_advance_by);
         self.emit_token(TokenChannel::DEFAULT, tok_type, Payload::None);
@@ -801,8 +822,9 @@ impl<'src> Lexer<'src> {
         true
     }
 
+    #[allow(clippy::too_many_lines)]
     fn lex_macro_string_in_macro_eval_context(&mut self, macro_eval_flags: MacroEvalExprFlags) {
-        debug_assert!(matches!(self.mode(), LexerMode::MacroEval(_, _)));
+        debug_assert!(matches!(self.mode(), LexerMode::MacroEval { .. }));
 
         // In eval context, the leading/trailing whitespace may or may not be
         // part of a macro string depending on the preceeding/following characters.
@@ -1082,7 +1104,7 @@ impl<'src> Lexer<'src> {
     ///                                                               here ^
     /// or at any genuine end of expression, which may be comma, semi, statement keyword etc.
     /// In the latter case, `next_expr_tok_type` should be None
-    fn maybe_emit_empty_macro_string(&mut self, next_expr_tok_type: Option<TokenType>) {
+    fn maybe_emit_empty_macro_string_in_eval(&mut self, next_expr_tok_type: Option<TokenType>) {
         let expr_end = next_expr_tok_type.map_or(true, |tok_type| {
             matches!(
                 tok_type,
@@ -1095,9 +1117,11 @@ impl<'src> Lexer<'src> {
         let op_follows = next_expr_tok_type.is_some_and(is_macro_eval_logical_op);
 
         if expr_end || op_follows {
-            if let Some(prev_tok_info) = self.buffer.last_token_info_on_default_channel() {
-                let prev_tok_type = prev_tok_info.token_type();
-
+            if let Some(&TokenInfo {
+                token_type: prev_tok_type,
+                ..
+            }) = self.buffer.last_token_info_on_default_channel()
+            {
                 // is we have a preceedning logical operator, we should emit empty string
                 // no matter the next token type
                 if is_macro_eval_logical_op(prev_tok_type) {
@@ -1387,8 +1411,8 @@ impl<'src> Lexer<'src> {
     ) {
         debug_assert!(matches!(
             self.mode(),
-            LexerMode::MacroCallArgOrValue(l)
-                | LexerMode::MacroCallValue(_, l) if l == parens_nesting_level
+            LexerMode::MacroCallArgOrValue { pnl: l }
+                | LexerMode::MacroCallValue { pnl: l,.. } if l == parens_nesting_level
         ));
 
         self.start_token();
@@ -1467,7 +1491,7 @@ impl<'src> Lexer<'src> {
                 self.pop_mode();
 
                 if populate_next_arg_stack {
-                    self.push_mode(LexerMode::MacroCallArgOrValue(0));
+                    self.push_mode(LexerMode::MacroCallArgOrValue { pnl: 0 });
                     // Leading insiginificant WS before the argument
                     self.push_mode(LexerMode::WsOrCStyleCommentOnly);
                     self.push_mode(LexerMode::ExpectSymbol(
@@ -1486,7 +1510,10 @@ impl<'src> Lexer<'src> {
                 // Found the terminator between argument name and value,
                 // pop the mode and push new modes to expect stuff then return
                 self.pop_mode();
-                self.push_mode(LexerMode::MacroCallValue(true, 0));
+                self.push_mode(LexerMode::MacroCallValue {
+                    populate_next_arg_stack: true,
+                    pnl: 0,
+                });
                 // Leading insiginificant WS before the argument
                 self.push_mode(LexerMode::WsOrCStyleCommentOnly);
                 self.push_mode(LexerMode::ExpectSymbol(
@@ -1508,6 +1535,7 @@ impl<'src> Lexer<'src> {
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     fn lex_macro_string_in_macro_call(
         &mut self,
         parens_nesting_level: u32,
@@ -1517,8 +1545,9 @@ impl<'src> Lexer<'src> {
         debug_assert!(
             matches!(
                 self.mode(),
-                LexerMode::MacroCallValue(pnas, _) if pnas == populate_next_arg_stack
-            ) || matches!(self.mode(), LexerMode::MacroCallArgOrValue(_))
+                LexerMode::MacroCallValue{ populate_next_arg_stack: pnas, .. }
+                    if pnas == populate_next_arg_stack
+            ) || matches!(self.mode(), LexerMode::MacroCallArgOrValue { .. })
         );
 
         // Helper function to emit the token and update the mode if needed
@@ -1537,7 +1566,8 @@ impl<'src> Lexer<'src> {
 
                 if let Some(m) = lexer.mode_stack.last_mut() {
                     match m {
-                        LexerMode::MacroCallArgOrValue(pnl) | LexerMode::MacroCallValue(_, pnl) => {
+                        LexerMode::MacroCallArgOrValue { pnl }
+                        | LexerMode::MacroCallValue { pnl, .. } => {
                             *pnl = pnl.wrapping_add_signed(local_parens_nesting);
                         }
                         _ => unreachable!(),
@@ -1618,7 +1648,7 @@ impl<'src> Lexer<'src> {
                     self.pop_mode();
 
                     if populate_next_arg_stack {
-                        self.push_mode(LexerMode::MacroCallArgOrValue(0));
+                        self.push_mode(LexerMode::MacroCallArgOrValue { pnl: 0 });
                         // Leading insiginificant WS before the argument
                         self.push_mode(LexerMode::WsOrCStyleCommentOnly);
                         self.push_mode(LexerMode::ExpectSymbol(
@@ -1637,7 +1667,10 @@ impl<'src> Lexer<'src> {
                     self.emit_token(TokenChannel::DEFAULT, TokenType::MacroString, Payload::None);
                     // Pop the arg/value mode and push the value mode
                     self.pop_mode();
-                    self.push_mode(LexerMode::MacroCallValue(true, 0));
+                    self.push_mode(LexerMode::MacroCallValue {
+                        populate_next_arg_stack: true,
+                        pnl: 0,
+                    });
                     // Leading insiginificant WS before the argument
                     self.push_mode(LexerMode::WsOrCStyleCommentOnly);
                     self.push_mode(LexerMode::ExpectSymbol(
@@ -1667,7 +1700,8 @@ impl<'src> Lexer<'src> {
     ) {
         debug_assert!(matches!(
             self.mode(),
-            LexerMode::MacroStrQuotedExpr(m, l) if m == mask_macro && l == parens_nesting_level
+            LexerMode::MacroStrQuotedExpr { mask_macro: m, pnl: l }
+                if m == mask_macro && l == parens_nesting_level
         ));
 
         self.start_token();
@@ -1747,7 +1781,8 @@ impl<'src> Lexer<'src> {
     fn lex_macro_string_in_str_call(&mut self, mask_macro: bool, parens_nesting_level: u32) {
         debug_assert!(matches!(
             self.mode(),
-            LexerMode::MacroStrQuotedExpr(m, l) if m == mask_macro && l == parens_nesting_level
+            LexerMode::MacroStrQuotedExpr { mask_macro: m, pnl: l }
+                if m == mask_macro && l == parens_nesting_level
         ));
 
         // Helper function to emit the token and update the mode if needed
@@ -1767,8 +1802,12 @@ impl<'src> Lexer<'src> {
 
                     if let Some(m) = lexer.mode_stack.last_mut() {
                         match m {
-                            LexerMode::MacroStrQuotedExpr(_, pnl) => {
-                                *pnl = pnl.wrapping_add_signed(local_parens_nesting);
+                            LexerMode::MacroStrQuotedExpr {
+                                pnl: parens_nesting_level,
+                                ..
+                            } => {
+                                *parens_nesting_level =
+                                    parens_nesting_level.wrapping_add_signed(local_parens_nesting);
                             }
                             _ => unreachable!(),
                         }
@@ -1983,7 +2022,7 @@ impl<'src> Lexer<'src> {
             TokenType::StringExprStart,
             Payload::None,
         );
-        self.push_mode(LexerMode::StringExpr(allow_stat));
+        self.push_mode(LexerMode::StringExpr { allow_stat });
     }
 
     fn lex_single_quoted_str(&mut self) {
@@ -2146,7 +2185,9 @@ impl<'src> Lexer<'src> {
     }
 
     fn dispatch_mode_str_expr(&mut self, next_char: char, allow_stat: bool) {
-        debug_assert!(matches!(self.mode(), LexerMode::StringExpr(s) if s == allow_stat));
+        debug_assert!(
+            matches!(self.mode(), LexerMode::StringExpr { allow_stat: s } if s == allow_stat)
+        );
 
         self.start_token();
 
@@ -2165,7 +2206,7 @@ impl<'src> Lexer<'src> {
                 // In case of (2) this is only possible for an empty string
                 // as non-empty must have been handled inside `lex_str_expr_text`
                 let last_tok_is_start = if let Some(last_tok_info) = self.buffer.last_token_info() {
-                    last_tok_info.token_type() == TokenType::StringExprStart
+                    last_tok_info.token_type == TokenType::StringExprStart
                 } else {
                     false
                 };
@@ -2236,9 +2277,11 @@ impl<'src> Lexer<'src> {
 
                             self.lex_macro_identifier();
 
-                            if self.buffer.last_token_info().is_some_and(|tok_info| {
-                                is_macro_stat_tok_type(tok_info.token_type())
-                            }) {
+                            if self
+                                .buffer
+                                .last_token_info()
+                                .is_some_and(|tok_info| is_macro_stat_tok_type(tok_info.token_type))
+                            {
                                 self.emit_error_info(err_info);
                             }
                         }
@@ -2341,7 +2384,7 @@ impl<'src> Lexer<'src> {
                     // 2. This is just a string literal, like "just a string"
                     let last_tok_is_start =
                         if let Some(last_tok_info) = self.buffer.last_token_info() {
-                            last_tok_info.token_type() == TokenType::StringExprStart
+                            last_tok_info.token_type == TokenType::StringExprStart
                         } else {
                             false
                         };
@@ -2386,14 +2429,14 @@ impl<'src> Lexer<'src> {
 
     fn handle_unterminated_str_expr(&mut self, payload: Payload) {
         debug_assert_eq!(self.cursor.peek(), None);
-        debug_assert!(matches!(self.mode(), LexerMode::StringExpr(_)));
+        debug_assert!(matches!(self.mode(), LexerMode::StringExpr { .. }));
 
         // This will handle the unterminated string expression
         // Both the case of a real string expression and a string literal
         // emitting the correct "missing" token and an error
 
         let last_tok_is_start = if let Some(last_tok_info) = self.buffer.last_token_info() {
-            last_tok_info.token_type() == TokenType::StringExprStart
+            last_tok_info.token_type == TokenType::StringExprStart
         } else {
             false
         };
@@ -2613,7 +2656,7 @@ impl<'src> Lexer<'src> {
         // then we need to peek forward to find a `;`. Only of we find it, we can be sure
         // that this is indeed a datalines start token.
         if let Some(tok_info) = self.buffer.last_token_info_on_default_channel() {
-            if tok_info.token_type() != TokenType::SEMI {
+            if tok_info.token_type != TokenType::SEMI {
                 // the previous character is not a semicolon
                 return false;
             };
@@ -3238,64 +3281,6 @@ impl<'src> Lexer<'src> {
         MacroKwType::MacroStat
     }
 
-    /// A special helper that allows us to do a complex "parsing" look-ahead
-    /// to distinguish between an argument-less macro call and the one
-    /// with arguments.
-    ///
-    /// E.g. in `"&m /*comment*/ ()suffix"` `&m /*comment*/ ()` is a macro call
-    /// with arguments. Notice that there is WS & comment between the macro identifier
-    /// and the opening parenthesis. It is insignificant and should be lexed as such.
-    /// Whie in `"&m /*comment*/ suffix"` `&m` is a macro call without arguments,
-    /// and ` /*comment*/ suffix` is a single token of remaing text!
-    ///
-    /// In reality, in SAS, this is even more complex and impossible to statically
-    /// determine, as SAS looks for () only if the macro was defined with parameters!
-    /// So in theory, in `"&m /*comment*/ ()suffix"`, the entire ` /*comment*/ ()suffix`
-    /// may be text!
-    ///
-    /// We obviously can't do that, so we will assume that the macro call is with arguments.
-    #[inline]
-    fn maybe_expect_macro_call_args(&mut self) {
-        // Checkpoint the current state
-        self.checkpoint();
-
-        // Push the mode to check if this is a call with parameters.
-        // This is as usual in reverse order, first any ws/comments,
-        // and then our special mode that will check for the opening parenthesis
-        // and possibly rollback to the checkpoint
-        self.push_mode(LexerMode::MaybeMacroCallArgs);
-        self.push_mode(LexerMode::WsOrCStyleCommentOnly);
-    }
-
-    /// A helper to populate the expected states for the %str/%nrstr call
-    ///
-    /// Should be called after adding the %str/%nrstr token
-    #[inline]
-    fn expect_macro_str_call_args(&mut self, is_nrstr: bool) {
-        // Populate the expected states for the %str/%nrstr call
-        // in reverse order, as the lexer will unwind the stack
-        // as it lexes the tokens
-
-        // We use hidden channel for the %str/%nrstr and the wrapping parens
-        // since this is a pure compile time directive in SAS which just allows
-        // having a macro text expression with things that would otherwise be
-        // interpreted as macro calls or removed (like spaces)
-
-        self.push_mode(LexerMode::ExpectSymbol(
-            ')',
-            TokenType::RPAREN,
-            TokenChannel::HIDDEN,
-        ));
-        self.push_mode(LexerMode::MacroStrQuotedExpr(is_nrstr, 0));
-        self.push_mode(LexerMode::ExpectSymbol(
-            '(',
-            TokenType::LPAREN,
-            TokenChannel::HIDDEN,
-        ));
-        // Leading insiginificant WS before opening parenthesis
-        self.push_mode(LexerMode::WsOrCStyleCommentOnly);
-    }
-
     fn lex_macro_comment(&mut self) {
         debug_assert_eq!(self.cursor.peek(), Some('%'));
         debug_assert_eq!(self.cursor.peek_next(), '*');
@@ -3360,7 +3345,7 @@ impl<'src> Lexer<'src> {
         debug_assert!(self
             .buffer
             .last_token_info_on_default_channel()
-            .is_some_and(|ti| ti.token_type() == TokenType::KwmDo));
+            .is_some_and(|ti| ti.token_type == TokenType::KwmDo));
 
         // Whatever goes next, this mode is done
         self.pop_mode();
@@ -3384,17 +3369,17 @@ impl<'src> Lexer<'src> {
                 // for the macro call we do the same as for all other symbols - push the,
                 // name expression mode, except that we know we've found at least the start
                 if self.buffer.last_token_info().is_some_and(|ti| {
-                    ![TokenType::KwmUntil, TokenType::KwmWhile].contains(&ti.token_type())
+                    ![TokenType::KwmUntil, TokenType::KwmWhile].contains(&ti.token_type)
                 }) {
-                    self.push_mode(LexerMode::MacroEval(
-                        MacroEvalExprFlags::new(
+                    self.push_mode(LexerMode::MacroEval {
+                        macro_eval_flags: MacroEvalExprFlags::new(
                             MacroEvalNumericMode::Integer,
                             MacroEvalNextArgumentMode::None,
                             true,
                             true,
                         ),
-                        0,
-                    ));
+                        pnl: 0,
+                    });
                     self.push_mode(LexerMode::WsOrCStyleCommentOnly);
                     self.push_mode(LexerMode::ExpectSymbol(
                         '=',
@@ -3409,15 +3394,15 @@ impl<'src> Lexer<'src> {
             }
             _ => {
                 // %do var=...; A mix of %let and %if expression
-                self.push_mode(LexerMode::MacroEval(
-                    MacroEvalExprFlags::new(
+                self.push_mode(LexerMode::MacroEval {
+                    macro_eval_flags: MacroEvalExprFlags::new(
                         MacroEvalNumericMode::Integer,
                         MacroEvalNextArgumentMode::None,
                         true,
                         true,
                     ),
-                    0,
-                ));
+                    pnl: 0,
+                });
                 self.push_mode(LexerMode::WsOrCStyleCommentOnly);
                 self.push_mode(LexerMode::ExpectSymbol(
                     '=',
@@ -3436,6 +3421,7 @@ impl<'src> Lexer<'src> {
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     fn dispatch_macro_call_or_stat(&mut self, kw_tok_type: TokenTypeMacroCallOrStat) {
         // Emit the token for the keyword itself
 
@@ -3461,99 +3447,29 @@ impl<'src> Lexer<'src> {
 
         // Now populate the following mode stack
         match kw_tok_type {
-            // Built-in Macro functions
+            // Built-in Macro functions go first, then statements
             TokenTypeMacroCallOrStat::KwmStr | TokenTypeMacroCallOrStat::KwmNrStr => {
                 self.expect_macro_str_call_args(kw_tok_type == TokenTypeMacroCallOrStat::KwmNrStr);
             }
             TokenTypeMacroCallOrStat::KwmEval | TokenTypeMacroCallOrStat::KwmSysevalf => {
-                self.push_mode(LexerMode::ExpectSymbol(
-                    ')',
-                    TokenType::RPAREN,
-                    TokenChannel::DEFAULT,
-                ));
-                // The handler for this will push the mode for the comma and following
-                // argument as needed
-                self.push_mode(LexerMode::MacroEval(
-                    MacroEvalExprFlags::new(
-                        if kw_tok_type == TokenTypeMacroCallOrStat::KwmSysevalf {
-                            MacroEvalNumericMode::Float
-                        } else {
-                            MacroEvalNumericMode::Integer
-                        },
-                        if kw_tok_type == TokenTypeMacroCallOrStat::KwmSysevalf {
-                            MacroEvalNextArgumentMode::MacroArg
-                        } else {
-                            MacroEvalNextArgumentMode::None
-                        },
-                        false,
-                        false,
-                    ),
-                    0,
-                ));
-                // Leading insiginificant WS before the first argument
-                self.push_mode(LexerMode::WsOrCStyleCommentOnly);
-                self.push_mode(LexerMode::ExpectSymbol(
-                    '(',
-                    TokenType::LPAREN,
-                    TokenChannel::DEFAULT,
-                ));
-                // Leading insiginificant WS before opening parenthesis
-                self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+                self.expect_eval_call_args(kw_tok_type == TokenTypeMacroCallOrStat::KwmSysevalf);
             }
             TokenTypeMacroCallOrStat::KwmScan
             | TokenTypeMacroCallOrStat::KwmQScan
-            | TokenTypeMacroCallOrStat::KwmSubstr
-            | TokenTypeMacroCallOrStat::KwmQSubstr
             | TokenTypeMacroCallOrStat::KwmKScan
-            | TokenTypeMacroCallOrStat::KwmQKScan
+            | TokenTypeMacroCallOrStat::KwmQKScan => {
+                self.expect_scan_or_substr_call_args(true);
+            }
+            TokenTypeMacroCallOrStat::KwmSubstr
+            | TokenTypeMacroCallOrStat::KwmQSubstr
             | TokenTypeMacroCallOrStat::KwmKSubstr
             | TokenTypeMacroCallOrStat::KwmQKSubstr => {
-                self.push_mode(LexerMode::ExpectSymbol(
-                    ')',
-                    TokenType::RPAREN,
-                    TokenChannel::DEFAULT,
-                ));
-                // Second, expression argument. The handler for this will push the mode for the comma
-                // and the following of the correct type
-                self.push_mode(LexerMode::MacroEval(
-                    MacroEvalExprFlags::new(
-                        MacroEvalNumericMode::Integer,
-                        if matches!(
-                            kw_tok_type,
-                            TokenTypeMacroCallOrStat::KwmScan
-                                | TokenTypeMacroCallOrStat::KwmQScan
-                                | TokenTypeMacroCallOrStat::KwmKScan
-                                | TokenTypeMacroCallOrStat::KwmQKScan
-                        ) {
-                            MacroEvalNextArgumentMode::MacroArg
-                        } else {
-                            MacroEvalNextArgumentMode::EvalExpr
-                        },
-                        false,
-                        false,
-                    ),
-                    0,
-                ));
-                // First argument and following comma + WS
-                self.push_mode(LexerMode::WsOrCStyleCommentOnly);
-                self.push_mode(LexerMode::ExpectSymbol(
-                    ',',
-                    TokenType::COMMA,
-                    TokenChannel::DEFAULT,
-                ));
-                self.push_mode(LexerMode::MacroCallValue(false, 0));
-                // Leading insiginificant WS before the first argument
-                self.push_mode(LexerMode::WsOrCStyleCommentOnly);
-                self.push_mode(LexerMode::ExpectSymbol(
-                    '(',
-                    TokenType::LPAREN,
-                    TokenChannel::DEFAULT,
-                ));
-                // Leading insiginificant WS before opening parenthesis
-                self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+                self.expect_scan_or_substr_call_args(false);
             }
             // The "simple" built-ins, that are lexed as macro calls without any special handling
-            // Even though we know that some of them have speecific types or number of arguments
+            // Even though we know that some of them have speecific types or number of arguments.
+            // E.g. the last 6 are really one argument of var name expr only, but
+            // decided to not do too much parsing-like validation here
             TokenTypeMacroCallOrStat::KwmIndex
             | TokenTypeMacroCallOrStat::KwmKIndex
             | TokenTypeMacroCallOrStat::KwmLength
@@ -3578,59 +3494,25 @@ impl<'src> Lexer<'src> {
             | TokenTypeMacroCallOrStat::KwmNrBquote
             | TokenTypeMacroCallOrStat::KwmSuperq
             | TokenTypeMacroCallOrStat::KwmUnquote
-            // The following 6 are really one argument of var name expr only, but
-            // decided to not do too much parsing-like validation here
             | TokenTypeMacroCallOrStat::KwmSymExist
             | TokenTypeMacroCallOrStat::KwmSymGlobl
             | TokenTypeMacroCallOrStat::KwmSymLocal
             | TokenTypeMacroCallOrStat::KwmSysget
             | TokenTypeMacroCallOrStat::KwmSysmacexec
             | TokenTypeMacroCallOrStat::KwmSysmacexist => {
-                // All built-ins have arguments, so we may avoid the `maybe` version
-                self.push_mode(LexerMode::ExpectSymbol(
-                    ')',
-                    TokenType::RPAREN,
-                    TokenChannel::DEFAULT,
-                ));
-                // The handler fo arguments will push the mode for the comma, etc.
-                // Built-ins do not allow named arguments, so we pass `MacroCallValue`
-                // right away
-                self.push_mode(LexerMode::MacroCallValue(true, 0));
-                // Leading insiginificant WS before the first argument
-                self.push_mode(LexerMode::WsOrCStyleCommentOnly);
-                self.push_mode(LexerMode::ExpectSymbol(
-                    '(',
-                    TokenType::LPAREN,
-                    TokenChannel::DEFAULT,
-                ));
-                // Leading insiginificant WS before opening parenthesis
-                self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+                self.expect_builtin_macro_call_args();
             }
-            // No argument built-ins
-            TokenTypeMacroCallOrStat::KwmSysmexecdepth => {}
             // The special built-in beast, that allows named arguments
             TokenTypeMacroCallOrStat::KwmValidchs => {
-                self.push_mode(LexerMode::ExpectSymbol(
-                    ')',
-                    TokenType::RPAREN,
-                    TokenChannel::DEFAULT,
-                ));
-                // The handler fo arguments will push the mode for the comma, etc.
-                self.push_mode(LexerMode::MacroCallArgOrValue(0));
-                // Leading insiginificant WS before the first argument
-                self.push_mode(LexerMode::WsOrCStyleCommentOnly);
-                self.push_mode(LexerMode::ExpectSymbol(
-                    '(',
-                    TokenType::LPAREN,
-                    TokenChannel::DEFAULT,
-                ));
-                // Leading insiginificant WS before opening parenthesis
-                self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+                self.expect_validchs_call_args();
             }
             // Custom macro or label
             TokenTypeMacroCallOrStat::MacroIdentifier => {
                 self.maybe_expect_macro_call_args();
             }
+            // No argument built-in calls
+            #[allow(clippy::match_same_arms)]
+            TokenTypeMacroCallOrStat::KwmSysmexecdepth => {}
             // Macro statements
             TokenTypeMacroCallOrStat::KwmInclude
             | TokenTypeMacroCallOrStat::KwmList
@@ -3665,15 +3547,15 @@ impl<'src> Lexer<'src> {
             TokenTypeMacroCallOrStat::KwmTo | TokenTypeMacroCallOrStat::KwmBy => {
                 self.push_mode(LexerMode::ExpectSemiOrEOF);
                 // The handler fo arguments will push the mode for the comma, etc.
-                self.push_mode(LexerMode::MacroEval(
-                    MacroEvalExprFlags::new(
+                self.push_mode(LexerMode::MacroEval {
+                    macro_eval_flags: MacroEvalExprFlags::new(
                         MacroEvalNumericMode::Integer,
                         MacroEvalNextArgumentMode::None,
                         kw_tok_type == TokenTypeMacroCallOrStat::KwmTo,
                         true,
                     ),
-                    0,
-                ));
+                    pnl: 0,
+                });
                 // Leading insiginificant WS before opening parenthesis
                 self.push_mode(LexerMode::WsOrCStyleCommentOnly);
             }
@@ -3685,15 +3567,15 @@ impl<'src> Lexer<'src> {
                     TokenType::RPAREN,
                     TokenChannel::DEFAULT,
                 ));
-                self.push_mode(LexerMode::MacroEval(
-                    MacroEvalExprFlags::new(
+                self.push_mode(LexerMode::MacroEval {
+                    macro_eval_flags: MacroEvalExprFlags::new(
                         MacroEvalNumericMode::Integer,
                         MacroEvalNextArgumentMode::None,
                         false,
                         false,
                     ),
-                    0,
-                ));
+                    pnl: 0,
+                });
                 // Leading insiginificant WS before the first argument
                 self.push_mode(LexerMode::WsOrCStyleCommentOnly);
                 self.push_mode(LexerMode::ExpectSymbol(
@@ -3730,8 +3612,8 @@ impl<'src> Lexer<'src> {
                 self.push_mode(LexerMode::WsOrCStyleCommentOnly);
             }
             TokenTypeMacroCallOrStat::KwmIf => {
-                self.push_mode(LexerMode::MacroEval(
-                    MacroEvalExprFlags::new(
+                self.push_mode(LexerMode::MacroEval {
+                    macro_eval_flags: MacroEvalExprFlags::new(
                         MacroEvalNumericMode::Integer,
                         MacroEvalNextArgumentMode::None,
                         true,
@@ -3740,8 +3622,8 @@ impl<'src> Lexer<'src> {
                         // semi as semi etc.
                         true,
                     ),
-                    0,
-                ));
+                    pnl: 0,
+                });
                 // Leading insiginificant WS before expression
                 self.push_mode(LexerMode::WsOrCStyleCommentOnly);
             }
@@ -3752,6 +3634,198 @@ impl<'src> Lexer<'src> {
                 self.push_mode(LexerMode::WsOrCStyleCommentOnly);
             }
         }
+    }
+
+    /// A special helper that allows us to do a complex "parsing" look-ahead
+    /// to distinguish between an argument-less macro call and the one
+    /// with arguments.
+    ///
+    /// E.g. in `"&m /*comment*/ ()suffix"` `&m /*comment*/ ()` is a macro call
+    /// with arguments. Notice that there is WS & comment between the macro identifier
+    /// and the opening parenthesis. It is insignificant and should be lexed as such.
+    /// Whie in `"&m /*comment*/ suffix"` `&m` is a macro call without arguments,
+    /// and ` /*comment*/ suffix` is a single token of remaing text!
+    ///
+    /// In reality, in SAS, this is even more complex and impossible to statically
+    /// determine, as SAS looks for () only if the macro was defined with parameters!
+    /// So in theory, in `"&m /*comment*/ ()suffix"`, the entire ` /*comment*/ ()suffix`
+    /// may be text!
+    ///
+    /// We obviously can't do that, so we will assume that the macro call is with arguments.
+    #[inline]
+    fn maybe_expect_macro_call_args(&mut self) {
+        // Checkpoint the current state
+        self.checkpoint();
+
+        // Push the mode to check if this is a call with parameters.
+        // This is as usual in reverse order, first any ws/comments,
+        // and then our special mode that will check for the opening parenthesis
+        // and possibly rollback to the checkpoint
+        self.push_mode(LexerMode::MaybeMacroCallArgs);
+        self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+    }
+
+    /// A helper to populate the expected states for the %str/%nrstr call
+    ///
+    /// Should be called after adding the %str/%nrstr token
+    #[inline]
+    fn expect_macro_str_call_args(&mut self, mask_macro: bool) {
+        // Populate the expected states for the %str/%nrstr call
+        // in reverse order, as the lexer will unwind the stack
+        // as it lexes the tokens
+
+        // We use hidden channel for the %str/%nrstr and the wrapping parens
+        // since this is a pure compile time directive in SAS which just allows
+        // having a macro text expression with things that would otherwise be
+        // interpreted as macro calls or removed (like spaces)
+
+        self.push_mode(LexerMode::ExpectSymbol(
+            ')',
+            TokenType::RPAREN,
+            TokenChannel::HIDDEN,
+        ));
+        self.push_mode(LexerMode::MacroStrQuotedExpr { mask_macro, pnl: 0 });
+        self.push_mode(LexerMode::ExpectSymbol(
+            '(',
+            TokenType::LPAREN,
+            TokenChannel::HIDDEN,
+        ));
+        // Leading insiginificant WS before opening parenthesis
+        self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+    }
+
+    /// A helper to populate the expected states for the %eval/%sysevalf call
+    #[inline]
+    fn expect_eval_call_args(&mut self, is_sysevalf: bool) {
+        self.push_mode(LexerMode::ExpectSymbol(
+            ')',
+            TokenType::RPAREN,
+            TokenChannel::DEFAULT,
+        ));
+        // The handler for this will push the mode for the comma and following
+        // argument as needed
+        self.push_mode(LexerMode::MacroEval {
+            macro_eval_flags: MacroEvalExprFlags::new(
+                if is_sysevalf {
+                    MacroEvalNumericMode::Float
+                } else {
+                    MacroEvalNumericMode::Integer
+                },
+                if is_sysevalf {
+                    MacroEvalNextArgumentMode::MacroArg
+                } else {
+                    MacroEvalNextArgumentMode::None
+                },
+                false,
+                false,
+            ),
+            pnl: 0,
+        });
+        // Leading insiginificant WS before the first argument
+        self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+        self.push_mode(LexerMode::ExpectSymbol(
+            '(',
+            TokenType::LPAREN,
+            TokenChannel::DEFAULT,
+        ));
+        // Leading insiginificant WS before opening parenthesis
+        self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+    }
+
+    /// A helper to populate the expected states for the %scan/%substr call
+    /// and their quoted versions
+    #[inline]
+    fn expect_scan_or_substr_call_args(&mut self, is_scan: bool) {
+        self.push_mode(LexerMode::ExpectSymbol(
+            ')',
+            TokenType::RPAREN,
+            TokenChannel::DEFAULT,
+        ));
+        // Second, expression argument. The handler for this will push the mode for the comma
+        // and the following of the correct type
+        self.push_mode(LexerMode::MacroEval {
+            macro_eval_flags: MacroEvalExprFlags::new(
+                MacroEvalNumericMode::Integer,
+                if is_scan {
+                    MacroEvalNextArgumentMode::MacroArg
+                } else {
+                    MacroEvalNextArgumentMode::EvalExpr
+                },
+                false,
+                false,
+            ),
+            pnl: 0,
+        });
+        // First argument and following comma + WS
+        self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+        self.push_mode(LexerMode::ExpectSymbol(
+            ',',
+            TokenType::COMMA,
+            TokenChannel::DEFAULT,
+        ));
+        self.push_mode(LexerMode::MacroCallValue {
+            populate_next_arg_stack: false,
+            pnl: 0,
+        });
+        // Leading insiginificant WS before the first argument
+        self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+        self.push_mode(LexerMode::ExpectSymbol(
+            '(',
+            TokenType::LPAREN,
+            TokenChannel::DEFAULT,
+        ));
+        // Leading insiginificant WS before opening parenthesis
+        self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+    }
+
+    /// A helper to populate the expected states for the built-in macro calls
+    /// that have no special handling - just arguments
+    #[inline]
+    fn expect_builtin_macro_call_args(&mut self) {
+        // All built-ins have arguments, so we may avoid the `maybe` version
+        self.push_mode(LexerMode::ExpectSymbol(
+            ')',
+            TokenType::RPAREN,
+            TokenChannel::DEFAULT,
+        ));
+        // The handler fo arguments will push the mode for the comma, etc.
+        // Built-ins do not allow named arguments, so we pass `MacroCallValue`
+        // right away
+        self.push_mode(LexerMode::MacroCallValue {
+            populate_next_arg_stack: true,
+            pnl: 0,
+        });
+        // Leading insiginificant WS before the first argument
+        self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+        self.push_mode(LexerMode::ExpectSymbol(
+            '(',
+            TokenType::LPAREN,
+            TokenChannel::DEFAULT,
+        ));
+        // Leading insiginificant WS before opening parenthesis
+        self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+    }
+
+    /// A helper to populate the expected states for the %validchs call
+    /// that allows named arguments. The only built-in that does so.
+    #[inline]
+    fn expect_validchs_call_args(&mut self) {
+        self.push_mode(LexerMode::ExpectSymbol(
+            ')',
+            TokenType::RPAREN,
+            TokenChannel::DEFAULT,
+        ));
+        // The handler fo arguments will push the mode for the comma, etc.
+        self.push_mode(LexerMode::MacroCallArgOrValue { pnl: 0 });
+        // Leading insiginificant WS before the first argument
+        self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+        self.push_mode(LexerMode::ExpectSymbol(
+            '(',
+            TokenType::LPAREN,
+            TokenChannel::DEFAULT,
+        ));
+        // Leading insiginificant WS before opening parenthesis
+        self.push_mode(LexerMode::WsOrCStyleCommentOnly);
     }
 }
 

@@ -10,7 +10,6 @@ version = { workspace = true }
 [lib]
 
 [dependencies]
-is-macro = { workspace = true }
 phf = { workspace = true }
 rmp-serde = { workspace = true }
 sas_lexer_macro = { workspace = true }

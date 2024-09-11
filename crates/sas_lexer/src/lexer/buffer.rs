@@ -80,7 +80,7 @@ pub(super) struct TokenInfo {
     channel: TokenChannel,
 
     /// Type of the token.
-    token_type: TokenType,
+    pub(super) token_type: TokenType,
 
     /// Zero-based byte offset of the token in the source string slice.
     /// u32 as we only support 4gb files
@@ -98,38 +98,6 @@ pub(super) struct TokenInfo {
 
     // Extra data associated with the token
     payload: Payload,
-}
-
-impl TokenInfo {
-    // #[must_use]
-    // pub(super) fn channel(&self) -> TokenChannel {
-    //     self.channel
-    // }
-
-    #[must_use]
-    pub(super) fn token_type(&self) -> TokenType {
-        self.token_type
-    }
-
-    // #[must_use]
-    // pub(super) fn byte_offset(&self) -> ByteOffset {
-    //     self.byte_offset
-    // }
-
-    // #[must_use]
-    // pub(super) fn start(&self) -> CharOffset {
-    //     self.start
-    // }
-
-    // #[must_use]
-    // pub(super) fn line(&self) -> LineIdx {
-    //     self.line
-    // }
-
-    // #[must_use]
-    // pub(super) fn payload(&self) -> Payload {
-    //     self.payload
-    // }
 }
 
 /// Specifies minimal initial capacity of `token_infos` & `line_infos` vectors
