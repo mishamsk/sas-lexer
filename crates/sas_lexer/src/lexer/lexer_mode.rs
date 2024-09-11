@@ -1,5 +1,5 @@
 use super::{channel::TokenChannel, error::ErrorType, token_type::TokenType};
-use is_macro::Is;
+use strum::EnumIs;
 
 /// Macro arithmetic/logical expression has integer and float modes.
 /// Float is only enabled in `%sysevalf`
@@ -98,7 +98,7 @@ impl MacroEvalExprFlags {
 }
 
 /// The lexer mode
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Is)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, EnumIs)]
 pub(crate) enum LexerMode {
     /// Default mode aka open code (non macro)
     #[default]
@@ -106,7 +106,7 @@ pub(crate) enum LexerMode {
     /// String expression, aka double quoted string mode.
     /// `bool` flag indicates if statement is allowed and should be lexed,
     /// which is a thing in open code, but not in macro expressions
-    StringExpr(bool),
+    StringExpr { allow_stat: bool },
     /// Insignificant WS/comment space. E.g. between macro name and parens in a call
     /// this is the mode where we want to lex all consecutive whitespace and comments
     /// and then return to the previous mode
@@ -127,29 +127,50 @@ pub(crate) enum LexerMode {
     /// Note - it should alwys be preceded by the `WsOrCStyleCommentOnly` mode
     /// and a checkpoint created!
     MaybeMacroCallArgs,
-    /// The u32 value is the current parenthesis nesting level.
-    /// Macro arguments allow balanced parenthesis nesting and
-    /// inside these parenthesis, `,` and `=` are not treated as
-    /// terminators.
-    MacroCallArgOrValue(u32),
-    /// The bool value indicates whether next argument mode should be
-    /// pushed on to the stack upon `,`. `false` is used in some
-    /// built-in macro call lexing, where we pre-populate the stack
-    /// due to special handling of the arguments as eval expressions.
-    /// The u32 value is the current parenthesis nesting level.
-    /// Macro argument values allow balanced parenthesis nesting and
-    /// inside these parenthesis, `,` is not treated as
-    /// terminators.
-    MacroCallValue(bool, u32),
-    /// The state for lexing inside an %str/%nrstr call.
-    /// as in `%str(-->1+1<--)`. Boolean flag indicates if
-    /// % and & are masked, i.e. this is %nrstr.
-    /// u32 value is the current parenthesis nesting level, see `MacroCallArgOrValue`
-    MacroStrQuotedExpr(bool, u32),
-    /// Macro arithmetic/logical expression, as in `%eval(-->1+1<--)`, or `%if 1+1`
-    /// See `MacroEvalExprFlags` for the packed flags.
-    /// u32 value is the current parenthesis nesting level, see `MacroCallArgOrValue`
-    MacroEval(MacroEvalExprFlags, u32),
+    /// Macro call argument or value mode. I.e. inside the parens of a macro call,
+    /// before `=`.
+    MacroCallArgOrValue {
+        /// The current parenthesis nesting level.
+        /// Macro arguments allow balanced parenthesis nesting and
+        /// inside these parenthesis, `,` and `=` are not treated as
+        /// terminators.
+        pnl: u32,
+    },
+    /// Macro call value mode. I.e. inside the parens of a macro call,
+    /// after `=` for user defined macros or the only valid mode for
+    /// built-in macro calls, since they do not support named arguments.
+    MacroCallValue {
+        /// The bool value indicates whether next argument mode should be
+        /// pushed on to the stack upon `,`. `false` is used in some
+        /// built-in macro call lexing, where we pre-populate the stack
+        /// due to special handling of the arguments as eval expressions.
+        populate_next_arg_stack: bool,
+        /// The current parenthesis nesting level.
+        /// Macro arguments allow balanced parenthesis nesting and
+        /// inside these parenthesis, `,` is not treated as
+        /// terminators.
+        pnl: u32,
+    },
+    /// The state for lexing inside an %str/%nrstr call. I.e. in `%str(-->1+1<--)`.
+    MacroStrQuotedExpr {
+        /// Boolean flag indicates if % and & are masked, i.e. this is %nrstr.
+        mask_macro: bool,
+        /// The current parenthesis nesting level.
+        /// Macro arguments allow balanced parenthesis nesting and
+        /// inside these parenthesis, `,` is not treated as
+        /// terminators.
+        pnl: u32,
+    },
+    /// Macro arithmetic/logical expression, as in `%eval(-->1+1<--)`, or `%if 1+1`    
+    MacroEval {
+        /// See `MacroEvalExprFlags` for the packed flags explanation
+        macro_eval_flags: MacroEvalExprFlags,
+        /// The current parenthesis nesting level.
+        /// Macro arguments allow balanced parenthesis nesting and
+        /// inside these parenthesis, `,` is not treated as
+        /// terminators.
+        pnl: u32,
+    },
     /// Mode for dispatching various types of macro DO statements.
     /// Nothing is lexed in this mode, rather the stack is populated
     /// based on the lookahead.
