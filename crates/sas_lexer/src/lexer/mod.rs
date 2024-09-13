@@ -1170,15 +1170,20 @@ impl<'src> Lexer<'src> {
         }
     }
 
-    fn dispatch_macro_name_expr(&mut self, next_char: char, first: bool, err: Option<ErrorType>) {
+    fn dispatch_macro_name_expr(
+        &mut self,
+        next_char: char,
+        first_token: bool,
+        err: Option<ErrorType>,
+    ) {
         debug_assert!(
-            matches!(self.mode(), LexerMode::MacroVarNameExpr(f, e) if f != first && e == err)
+            matches!(self.mode(), LexerMode::MacroVarNameExpr(f, e) if f != first_token && e == err)
         );
 
         self.start_token();
 
         let pop_mode_and_check = |lexer: &mut Lexer| {
-            if first {
+            if first_token {
                 // This is straight from what SAS emits
                 if let Some(err) = err {
                     lexer.emit_error(err);
@@ -1188,7 +1193,7 @@ impl<'src> Lexer<'src> {
             lexer.pop_mode();
         };
 
-        // Helper to update the mode indicating that we have found at least one token
+        // Helper to update the mode indicating that we have found at least one non-hidden token
         // First we need to store the index of the mode when we started lexing this,
         // because nested calls can add more modes to the stack, but what we
         // want to update is the mode at the start of this call
@@ -1199,6 +1204,8 @@ impl<'src> Lexer<'src> {
                 lexer.mode_stack.get_mut(start_mode_index)
             {
                 *found_name = true;
+            } else {
+                lexer.emit_error(ErrorType::InternalError("Unexpected mode stack"));
             };
         };
 
@@ -1215,7 +1222,9 @@ impl<'src> Lexer<'src> {
                     return;
                 }
 
-                update_mode(self);
+                if first_token {
+                    update_mode(self);
+                };
             }
             '%' => {
                 match self.lex_macro_call(false, false) {
@@ -1225,11 +1234,13 @@ impl<'src> Lexer<'src> {
                         pop_mode_and_check(self);
                     }
                     MacroKwType::MacroCallOrLabel => {
-                        update_mode(self);
+                        if first_token {
+                            update_mode(self);
+                        };
                     }
                 }
             }
-            c if is_valid_sas_name_start(c) || (!first && is_xid_continue(c)) => {
+            c if is_valid_sas_name_start(c) || (!first_token && is_xid_continue(c)) => {
                 // A macro string in place of macro identifier
                 // Consume as identifier, no reserved words here,
                 // so we do not need the full lex_identifier logic
@@ -1240,7 +1251,7 @@ impl<'src> Lexer<'src> {
                 self.emit_token(
                     TokenChannel::DEFAULT,
                     // True identifier is only possible if this is the first (and only) token.
-                    if first {
+                    if first_token {
                         TokenType::Identifier
                     } else {
                         TokenType::MacroString
@@ -1248,7 +1259,9 @@ impl<'src> Lexer<'src> {
                     Payload::None,
                 );
 
-                update_mode(self);
+                if first_token {
+                    update_mode(self);
+                };
             }
             _ => {
                 // Something else. pop mode without consuming the character
@@ -1550,7 +1563,9 @@ impl<'src> Lexer<'src> {
                 self.mode(),
                 LexerMode::MacroCallValue{ populate_next_arg_stack: pnas, .. }
                     if pnas == populate_next_arg_stack
-            ) || matches!(self.mode(), LexerMode::MacroCallArgOrValue { .. })
+            ) && !terminate_on_assign
+                || matches!(self.mode(), LexerMode::MacroCallArgOrValue { .. })
+                    && terminate_on_assign
         );
 
         // Helper function to emit the token and update the mode if needed
