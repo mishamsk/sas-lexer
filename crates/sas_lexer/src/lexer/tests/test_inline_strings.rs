@@ -1,14 +1,27 @@
+use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 use std::vec;
 
 use crate::Payload;
 use crate::{error::ErrorType, lex, TokenChannel, TokenType};
-use rstest::rstest;
+use rstest::{fixture, rstest};
 
 use super::super::error::OPEN_CODE_RECURSION_ERR;
 use super::super::token_type::{KEYWORDS, MKEYWORDS};
 use super::util::{assert_lexing, mangle_case, ErrorTestCase, TokenTestCase};
 
 const NO_ERRORS: Vec<ErrorType> = vec![];
+
+impl Hash for TokenType {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        (*self as u16).hash(state);
+    }
+}
+
+#[fixture]
+fn kwm_to_str_map() -> HashMap<TokenType, String> {
+    HashMap::from_iter(MKEYWORDS.into_iter().map(|(k, v)| (*v, k.to_string())))
+}
 
 #[test]
 fn test_unicode_char_offset() {
@@ -537,16 +550,12 @@ fn test_all_single_symbols(#[case] contents: &str, #[case] expected_token: impl 
 }
 
 #[test]
-fn test_all_single_keywords() {
-    KEYWORDS.keys().for_each(|keyword| {
+fn test_all_single_non_macro_keywords() {
+    KEYWORDS.into_iter().for_each(|(keyword, tok_type)| {
         // Change every odd character to uppercase, and every even character to lowercase
         let mangled_keyword = mangle_case(keyword);
 
-        assert_lexing(
-            mangled_keyword.as_str(),
-            vec![(KEYWORDS.get(keyword).copied().unwrap())],
-            NO_ERRORS,
-        );
+        assert_lexing(mangled_keyword.as_str(), vec![(*tok_type)], NO_ERRORS);
     });
 }
 
@@ -1704,16 +1713,35 @@ fn test_macro_nrstr_call_error_recovery(
     assert_lexing(contents, expected_token, expected_error);
 }
 
+#[rstest]
+#[case::macro_include(TokenType::KwmInclude)]
+#[case::macro_list(TokenType::KwmList)]
+#[case::macro_then(TokenType::KwmThen)]
+#[case::macro_else(TokenType::KwmElse)]
+fn test_macro_stats_with_no_expected_tail(
+    #[case] tok_type: TokenType,
+    kwm_to_str_map: HashMap<TokenType, String>,
+) {
+    // Get the string representation of the token type
+    let tok_str = kwm_to_str_map.get(&tok_type).unwrap();
+
+    // Prepend % and mangle case
+    let tok_str = format!("%{}", mangle_case(tok_str));
+
+    assert_lexing(tok_str.as_str(), vec![(tok_type)], NO_ERRORS);
+}
+
 /// These are super simple - just a keyword followed by a mandatory SEMI
 #[rstest]
 #[case::macro_end(TokenType::KwmEnd)]
 #[case::macro_return(TokenType::KwmReturn)]
-fn test_macro_simple_stats(#[case] tok_type: TokenType) {
+#[case::macro_run(TokenType::KwmRun)]
+fn test_macro_simple_stats(
+    #[case] tok_type: TokenType,
+    kwm_to_str_map: HashMap<TokenType, String>,
+) {
     // Get the string representation of the token type
-    let tok_str = MKEYWORDS
-        .into_iter()
-        .find_map(|(k, v)| if *v == tok_type { Some(k) } else { None })
-        .unwrap();
+    let tok_str = kwm_to_str_map.get(&tok_type).unwrap();
 
     // Prepend % and mangle case
     let tok_str = format!("%{}", mangle_case(tok_str));
@@ -1744,6 +1772,97 @@ fn test_macro_simple_stats(#[case] tok_type: TokenType) {
             ErrorType::MissingExpected("';' or end of file"),
             tok_str.len(),
         )],
+    );
+}
+
+/// These are super simple - just a keyword followed by a mandatory SEMI
+#[rstest]
+#[case::macro_abort(TokenType::KwmAbort)]
+#[case::macro_display(TokenType::KwmDisplay)]
+#[case::macro_goto(TokenType::KwmGoto)]
+#[case::macro_input(TokenType::KwmInput)]
+#[case::macro_mend(TokenType::KwmMend)]
+#[case::macro_put(TokenType::KwmPut)]
+#[case::macro_sysexec(TokenType::KwmSysexec)]
+fn test_macro_stats_with_semi_term_tail(
+    #[case] tok_type: TokenType,
+    kwm_to_str_map: HashMap<TokenType, String>,
+) {
+    // Get the string representation of the token type
+    let tok_str = kwm_to_str_map.get(&tok_type).unwrap();
+
+    // Prepend % and mangle case
+    let tok_str = format!("%{}", mangle_case(tok_str));
+
+    // Create a shared string without the ending semicolon
+    let test_str = format!("{tok_str}/*c*/&mv-%mc() + / \"\"\"some&suf\" and 'lit'd /*t*/");
+    let expected_tokens = vec![
+        (tok_str.as_str(), tok_type, Payload::None, tok_str.as_str()),
+        ("/*c*/", TokenType::CStyleComment, Payload::None, "/*c*/"),
+        ("&mv", TokenType::MacroVarExpr, Payload::None, "&mv"),
+        ("-", TokenType::MacroString, Payload::None, "-"),
+        ("%mc", TokenType::MacroIdentifier, Payload::None, "%mc"),
+        ("(", TokenType::LPAREN, Payload::None, "("),
+        (")", TokenType::RPAREN, Payload::None, ")"),
+        (" + / ", TokenType::MacroString, Payload::None, " + / "),
+        ("\"", TokenType::StringExprStart, Payload::None, "\""),
+        (
+            "\"\"some",
+            TokenType::StringExprText,
+            Payload::StringLiteral(0, 5),
+            "\"some",
+        ),
+        ("&suf", TokenType::MacroVarExpr, Payload::None, "&suf"),
+        ("\"", TokenType::StringExprEnd, Payload::None, "\""),
+        (" and ", TokenType::MacroString, Payload::None, " and "),
+        ("'lit'd", TokenType::DateLiteral, Payload::None, "'lit'd"),
+        (" ", TokenType::MacroString, Payload::None, " "),
+        ("/*t*/", TokenType::CStyleComment, Payload::None, "/*t*/"),
+    ];
+
+    // First test the correct case
+    assert_lexing(
+        format!("{test_str};").as_str(),
+        {
+            let mut v = expected_tokens.clone();
+            v.push((";", TokenType::SEMI, Payload::None, ";"));
+            v
+        },
+        NO_ERRORS,
+    );
+
+    // Recover from missing semicolon at EOF
+    assert_lexing(
+        format!("{test_str}").as_str(),
+        {
+            let mut v = expected_tokens.clone();
+            v.push(("", TokenType::SEMI, Payload::None, ""));
+            v
+        },
+        NO_ERRORS,
+    );
+
+    // Recover from missing semicolon not at EOF, with error
+    assert_lexing(
+        format!("{test_str}%then").as_str(),
+        {
+            let mut v = expected_tokens.clone();
+            v.push(("", TokenType::SEMI, Payload::None, ""));
+            v.push(("%then", TokenType::KwmThen, Payload::None, "%then"));
+            v
+        },
+        vec![
+            (
+                ErrorType::SASSessionUnrecoverableError(
+                    "ERROR: Open code statement recursion detected.",
+                ),
+                test_str.len(),
+            ),
+            (
+                ErrorType::MissingExpected("';' or end of file"),
+                test_str.len(),
+            ),
+        ],
     );
 }
 
@@ -2610,5 +2729,134 @@ fn test_macro_eval_empty_logical_operand(
         ]
 )]
 fn test_macro_do(#[case] contents: &str, #[case] expected_token: Vec<impl TokenTestCase>) {
+    assert_lexing(contents, expected_token, NO_ERRORS);
+}
+
+/// This test doesn't follow true semantics of built-ins. Most accept
+/// only one arg, but we have a test case with two regardless.
+#[rstest]
+#[case::ints_not_evaluated(
+    // Integers are not evaluated
+    vec![
+        ("1+1", TokenType::MacroString)            
+    ]
+)]
+#[case::look_like_named_args_and_comma(
+    // No named args, and comma in balanced parens is not a terminator
+    vec![
+        ("arg1=some(,arg2=())", TokenType::MacroString)            
+    ],
+)]
+#[case::balanced_parens_after_slash_with_comment(
+    vec![
+        ("/(", TokenType::MacroString),
+        ("/*c*/", TokenType::CStyleComment),
+        (")", TokenType::MacroString),
+    ]
+)]
+#[case::nested_call_with_comment(
+    vec![
+        ("/*c*/", TokenType::CStyleComment),
+        ("some()", TokenType::MacroString),
+        ("/*c*/", TokenType::CStyleComment),
+        (",", TokenType::COMMA),
+        ("/*c*/", TokenType::CStyleComment),
+        ("2", TokenType::MacroString),
+        ("/*c*/", TokenType::CStyleComment),        
+    ]
+)]
+fn test_macro_simple_builtins(
+    #[values(
+        TokenType::KwmIndex,
+        TokenType::KwmKIndex,
+        TokenType::KwmLength,
+        TokenType::KwmKLength,
+        TokenType::KwmLowcase,
+        TokenType::KwmKLowcase,
+        TokenType::KwmQLowcase,
+        TokenType::KwmQKLowcase,
+        TokenType::KwmUpcase,
+        TokenType::KwmKUpcase,
+        TokenType::KwmQUpcase,
+        TokenType::KwmQKUpcase,
+        TokenType::KwmSysmexecname,
+        TokenType::KwmSysprod,
+        TokenType::KwmKCmpres,
+        TokenType::KwmQKCmpres,
+        TokenType::KwmKLeft,
+        TokenType::KwmQKLeft,
+        TokenType::KwmQuote,
+        TokenType::KwmNrQuote,
+        TokenType::KwmBquote,
+        TokenType::KwmNrBquote,
+        TokenType::KwmSuperq,
+        TokenType::KwmUnquote,
+        TokenType::KwmSymExist,
+        TokenType::KwmSymGlobl,
+        TokenType::KwmSymLocal,
+        TokenType::KwmSysget,
+        TokenType::KwmSysmacexec,
+        TokenType::KwmSysmacexist
+    )]
+    tok_type: TokenType,
+    #[case] inner_expr_tokens: Vec<(&str, TokenType)>,
+    kwm_to_str_map: HashMap<TokenType, String>,
+) {
+    let func_name = mangle_case(kwm_to_str_map.get(&tok_type).unwrap());
+    let func_name = format!("%{func_name}");
+
+    let expr_str = inner_expr_tokens
+        .iter()
+        .map(|(snip, _)| *snip)
+        .collect::<String>();
+
+    let mut expected_tokens = Vec::with_capacity(inner_expr_tokens.len() + 3);
+
+    expected_tokens.push((func_name.as_str(), tok_type, Payload::None));
+    expected_tokens.push(("(", TokenType::LPAREN, Payload::None));
+    expected_tokens.extend(
+        inner_expr_tokens
+            .iter()
+            .map(|(snip, tok)| (*snip, *tok, Payload::None)),
+    );
+    expected_tokens.push((")", TokenType::RPAREN, Payload::None));
+
+    assert_lexing(
+        format!("{func_name}({expr_str})").as_str(),
+        expected_tokens,
+        NO_ERRORS,
+    );
+}
+
+#[rstest]
+// The only built that has named args
+#[case::validchs("%VALIDchs(dsnm=sashelp.class, encoding=utf-8)",
+    vec![
+        ("%VALIDchs", TokenType::KwmValidchs),
+        ("(", TokenType::LPAREN),
+        ("dsnm", TokenType::MacroString),
+        ("=", TokenType::ASSIGN),
+        ("sashelp.class", TokenType::MacroString),
+        (",", TokenType::COMMA),
+        (" ", TokenType::WS),
+        ("encoding", TokenType::MacroString),
+        ("=", TokenType::ASSIGN),
+        ("utf-8", TokenType::MacroString),
+        (")", TokenType::RPAREN),
+    ]
+)]
+// This one is argument-less, so val should be an identifier in open code
+#[case::sysmexecdepth("%SYSmexecdepth(val)",
+    vec![
+        ("%SYSmexecdepth", TokenType::KwmSysmexecdepth),
+        ("(", TokenType::LPAREN),
+        ("val", TokenType::Identifier),
+        (")", TokenType::RPAREN),        
+    ]
+)]
+fn test_macro_special_builtins(
+    #[case] contents: &str,
+    #[case] expected_token: Vec<impl TokenTestCase>,
+) {
     assert_lexing(contents, expected_token, NO_ERRORS);
 }

@@ -3531,7 +3531,10 @@ impl<'src> Lexer<'src> {
             | TokenTypeMacroCallOrStat::KwmList
             | TokenTypeMacroCallOrStat::KwmThen
             | TokenTypeMacroCallOrStat::KwmElse => {
-                // Super easy, they effectively do nothing to mode stack
+                // Super easy, they effectively do nothing to mode stack.
+                // Although they all kinda expect a semi after some arbitrary
+                // stuff, but enforcing this here is an overkill. Parser will
+                // handle it just fine.
             }
             TokenTypeMacroCallOrStat::KwmEnd
             | TokenTypeMacroCallOrStat::KwmReturn
