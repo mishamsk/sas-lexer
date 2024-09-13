@@ -98,7 +98,7 @@ impl MacroEvalExprFlags {
 }
 
 /// The lexer mode
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, EnumIs)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, EnumIs)]
 pub(crate) enum LexerMode {
     /// Default mode aka open code (non macro)
     #[default]

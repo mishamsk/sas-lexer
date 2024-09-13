@@ -14,7 +14,6 @@ pub(crate) mod token_type;
 
 use buffer::{LineIdx, Payload, TokenIdx, TokenInfo, TokenizedBuffer, WorkTokenizedBuffer};
 use channel::TokenChannel;
-use cursor::EOF_CHAR;
 use error::{ErrorInfo, ErrorType, OPEN_CODE_RECURSION_ERR};
 use lexer_mode::{LexerMode, MacroEvalExprFlags, MacroEvalNextArgumentMode, MacroEvalNumericMode};
 
@@ -188,24 +187,24 @@ impl<'src> Lexer<'src> {
     }
 
     #[inline]
-    fn push_mode(&mut self, mode: LexerMode) -> LexerMode {
+    fn push_mode(&mut self, mode: LexerMode) {
         self.mode_stack.push(mode);
-        mode
     }
 
-    fn pop_mode(&mut self) -> LexerMode {
-        self.mode_stack.pop().unwrap_or_else(|| {
+    fn pop_mode(&mut self) {
+        if !self.mode_stack.pop().is_some() {
             self.emit_error(ErrorType::InternalError("Empty mode stack"));
-            self.push_mode(LexerMode::default())
-        })
+            self.push_mode(LexerMode::default());
+        };
     }
 
     fn mode(&mut self) -> LexerMode {
         match self.mode_stack.last() {
-            Some(&mode) => mode,
+            Some(mode) => mode.clone(),
             None => {
                 self.emit_error(ErrorType::InternalError("Empty mode stack"));
-                self.push_mode(LexerMode::default())
+                self.push_mode(LexerMode::default());
+                LexerMode::default()
             }
         }
     }
@@ -263,6 +262,17 @@ impl<'src> Lexer<'src> {
     ) {
         self.buffer
             .add_token(channel, token_type, mark.0, mark.1, mark.2, payload);
+    }
+
+    /// There are many cases where we need to emit an empty macro string token.
+    /// Hence we have a helper for that.
+    #[inline]
+    fn emit_empty_macro_string_token(&mut self) {
+        self.emit_token(
+            TokenChannel::DEFAULT,
+            TokenType::MacroStringEmpty,
+            Payload::None,
+        );
     }
 
     fn update_last_token(
@@ -338,12 +348,17 @@ impl<'src> Lexer<'src> {
     /// tokens and errors if necessary, and adds the mandatory EOF token.
     fn finalize_lexing(&mut self) {
         // Iterate over the mode stack in reverse and unwind it
-        while let Some(mode) = self.mode_stack.last() {
+        while let Some(mode) = self.mode_stack.pop() {
+            // Release the shared reference to the mode by cloning it
+            // let mode = mode.clone();
+
+            self.start_token();
+
             match mode {
                 LexerMode::ExpectSymbol(expected_char, tok_type, tok_channel) => {
                     // If we were expecting a token - call lexing that will effectively
                     // emit an error and the token
-                    self.lex_expected_token(None, *expected_char, *tok_type, *tok_channel);
+                    self.lex_expected_token(None, expected_char, tok_type, tok_channel);
                 }
                 LexerMode::ExpectSemiOrEOF | LexerMode::MacroDo => {
                     // If we were expecting a semicolon or EOF - emit a virtual semicolon for parser convenience.
@@ -364,14 +379,12 @@ impl<'src> Lexer<'src> {
                 | LexerMode::MacroEval { pnl, .. } => {
                     // If the parens nesting level is > 0, we should emit the missing number of
                     // closing parens to balance it out
-                    let pnl = *pnl; // do not ask...borrow checker!
 
                     if pnl > 0 {
                         self.emit_error(ErrorType::MissingExpected(
                             "Missing closing parenthesis to balance the expression",
                         ));
 
-                        self.start_token();
                         for _ in 0..pnl {
                             self.emit_token(
                                 TokenChannel::DEFAULT,
@@ -388,12 +401,10 @@ impl<'src> Lexer<'src> {
                 LexerMode::MacroVarNameExpr(_, err) => {
                     // This may happen if we have %let without a variable name in the end or similar
                     if let Some(err) = err {
-                        self.emit_error(*err);
+                        self.emit_error(err);
                     }
                 }
             }
-
-            self.mode_stack.pop();
         }
 
         let last_line = self.buffer.last_line().unwrap_or_else(||
@@ -462,6 +473,7 @@ impl<'src> Lexer<'src> {
                 }
             }
             LexerMode::ExpectSymbol(expected_char, tok_type, tok_channel) => {
+                self.start_token();
                 self.lex_expected_token(Some(next_char), expected_char, tok_type, tok_channel);
             }
             LexerMode::ExpectSemiOrEOF => {
@@ -527,13 +539,12 @@ impl<'src> Lexer<'src> {
         tok_type: TokenType,
         tok_channel: TokenChannel,
     ) {
-        debug_assert_eq!(
-            self.mode(),
-            LexerMode::ExpectSymbol(expected_char, tok_type, tok_channel)
+        debug_assert!(
+            self.mode() == LexerMode::ExpectSymbol(expected_char, tok_type, tok_channel)
+                || self.cursor.peek().is_none() // EOF
         );
         debug_assert!(!expected_char.is_ascii_alphabetic());
 
-        self.start_token();
         if next_char.map_or(true, |c| c != expected_char) {
             // Expected token not found. Emit an error which will point at previous token
             // The token itself is emitted below
@@ -1126,11 +1137,7 @@ impl<'src> Lexer<'src> {
                 // no matter the next token type
                 if is_macro_eval_logical_op(prev_tok_type) {
                     // TODO: emit SAS error on missing operand for IN/#
-                    self.emit_token(
-                        TokenChannel::DEFAULT,
-                        TokenType::MacroStringEmpty,
-                        Payload::None,
-                    );
+                    self.emit_empty_macro_string_token();
                 } else if matches!(
                     prev_tok_type,
                     // These are all possible "starts", tokens preceeding
@@ -1157,11 +1164,7 @@ impl<'src> Lexer<'src> {
                         ));
                     }
 
-                    self.emit_token(
-                        TokenChannel::DEFAULT,
-                        TokenType::MacroStringEmpty,
-                        Payload::None,
-                    );
+                    self.emit_empty_macro_string_token();
                 }
             }
         }
@@ -2293,10 +2296,6 @@ impl<'src> Lexer<'src> {
                     }
                 }
             }
-            EOF_CHAR => {
-                // EOF reached without a closing double quote
-                self.handle_unterminated_str_expr(Payload::None);
-            }
             _ => {
                 // Not a macro var, not a macro call and not an ending => lex the middle
                 self.lex_str_expr_text();
@@ -2429,7 +2428,6 @@ impl<'src> Lexer<'src> {
 
     fn handle_unterminated_str_expr(&mut self, payload: Payload) {
         debug_assert_eq!(self.cursor.peek(), None);
-        debug_assert!(matches!(self.mode(), LexerMode::StringExpr { .. }));
 
         // This will handle the unterminated string expression
         // Both the case of a real string expression and a string literal
