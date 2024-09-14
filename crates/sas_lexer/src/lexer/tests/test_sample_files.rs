@@ -38,10 +38,12 @@ fn test_snapshots(#[files("src/lexer/tests/samples/**/*.sas")] path: PathBuf) {
     assert_yaml_snapshot!("tokens", tokens);
 
     if errors.is_empty() {
-        assert_yaml_snapshot!("errors_snapshot", @r###"
-        ---
-        errors_snapshot
-        "###);
+        insta::allow_duplicates! {
+            assert_yaml_snapshot!("errors_snapshot", @r###"
+            ---
+            errors_snapshot
+            "###);
+        }
     } else {
         let error_strings = errors
             .iter()

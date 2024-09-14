@@ -184,4 +184,9 @@ pub(crate) enum LexerMode {
     /// Mode for lexing unrestricted macro text expressions terminated by semi.
     /// These are used for %let initializations, %put, etc.
     MacroSemiTerminatedTextExpr,
+    /// Mode for lexing text expressions where WS is a delimiter and `=` is
+    /// lexed as an `assign` token. Also semi terminated.
+    /// It sued both with macro statement options following the `/` in `%copy`, `%macro`,
+    /// and for valists in `%global`, `%local`, `%input` and others.
+    MacroStatOptionsTextExpr,
 }

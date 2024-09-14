@@ -1736,6 +1736,7 @@ fn test_macro_stats_with_no_expected_tail(
 #[case::macro_end(TokenType::KwmEnd)]
 #[case::macro_return(TokenType::KwmReturn)]
 #[case::macro_run(TokenType::KwmRun)]
+#[case::macro_sysmstoreclear(TokenType::KwmSysmstoreclear)]
 fn test_macro_simple_stats(
     #[case] tok_type: TokenType,
     kwm_to_str_map: HashMap<TokenType, String>,
@@ -1775,13 +1776,9 @@ fn test_macro_simple_stats(
     );
 }
 
-/// These are super simple - just a keyword followed by a mandatory SEMI
+/// These are simple - just a keyword, then unrestricted text expr
+/// followed by a mandatory SEMI
 #[rstest]
-#[case::macro_abort(TokenType::KwmAbort)]
-#[case::macro_display(TokenType::KwmDisplay)]
-#[case::macro_goto(TokenType::KwmGoto)]
-#[case::macro_input(TokenType::KwmInput)]
-#[case::macro_mend(TokenType::KwmMend)]
 #[case::macro_put(TokenType::KwmPut)]
 #[case::macro_sysexec(TokenType::KwmSysexec)]
 fn test_macro_stats_with_semi_term_tail(
@@ -1817,6 +1814,117 @@ fn test_macro_stats_with_semi_term_tail(
         (" and ", TokenType::MacroString, Payload::None, " and "),
         ("'lit'd", TokenType::DateLiteral, Payload::None, "'lit'd"),
         (" ", TokenType::MacroString, Payload::None, " "),
+        ("/*t*/", TokenType::CStyleComment, Payload::None, "/*t*/"),
+    ];
+
+    // First test the correct case
+    assert_lexing(
+        format!("{test_str};").as_str(),
+        {
+            let mut v = expected_tokens.clone();
+            v.push((";", TokenType::SEMI, Payload::None, ";"));
+            v
+        },
+        NO_ERRORS,
+    );
+
+    // Recover from missing semicolon at EOF
+    assert_lexing(
+        format!("{test_str}").as_str(),
+        {
+            let mut v = expected_tokens.clone();
+            v.push(("", TokenType::SEMI, Payload::None, ""));
+            v
+        },
+        NO_ERRORS,
+    );
+
+    // Recover from missing semicolon not at EOF, with error
+    assert_lexing(
+        format!("{test_str}%then").as_str(),
+        {
+            let mut v = expected_tokens.clone();
+            v.push(("", TokenType::SEMI, Payload::None, ""));
+            v.push(("%then", TokenType::KwmThen, Payload::None, "%then"));
+            v
+        },
+        vec![
+            (
+                ErrorType::SASSessionUnrecoverableError(
+                    "ERROR: Open code statement recursion detected.",
+                ),
+                test_str.len(),
+            ),
+            (
+                ErrorType::MissingExpected("';' or end of file"),
+                test_str.len(),
+            ),
+        ],
+    );
+}
+
+/// These are more involved. They have various detailed syntaxes,
+/// but we used shared mode that is between unrestricted and eval.
+/// This test ignores the syntax and test the mode in general on
+/// not so correct string. A separate test covers one realistical
+/// example for each.
+#[rstest]
+#[case::macro_abort(TokenType::KwmAbort)]
+#[case::macro_display(TokenType::KwmDisplay)]
+#[case::macro_goto(TokenType::KwmGoto)]
+#[case::macro_input(TokenType::KwmInput)]
+#[case::macro_mend(TokenType::KwmMend)]
+#[case::macro_symdel(TokenType::KwmSymdel)]
+#[case::macro_syslput(TokenType::KwmSyslput)]
+#[case::macro_sysrput(TokenType::KwmSysrput)]
+#[case::macro_window(TokenType::KwmWindow)]
+fn test_macro_stats_with_stat_opts_tail(
+    #[case] tok_type: TokenType,
+    kwm_to_str_map: HashMap<TokenType, String>,
+) {
+    // Get the string representation of the token type
+    let tok_str = kwm_to_str_map.get(&tok_type).unwrap();
+
+    // Prepend % and mangle case
+    let tok_str = format!("%{}", mangle_case(tok_str));
+
+    // Create a shared string without the ending semicolon
+    let test_str = format!(
+        "{tok_str}/*c*/var1 &pre.var%suf() / NOWARN opt=\"\"\"some&suf\" #5 a='lit'd /*t*/"
+    );
+    let expected_tokens = vec![
+        (tok_str.as_str(), tok_type, Payload::None, tok_str.as_str()),
+        ("/*c*/", TokenType::CStyleComment, Payload::None, "/*c*/"),
+        ("var1", TokenType::MacroString, Payload::None, "var1"),
+        (" ", TokenType::WS, Payload::None, " "),
+        ("&pre.", TokenType::MacroVarExpr, Payload::None, "&pre."),
+        ("var", TokenType::MacroString, Payload::None, "var"),
+        ("%suf", TokenType::MacroIdentifier, Payload::None, "%suf"),
+        ("(", TokenType::LPAREN, Payload::None, "("),
+        (")", TokenType::RPAREN, Payload::None, ")"),
+        (" ", TokenType::WS, Payload::None, " "),
+        ("/", TokenType::FSLASH, Payload::None, "/"),
+        (" ", TokenType::WS, Payload::None, " "),
+        ("NOWARN", TokenType::MacroString, Payload::None, "NOWARN"),
+        (" ", TokenType::WS, Payload::None, " "),
+        ("opt", TokenType::MacroString, Payload::None, "opt"),
+        ("=", TokenType::ASSIGN, Payload::None, "="),
+        ("\"", TokenType::StringExprStart, Payload::None, "\""),
+        (
+            "\"\"some",
+            TokenType::StringExprText,
+            Payload::StringLiteral(0, 5),
+            "\"some",
+        ),
+        ("&suf", TokenType::MacroVarExpr, Payload::None, "&suf"),
+        ("\"", TokenType::StringExprEnd, Payload::None, "\""),
+        (" ", TokenType::WS, Payload::None, " "),
+        ("#5", TokenType::MacroString, Payload::None, "#5"),
+        (" ", TokenType::WS, Payload::None, " "),
+        ("a", TokenType::MacroString, Payload::None, "a"),
+        ("=", TokenType::ASSIGN, Payload::None, "="),
+        ("'lit'd", TokenType::DateLiteral, Payload::None, "'lit'd"),
+        (" ", TokenType::WS, Payload::None, " "),
         ("/*t*/", TokenType::CStyleComment, Payload::None, "/*t*/"),
     ];
 
@@ -2858,5 +2966,112 @@ fn test_macro_special_builtins(
     #[case] contents: &str,
     #[case] expected_token: Vec<impl TokenTestCase>,
 ) {
+    assert_lexing(contents, expected_token, NO_ERRORS);
+}
+
+/// A collection of non-exhaustive tests for rare macro stats.
+/// %window is handled only in file test, too long to include here.
+#[rstest]
+#[case::copy(
+    "%coPY %pre/*c*/()macroname&suf //*c*/ OUT='ext' lib=%mc SOURCE;",
+    vec![
+        ("%coPY", TokenType::KwmCopy),
+        (" ", TokenType::WS),
+        ("%pre", TokenType::MacroIdentifier),
+        ("/*c*/", TokenType::CStyleComment),
+        ("(", TokenType::LPAREN),
+        (")", TokenType::RPAREN),
+        ("macroname", TokenType::MacroString),
+        ("&suf", TokenType::MacroVarExpr),
+        (" ", TokenType::WS),
+        ("/", TokenType::FSLASH),
+        ("/*c*/", TokenType::CStyleComment),
+        (" ", TokenType::WS),
+        ("OUT", TokenType::MacroString),
+        ("=", TokenType::ASSIGN),
+        ("'ext'", TokenType::StringLiteral),
+        (" ", TokenType::WS),
+        ("lib", TokenType::MacroString),
+        ("=", TokenType::ASSIGN),
+        ("%mc", TokenType::MacroIdentifier),
+        (" ", TokenType::WS),
+        ("SOURCE", TokenType::MacroString),
+        (";", TokenType::SEMI),
+    ]
+)]
+#[case::input(
+    "%Input first &second;",
+    vec![
+        ("%Input", TokenType::KwmInput),        
+        (" ", TokenType::WS),
+        ("first", TokenType::MacroString),
+        (" ", TokenType::WS),
+        ("&second", TokenType::MacroVarExpr),
+        (";", TokenType::SEMI),
+    ]
+)]
+#[case::mend(
+    "%Mend disc;",
+    vec![
+        ("%Mend", TokenType::KwmMend),
+        (" ", TokenType::WS),        
+        ("disc", TokenType::MacroString),
+        (";", TokenType::SEMI),
+    ]
+)]
+#[case::symdel(
+    "%SYMdel var1 &var2 / nowarn;",
+    vec![
+        ("%SYMdel", TokenType::KwmSymdel),
+        (" ", TokenType::WS),
+        ("var1", TokenType::MacroString),
+        (" ", TokenType::WS),
+        ("&var2", TokenType::MacroVarExpr),
+        (" ", TokenType::WS),
+        ("/", TokenType::FSLASH),
+        (" ", TokenType::WS),
+        ("nowarn", TokenType::MacroString),
+        (";", TokenType::SEMI),
+    ]
+)]
+#[case::syslput(
+    "%sysLput path=%bquote(&path);",
+    vec![
+        ("%sysLput", TokenType::KwmSyslput),
+        (" ", TokenType::WS),
+        ("path", TokenType::MacroString),
+        ("=", TokenType::ASSIGN),
+        ("%bquote", TokenType::KwmBquote),
+        ("(", TokenType::LPAREN),
+        ("&path", TokenType::MacroVarExpr),
+        (")", TokenType::RPAREN),
+        (";", TokenType::SEMI),        
+    ]
+)]
+#[case::sysmacdelete(
+    "%SYSmacDELETE macro_name / nowarn;",
+    vec![
+        ("%SYSmacDELETE", TokenType::KwmSysmacdelete),
+        (" ", TokenType::WS),
+        ("macro_name", TokenType::Identifier),
+        (" ", TokenType::WS),
+        ("/", TokenType::FSLASH),
+        (" ", TokenType::WS),
+        ("nowarn", TokenType::MacroString),
+        (";", TokenType::SEMI),
+    ]
+)]
+#[case::sysrput(
+    "%SYSrput retcode=&sysinfo;",
+    vec![
+        ("%SYSrput", TokenType::KwmSysrput),
+        (" ", TokenType::WS),
+        ("retcode", TokenType::MacroString),
+        ("=", TokenType::ASSIGN),
+        ("&sysinfo", TokenType::MacroVarExpr),
+        (";", TokenType::SEMI),
+    ]
+)]
+fn test_macro_rare_stats(#[case] contents: &str, #[case] expected_token: Vec<impl TokenTestCase>) {
     assert_lexing(contents, expected_token, NO_ERRORS);
 }
