@@ -369,7 +369,8 @@ impl<'src> Lexer<'src> {
                 LexerMode::Default
                 | LexerMode::WsOrCStyleCommentOnly
                 | LexerMode::MaybeMacroCallArgs
-                | LexerMode::MacroSemiTerminatedTextExpr => {
+                | LexerMode::MacroSemiTerminatedTextExpr
+                | LexerMode::MacroStatOptionsTextExpr => {
                     // These are optional modes, meaning there can be no actual token lexed in it
                     // so we can safely pop them
                 }
@@ -529,6 +530,9 @@ impl<'src> Lexer<'src> {
             LexerMode::MacroSemiTerminatedTextExpr => {
                 self.dispatch_macro_semi_term_text_expr(next_char);
             }
+            LexerMode::MacroStatOptionsTextExpr => {
+                self.dispatch_macro_stat_opts_text_expr(next_char);
+            }
         }
     }
 
@@ -635,12 +639,8 @@ impl<'src> Lexer<'src> {
 
         // Dispatch the "big" categories
         match next_char {
-            '\'' => {
-                self.lex_single_quoted_str();
-            }
-            '"' => {
-                self.lex_string_expression_start(false);
-            }
+            '\'' => self.lex_single_quoted_str(),
+            '"' => self.lex_string_expression_start(false),
             '/' => {
                 if self.cursor.peek_next() == '*' {
                     self.lex_cstyle_comment();
@@ -1398,6 +1398,139 @@ impl<'src> Lexer<'src> {
                 '\n' => {
                     self.cursor.advance();
                     self.add_line();
+                }
+                ';' => {
+                    // Found the terminator, emit the token, pop the mode and return
+                    self.emit_token(TokenChannel::DEFAULT, TokenType::MacroString, Payload::None);
+                    self.pop_mode();
+                    return;
+                }
+                _ => {
+                    // Not a terminator, just a regular character in the string
+                    // consume and continue lexing the string
+                    self.cursor.advance();
+                }
+            }
+        }
+
+        // EOF
+        // Emit the text token and return
+        self.emit_token(TokenChannel::DEFAULT, TokenType::MacroString, Payload::None);
+    }
+
+    fn dispatch_macro_stat_opts_text_expr(&mut self, next_char: char) {
+        debug_assert!(matches!(self.mode(), LexerMode::MacroStatOptionsTextExpr));
+
+        self.start_token();
+
+        // Dispatch the "big" categories
+        match next_char {
+            '\'' => self.lex_single_quoted_str(),
+            '"' => self.lex_string_expression_start(false),
+            '/' => {
+                if self.cursor.peek_next() == '*' {
+                    self.lex_cstyle_comment();
+                } else {
+                    // not a comment, a slash. Lex as a FSLASH token
+                    self.cursor.advance();
+                    self.emit_token(TokenChannel::DEFAULT, TokenType::FSLASH, Payload::None);
+                }
+            }
+            '&' => {
+                if !self.lex_macro_var_expr() {
+                    // Not a macro var, just a sequence of ampersands
+                    // consume the sequence and continue lexing the string
+                    self.cursor.eat_while(|c| c == '&');
+                    self.lex_macro_string_stat_opts();
+                }
+            }
+            '%' => {
+                match self.lex_macro_call(true, false) {
+                    MacroKwType::MacroStat => {
+                        // Hit a following macro statement => pop mode and exit.
+                        // Error has already been emitted by the `lex_macro_call`
+                        self.pop_mode();
+                    }
+                    MacroKwType::None => {
+                        // Just a percent, consume and continue lexing the string
+                        // We could have not consumed it and let the
+                        // string lexing handle it, but this way we
+                        // we avoid one extra check
+                        self.cursor.advance();
+                        self.lex_macro_string_unrestricted();
+                    }
+                    MacroKwType::MacroCallOrLabel => {}
+                }
+            }
+            ';' => {
+                // Found the terminator, pop the mode and return
+                self.pop_mode();
+            }
+            c if c.is_whitespace() => {
+                // Lex whitespace
+                self.lex_ws();
+            }
+            '=' => {
+                // Lex the assignment
+                self.cursor.advance();
+                self.emit_token(TokenChannel::DEFAULT, TokenType::ASSIGN, Payload::None);
+            }
+            _ => {
+                // Not a terminator, just a regular character in the string
+                // consume and continue lexing the string
+                self.cursor.advance();
+                self.lex_macro_string_stat_opts();
+            }
+        }
+    }
+
+    fn lex_macro_string_stat_opts(&mut self) {
+        debug_assert!(matches!(self.mode(), LexerMode::MacroStatOptionsTextExpr));
+
+        while let Some(c) = self.cursor.peek() {
+            match c {
+                '\'' | '"' | '/' | '=' => {
+                    // Reached the end of the section of a macro string
+                    // Emit the text token and return
+                    self.emit_token(TokenChannel::DEFAULT, TokenType::MacroString, Payload::None);
+                    return;
+                }
+                c if c.is_whitespace() => {
+                    // Also emit the text token and return
+                    self.emit_token(TokenChannel::DEFAULT, TokenType::MacroString, Payload::None);
+                    return;
+                }
+                '&' => {
+                    let (is_macro_amp, amp_count) = is_macro_amp(self.cursor.chars());
+
+                    if is_macro_amp {
+                        // Hit a macro var expr in the string expression => emit the text token
+                        self.emit_token(
+                            TokenChannel::DEFAULT,
+                            TokenType::MacroString,
+                            Payload::None,
+                        );
+
+                        return;
+                    }
+
+                    // Just amps in the text, consume and continue
+                    self.cursor.advance_by(amp_count);
+                }
+                '%' => {
+                    if is_macro_percent(self.cursor.peek_next(), false) {
+                        // Hit a macro call or statment in/after the string expression => emit the text token
+                        self.emit_token(
+                            TokenChannel::DEFAULT,
+                            TokenType::MacroString,
+                            Payload::None,
+                        );
+
+                        return;
+                    }
+
+                    // Just percent in the text, consume and continue
+                    self.cursor.advance();
                 }
                 ';' => {
                     // Found the terminator, emit the token, pop the mode and return
@@ -3538,9 +3671,16 @@ impl<'src> Lexer<'src> {
             }
             TokenTypeMacroCallOrStat::KwmEnd
             | TokenTypeMacroCallOrStat::KwmReturn
-            | TokenTypeMacroCallOrStat::KwmRun => {
+            | TokenTypeMacroCallOrStat::KwmRun
+            | TokenTypeMacroCallOrStat::KwmSysmstoreclear => {
                 // Almost super easy, just expect the closing semi
                 self.push_mode(LexerMode::ExpectSemiOrEOF);
+                self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+            }
+            TokenTypeMacroCallOrStat::KwmPut | TokenTypeMacroCallOrStat::KwmSysexec => {
+                // These we just lex as macro text expressions until the semi
+                self.push_mode(LexerMode::ExpectSemiOrEOF);
+                self.push_mode(LexerMode::MacroSemiTerminatedTextExpr);
                 self.push_mode(LexerMode::WsOrCStyleCommentOnly);
             }
             TokenTypeMacroCallOrStat::KwmAbort
@@ -3548,11 +3688,13 @@ impl<'src> Lexer<'src> {
             | TokenTypeMacroCallOrStat::KwmGoto
             | TokenTypeMacroCallOrStat::KwmInput
             | TokenTypeMacroCallOrStat::KwmMend
-            | TokenTypeMacroCallOrStat::KwmPut
-            | TokenTypeMacroCallOrStat::KwmSysexec => {
-                // These we just lex as macro text expressions until the semi
+            | TokenTypeMacroCallOrStat::KwmSymdel
+            | TokenTypeMacroCallOrStat::KwmSyslput
+            | TokenTypeMacroCallOrStat::KwmSysrput
+            | TokenTypeMacroCallOrStat::KwmWindow => {
+                // These we just lex as macro stat opts text expressions until the semi
                 self.push_mode(LexerMode::ExpectSemiOrEOF);
-                self.push_mode(LexerMode::MacroSemiTerminatedTextExpr);
+                self.push_mode(LexerMode::MacroStatOptionsTextExpr);
                 self.push_mode(LexerMode::WsOrCStyleCommentOnly);
             }
             TokenTypeMacroCallOrStat::KwmDo => {
@@ -3576,56 +3718,10 @@ impl<'src> Lexer<'src> {
                 self.push_mode(LexerMode::WsOrCStyleCommentOnly);
             }
             TokenTypeMacroCallOrStat::KwmUntil | TokenTypeMacroCallOrStat::KwmWhile => {
-                self.push_mode(LexerMode::ExpectSemiOrEOF);
-                self.push_mode(LexerMode::WsOrCStyleCommentOnly);
-                self.push_mode(LexerMode::ExpectSymbol(
-                    ')',
-                    TokenType::RPAREN,
-                    TokenChannel::DEFAULT,
-                ));
-                self.push_mode(LexerMode::MacroEval {
-                    macro_eval_flags: MacroEvalExprFlags::new(
-                        MacroEvalNumericMode::Integer,
-                        MacroEvalNextArgumentMode::None,
-                        false,
-                        false,
-                    ),
-                    pnl: 0,
-                });
-                // Leading insiginificant WS before the first argument
-                self.push_mode(LexerMode::WsOrCStyleCommentOnly);
-                self.push_mode(LexerMode::ExpectSymbol(
-                    '(',
-                    TokenType::LPAREN,
-                    TokenChannel::DEFAULT,
-                ));
-                // Leading insiginificant WS before opening parenthesis
-                self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+                self.expect_macro_until_while_stat_args();
             }
             TokenTypeMacroCallOrStat::KwmLet => {
-                // following let we must have name, equal sign and expression.
-                // All maybe surrounded by insignificant whitespace! + the closing semi
-                // Also, SAS happily recovers after missing equal sign, with just a note
-                // Hence we pre-feed all the expected states to the mode stack in reverse order,
-                // and it will unwind as we lex tokens
-                // We do not handle the trailing WS for the initialized, instead defer it to the
-                // parser, to avoid excessive lookahead
-                self.push_mode(LexerMode::ExpectSemiOrEOF);
-                self.push_mode(LexerMode::MacroSemiTerminatedTextExpr);
-                self.push_mode(LexerMode::WsOrCStyleCommentOnly);
-                self.push_mode(LexerMode::ExpectSymbol(
-                    '=',
-                    TokenType::ASSIGN,
-                    TokenChannel::DEFAULT,
-                ));
-                self.push_mode(LexerMode::WsOrCStyleCommentOnly);
-                self.push_mode(LexerMode::MacroVarNameExpr(
-                    false,
-                    Some(ErrorType::MissingExpected(
-                        "ERROR: Expecting a variable name after %LET.",
-                    )),
-                ));
-                self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+                self.expect_macro_let_stat();
             }
             TokenTypeMacroCallOrStat::KwmIf => {
                 self.push_mode(LexerMode::MacroEval {
@@ -3643,8 +3739,11 @@ impl<'src> Lexer<'src> {
                 // Leading insiginificant WS before expression
                 self.push_mode(LexerMode::WsOrCStyleCommentOnly);
             }
+            TokenTypeMacroCallOrStat::KwmCopy | TokenTypeMacroCallOrStat::KwmSysmacdelete => {
+                self.expect_macro_name_then_opts();
+            }
+            // TODO!!!!!! PLACEHOLDER - should be exhaustive
             _ => {
-                // TODO!!!!!! PLACEHOLDER - should be exhaustive
                 self.push_mode(LexerMode::ExpectSemiOrEOF);
                 self.push_mode(LexerMode::MacroSemiTerminatedTextExpr);
                 self.push_mode(LexerMode::WsOrCStyleCommentOnly);
@@ -3841,6 +3940,90 @@ impl<'src> Lexer<'src> {
             TokenChannel::DEFAULT,
         ));
         // Leading insiginificant WS before opening parenthesis
+        self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+    }
+
+    /// A helper to populate the expected states for the [%do] %until/%while statements
+    /// starting at the opening parenthesis. It is similar to %eval and
+    /// followed by expected semicolon or EOF.
+    #[inline]
+    fn expect_macro_until_while_stat_args(&mut self) {
+        self.push_mode(LexerMode::ExpectSemiOrEOF);
+        self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+        self.push_mode(LexerMode::ExpectSymbol(
+            ')',
+            TokenType::RPAREN,
+            TokenChannel::DEFAULT,
+        ));
+        self.push_mode(LexerMode::MacroEval {
+            macro_eval_flags: MacroEvalExprFlags::new(
+                MacroEvalNumericMode::Integer,
+                MacroEvalNextArgumentMode::None,
+                false,
+                false,
+            ),
+            pnl: 0,
+        });
+        // Leading insiginificant WS before the first argument
+        self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+        self.push_mode(LexerMode::ExpectSymbol(
+            '(',
+            TokenType::LPAREN,
+            TokenChannel::DEFAULT,
+        ));
+        // Leading insiginificant WS before opening parenthesis
+        self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+    }
+
+    /// A helper to populate the expected states for the %let statement.
+    /// Following let we must have name, equal sign and expression.
+    /// All maybe surrounded by insignificant whitespace! + the closing semi
+    /// Also, SAS happily recovers after missing equal sign, with just a note
+    /// Hence we pre-feed all the expected states to the mode stack in reverse order,
+    /// and it will unwind as we lex tokens
+    /// We do not handle the trailing WS for the initializer, instead defer it to the
+    /// parser, to avoid excessive lookahead
+    #[inline]
+    fn expect_macro_let_stat(&mut self) {
+        self.push_mode(LexerMode::ExpectSemiOrEOF);
+        self.push_mode(LexerMode::MacroSemiTerminatedTextExpr);
+        self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+        self.push_mode(LexerMode::ExpectSymbol(
+            '=',
+            TokenType::ASSIGN,
+            TokenChannel::DEFAULT,
+        ));
+        self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+        self.push_mode(LexerMode::MacroVarNameExpr(
+            false,
+            Some(ErrorType::MissingExpected(
+                "ERROR: Expecting a variable name after %LET.",
+            )),
+        ));
+        self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+    }
+
+    /// A helper to populate the expected states for the %copy/%SYSMACDELETE statements.
+    /// It is similar to %let, starts with a mandatory name expr (macro here),
+    /// then a mandatory `/` followed by options that we just lex as
+    /// stat options text expression.
+    #[inline]
+    fn expect_macro_name_then_opts(&mut self) {
+        self.push_mode(LexerMode::ExpectSemiOrEOF);
+        self.push_mode(LexerMode::MacroStatOptionsTextExpr);
+        self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+        self.push_mode(LexerMode::ExpectSymbol(
+            '/',
+            TokenType::FSLASH,
+            TokenChannel::DEFAULT,
+        ));
+        self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+        self.push_mode(LexerMode::MacroVarNameExpr(
+            false,
+            Some(ErrorType::MissingExpected(
+                "ERROR 180-322: Statement is not valid or it is used out of proper order.",
+            )),
+        ));
         self.push_mode(LexerMode::WsOrCStyleCommentOnly);
     }
 }
