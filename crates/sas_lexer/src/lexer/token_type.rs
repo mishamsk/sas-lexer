@@ -363,7 +363,7 @@ pub(super) const MACRO_QUOTE_CALL_TOKEN_TYPE_RANGE: (u16, u16) =
     (TokenType::KwmBquote as u16, TokenType::KwmNrStr as u16);
 
 pub(super) const MACRO_STAT_TOKEN_TYPE_RANGE: (u16, u16) =
-    (TokenType::KwmAbort as u16, TokenType::KwmList as u16);
+    (TokenType::KwmAbort as u16, TokenType::KwmRun as u16);
 
 #[cfg(test)]
 mod tests {
@@ -451,6 +451,7 @@ mod tests {
                         | TokenType::KwmWindow
                         | TokenType::KwmInclude
                         | TokenType::KwmList
+                        | TokenType::KwmRun
                 )
             );
         }
