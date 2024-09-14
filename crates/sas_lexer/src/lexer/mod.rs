@@ -3659,6 +3659,10 @@ impl<'src> Lexer<'src> {
             // No argument built-in calls
             #[allow(clippy::match_same_arms)]
             TokenTypeMacroCallOrStat::KwmSysmexecdepth => {}
+            // TODO!!!!!! PLACEHOLDER - should be exhaustive
+            _ if !is_macro_stat_tok_type(kw_tok_type.into()) => {
+                self.expect_builtin_macro_call_args();
+            }
             // Macro statements
             TokenTypeMacroCallOrStat::KwmInclude
             | TokenTypeMacroCallOrStat::KwmList
