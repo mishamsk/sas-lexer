@@ -160,8 +160,9 @@ pub(super) fn lex_macro_call_stat_or_label(
     let ident = source_view
         .get(1..ident_end_byte_offset as usize)
         .ok_or("Unexpected error getting ident slice in `lex_macro_call_stat_or_label`")?
-        .chars()
-        .map(|c| c.to_ascii_uppercase())
+        .as_bytes()
+        .iter()
+        .map(|c| c.to_ascii_uppercase() as char)
         .collect::<SmolStr>();
 
     if ident.is_empty() {

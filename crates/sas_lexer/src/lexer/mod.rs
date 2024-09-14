@@ -2752,8 +2752,9 @@ impl<'src> Lexer<'src> {
         // Using SmolStr is faster as it will be stack allocated
         let ident = self
             .pending_token_text()
-            .chars()
-            .map(|c| c.to_ascii_uppercase())
+            .as_bytes()
+            .iter()
+            .map(|c| c.to_ascii_uppercase() as char)
             .collect::<SmolStr>();
 
         if let Some(kw_tok_type) = parse_keyword(&ident) {
