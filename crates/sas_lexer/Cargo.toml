@@ -19,9 +19,16 @@ strum = { workspace = true }
 unicode-ident = "1.0.12"
 
 [dev-dependencies]
+criterion = { workspace = true, features = ["html_reports"] }
 insta = { workspace = true }
 rstest = { workspace = true }
-serde = { workspace = true }
+zip = { workspace = true }
+walkdir = { workspace = true }
+
 
 [lints]
 workspace = true
+
+[[bench]]
+name = "lexer"
+harness = false

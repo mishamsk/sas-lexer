@@ -14,7 +14,7 @@ path = "src/main.rs"
 [dependencies]
 sas_lexer = { workspace = true }
 clap = { version = "4.5.10", features = ["derive"] }
-walkdir = "2.5.0"
+walkdir = { workspace = true }
 strum = { workspace = true }
 convert_case = "0.6.0"
 
