@@ -355,7 +355,7 @@ fn test_complex_string_expr(
         ("\"", TokenType::StringExprStart),        
         ("%let", TokenType::KwmLet),
         (" ", TokenType::WS),
-        ("v", TokenType::Identifier),
+        ("v", TokenType::MacroString),
         ("=", TokenType::ASSIGN),
         ("1", TokenType::MacroString),
         (";", TokenType::SEMI),
@@ -411,7 +411,7 @@ fn test_string_expr_with_embedded_stat(
                 ("this ", TokenType::StringExprText),
                 ("%let", TokenType::KwmLet),
                 (" ", TokenType::WS),
-                ("a", TokenType::Identifier),
+                ("a", TokenType::MacroString),
                 ("=", TokenType::ASSIGN),
                 ("1", TokenType::MacroString),
                 (";", TokenType::SEMI),
@@ -744,7 +744,7 @@ fn test_numeric_literal_range() {
     vec![
         ("%LeT", TokenType::KwmLet),
         (" ", TokenType::WS),
-        ("a", TokenType::Identifier),
+        ("a", TokenType::MacroString),
         ("=", TokenType::ASSIGN),
         ("(", TokenType::MacroString),
         (";", TokenType::SEMI),
@@ -754,7 +754,7 @@ fn test_numeric_literal_range() {
     vec![
         ("%lEt", TokenType::KwmLet),
         (" ", TokenType::WS),
-        ("a", TokenType::Identifier),
+        ("a", TokenType::MacroString),
         ("=", TokenType::ASSIGN),
         (")", TokenType::MacroString),
         (";", TokenType::SEMI),
@@ -764,7 +764,7 @@ fn test_numeric_literal_range() {
     vec![
         ("%let", TokenType::KwmLet),
         (" ", TokenType::WS),
-        ("a", TokenType::Identifier),
+        ("a", TokenType::MacroString),
         ("&mv", TokenType::MacroVarExpr),
         ("=", TokenType::ASSIGN),
         ("&mv.", TokenType::MacroVarExpr),
@@ -787,7 +787,7 @@ fn test_numeric_literal_range() {
     vec![
         ("%let", TokenType::KwmLet),
         (" ", TokenType::WS),
-        ("a", TokenType::Identifier),
+        ("a", TokenType::MacroString),
         ("&b.", TokenType::MacroVarExpr),
         ("c", TokenType::MacroString),
         ("=", TokenType::ASSIGN),
@@ -799,7 +799,7 @@ fn test_numeric_literal_range() {
     vec![
         ("%let", TokenType::KwmLet),
         (" ", TokenType::WS),
-        ("a", TokenType::Identifier),
+        ("a", TokenType::MacroString),
         (" \n", TokenType::WS),
         ("=", TokenType::ASSIGN),
         ("   ", TokenType::WS),
@@ -813,7 +813,7 @@ fn test_numeric_literal_range() {
     vec![
         ("%let", TokenType::KwmLet),
         (" ", TokenType::WS),
-        ("a", TokenType::Identifier),
+        ("a", TokenType::MacroString),
         ("&a1", TokenType::MacroVarExpr),
         ("%t", TokenType::MacroIdentifier),
         ("(", TokenType::LPAREN),
@@ -842,7 +842,7 @@ fn test_numeric_literal_range() {
     vec![
         ("%let", TokenType::KwmLet),
         (" ", TokenType::WS),
-        ("a", TokenType::Identifier),
+        ("a", TokenType::MacroString),
         ("&a1", TokenType::MacroVarExpr),
         ("%t", TokenType::MacroIdentifier),
         ("(", TokenType::LPAREN),
@@ -859,7 +859,7 @@ fn test_numeric_literal_range() {
     vec![
         ("%let", TokenType::KwmLet),
         (" ", TokenType::WS),
-        ("a", TokenType::Identifier),
+        ("a", TokenType::MacroString),
         ("&a1", TokenType::MacroVarExpr),
         ("%t", TokenType::MacroIdentifier),
         ("=", TokenType::ASSIGN),
@@ -871,7 +871,7 @@ fn test_numeric_literal_range() {
     vec![
         ("%let", TokenType::KwmLet),
         (" ", TokenType::WS),
-        ("a", TokenType::Identifier),
+        ("a", TokenType::MacroString),
         ("&a1", TokenType::MacroVarExpr),
         ("%t", TokenType::MacroIdentifier),
         ("%t", TokenType::MacroIdentifier),
@@ -884,7 +884,7 @@ fn test_numeric_literal_range() {
     vec![
         ("%let", TokenType::KwmLet),
         (" ", TokenType::WS),
-        ("a", TokenType::Identifier),
+        ("a", TokenType::MacroString),
         ("%t", TokenType::MacroIdentifier),
         ("(", TokenType::LPAREN),
         (")", TokenType::RPAREN),
@@ -898,7 +898,7 @@ fn test_numeric_literal_range() {
     vec![
         ("%let", TokenType::KwmLet),
         (" ", TokenType::WS),
-        ("_9v", TokenType::Identifier),
+        ("_9v", TokenType::MacroString),
         ("=", TokenType::ASSIGN),
         ("1", TokenType::MacroString),
         (";", TokenType::SEMI),
@@ -909,7 +909,7 @@ fn test_numeric_literal_range() {
         ("%let", TokenType::KwmLet),
         (" ", TokenType::WS),
         ("/*com*/", TokenType::CStyleComment),
-        ("_9v", TokenType::Identifier),
+        ("_9v", TokenType::MacroString),
         ("=", TokenType::ASSIGN),
         ("1", TokenType::MacroString),
         (";", TokenType::SEMI),
@@ -919,7 +919,7 @@ fn test_numeric_literal_range() {
     vec![
         ("%let", TokenType::KwmLet),
         (" ", TokenType::WS),
-        ("_9", TokenType::Identifier),
+        ("_9", TokenType::MacroString),
         ("/*com*/", TokenType::CStyleComment),
         ("v", TokenType::MacroString),
         ("=", TokenType::ASSIGN),
@@ -931,7 +931,7 @@ fn test_numeric_literal_range() {
     vec![
         ("%let", TokenType::KwmLet, Payload::None),
         (" ", TokenType::WS, Payload::None),
-        ("ev", TokenType::Identifier, Payload::None),
+        ("ev", TokenType::MacroString, Payload::None),
         ("%eval", TokenType::KwmEval, Payload::None),
         ("(", TokenType::LPAREN, Payload::None),
         ("1", TokenType::IntegerLiteral, Payload::Integer(1)),
@@ -947,7 +947,7 @@ fn test_numeric_literal_range() {
     vec![
         ("%let", TokenType::KwmLet),
         (" ", TokenType::WS),
-        ("ev", TokenType::Identifier),
+        ("ev", TokenType::MacroString),
         ("%symexist", TokenType::KwmSymExist),
         ("(", TokenType::LPAREN),
         ("a1", TokenType::MacroString),
@@ -961,7 +961,7 @@ fn test_numeric_literal_range() {
     vec![
        ("%let",TokenType::KwmLet),
        (" " ,TokenType::WS),
-       ("ev" ,TokenType::Identifier),
+       ("ev" ,TokenType::MacroString),
        ("%unquote" ,TokenType::KwmUnquote),
        ("(" ,TokenType::LPAREN),
        ("%quote" ,TokenType::KwmQuote),
@@ -978,7 +978,7 @@ fn test_numeric_literal_range() {
     vec![
        ("%let" ,TokenType::KwmLet),
        (" " ,TokenType::WS),
-       ("pre_" ,TokenType::Identifier),
+       ("pre_" ,TokenType::MacroString),
        ("%t" ,TokenType::MacroIdentifier),
        (" " ,TokenType::WS),
        ("/*c*/" ,TokenType::CStyleComment),
@@ -995,7 +995,7 @@ fn test_numeric_literal_range() {
     vec![
        ("%let" ,TokenType::KwmLet),
        (" " ,TokenType::WS),
-       ("a" ,TokenType::Identifier),
+       ("a" ,TokenType::MacroString),
        ("=" ,TokenType::ASSIGN),
        ("'%t();'" ,TokenType::StringLiteral),
        (" " ,TokenType::MacroString),
@@ -1017,7 +1017,7 @@ fn test_macro_let(#[case] contents: &str, #[case] expected_token: Vec<impl Token
     vec![
         ("%let", TokenType::KwmLet),
         (" ", TokenType::WS),
-        ("a", TokenType::Identifier),
+        ("a", TokenType::MacroString),
         ("%m", TokenType::MacroIdentifier),
         // Recovered from missing assign hence empty string
         ("", TokenType::ASSIGN),
@@ -1032,7 +1032,7 @@ fn test_macro_let(#[case] contents: &str, #[case] expected_token: Vec<impl Token
     vec![
         ("%let", TokenType::KwmLet),
         (" ", TokenType::WS),
-        ("a", TokenType::Identifier),
+        ("a", TokenType::MacroString),
         (" ", TokenType::WS),
         // Recovered from missing assign hence empty string
         ("", TokenType::ASSIGN),
@@ -1045,7 +1045,7 @@ fn test_macro_let(#[case] contents: &str, #[case] expected_token: Vec<impl Token
 vec![
     ("%let", TokenType::KwmLet),
     (" ", TokenType::WS),
-    ("a", TokenType::Identifier),
+    ("a", TokenType::MacroString),
     (" ", TokenType::WS),
     // Recovered from missing assign hence empty string
     ("", TokenType::ASSIGN),
@@ -1106,7 +1106,7 @@ vec![
 vec![
     ("%let", TokenType::KwmLet, TokenChannel::DEFAULT),
     (" ", TokenType::WS, TokenChannel::HIDDEN),
-    ("a", TokenType::Identifier, TokenChannel::DEFAULT),
+    ("a", TokenType::MacroString, TokenChannel::DEFAULT),
     // Recovered from missing assign hence empty string
     ("", TokenType::ASSIGN, TokenChannel::DEFAULT),
     ("%nrstr", TokenType::KwmNrStr, TokenChannel::HIDDEN),
@@ -1122,7 +1122,7 @@ vec![
 vec![
     ("%let", TokenType::KwmLet),
     (" ", TokenType::WS),
-    ("a", TokenType::Identifier),
+    ("a", TokenType::MacroString),
     // Recovered from missing assign hence empty string
     ("", TokenType::ASSIGN),
     ("%quote", TokenType::KwmQuote),
@@ -1138,7 +1138,7 @@ vec![
 vec![
     ("%let", TokenType::KwmLet, TokenChannel::DEFAULT),
     (" ", TokenType::WS, TokenChannel::HIDDEN),
-    ("a", TokenType::Identifier, TokenChannel::DEFAULT),
+    ("a", TokenType::MacroString, TokenChannel::DEFAULT),
     // Recovered from missing assign hence empty string
     ("", TokenType::ASSIGN, TokenChannel::DEFAULT),
     ("%str", TokenType::KwmStr, TokenChannel::HIDDEN),
@@ -1484,7 +1484,7 @@ fn test_macro_str_call(#[case] contents: &str, #[case] expected_token: Vec<impl 
         ("", TokenType::RPAREN, TokenChannel::HIDDEN),
         ("%let", TokenType::KwmLet, TokenChannel::DEFAULT),
         (" ", TokenType::WS, TokenChannel::HIDDEN),
-        ("v", TokenType::Identifier, TokenChannel::DEFAULT),
+        ("v", TokenType::MacroString, TokenChannel::DEFAULT),
         ("=", TokenType::ASSIGN, TokenChannel::DEFAULT),
         ("1", TokenType::MacroString, TokenChannel::DEFAULT),
         (";", TokenType::SEMI, TokenChannel::DEFAULT),
@@ -2609,7 +2609,7 @@ fn test_macro_eval_empty_logical_operand(
         vec![
             ("%do", TokenType::KwmDo),
             (" ", TokenType::WS),
-            ("i", TokenType::Identifier),
+            ("i", TokenType::MacroString),
             ("=", TokenType::ASSIGN),
             ("#", TokenType::UNKNOWN),
             ("%to", TokenType::KwmTo),
@@ -2623,7 +2623,7 @@ fn test_macro_eval_empty_logical_operand(
         vec![
             ("%do", TokenType::KwmDo),
             (" ", TokenType::WS),
-            ("i", TokenType::Identifier),
+            ("i", TokenType::MacroString),
             ("=", TokenType::ASSIGN),
             ("#", TokenType::UNKNOWN),
             ("%to", TokenType::KwmTo),
@@ -2790,7 +2790,7 @@ fn test_macro_eval_empty_logical_operand(
     vec![
         ("%do", TokenType::KwmDo, Payload::None),
         (" ", TokenType::WS, Payload::None),
-        ("i", TokenType::Identifier, Payload::None),
+        ("i", TokenType::MacroString, Payload::None),
         ("=", TokenType::ASSIGN, Payload::None),
         ("1", TokenType::IntegerLiteral, Payload::Integer(1)),
         (" ", TokenType::WS, Payload::None),
@@ -2805,7 +2805,7 @@ fn test_macro_eval_empty_logical_operand(
     vec![
         ("%do", TokenType::KwmDo, Payload::None),
         (" ", TokenType::WS, Payload::None),
-        ("i", TokenType::Identifier, Payload::None),
+        ("i", TokenType::MacroString, Payload::None),
         ("=", TokenType::ASSIGN, Payload::None),
         ("1", TokenType::IntegerLiteral, Payload::Integer(1)),
         (" ", TokenType::WS, Payload::None),
@@ -2822,7 +2822,7 @@ fn test_macro_eval_empty_logical_operand(
     vec![
         ("%do", TokenType::KwmDo, Payload::None),
         (" ", TokenType::WS, Payload::None),
-        ("i", TokenType::Identifier, Payload::None),
+        ("i", TokenType::MacroString, Payload::None),
         ("=", TokenType::ASSIGN, Payload::None),
         ("1", TokenType::IntegerLiteral, Payload::Integer(1)),
         (" ", TokenType::WS, Payload::None),
@@ -3053,7 +3053,7 @@ fn test_macro_special_builtins(
     vec![
         ("%SYSmacDELETE", TokenType::KwmSysmacdelete),
         (" ", TokenType::WS),
-        ("macro_name", TokenType::Identifier),
+        ("macro_name", TokenType::MacroString),
         (" ", TokenType::WS),
         ("/", TokenType::FSLASH),
         (" ", TokenType::WS),
