@@ -3072,6 +3072,102 @@ fn test_macro_special_builtins(
         (";", TokenType::SEMI),
     ]
 )]
+#[case::local_regular(
+    "%LOcal var1 pre&mv %m()suf;",
+    vec![
+        ("%LOcal", TokenType::KwmLocal),
+        (" ", TokenType::WS),
+        ("var1", TokenType::MacroString),
+        (" ", TokenType::WS),
+        ("pre", TokenType::MacroString),
+        ("&mv", TokenType::MacroVarExpr),
+        (" ", TokenType::WS),
+        ("%m", TokenType::MacroIdentifier),
+        ("(", TokenType::LPAREN),
+        (")", TokenType::RPAREN),
+        ("suf", TokenType::MacroString),
+        (";", TokenType::SEMI),
+    ]
+)]
+#[case::global_regular(
+    "%GLobal var1 pre&mv %m()suf;",
+    vec![
+        ("%GLobal", TokenType::KwmGlobal),
+        (" ", TokenType::WS),
+        ("var1", TokenType::MacroString),
+        (" ", TokenType::WS),
+        ("pre", TokenType::MacroString),
+        ("&mv", TokenType::MacroVarExpr),
+        (" ", TokenType::WS),
+        ("%m", TokenType::MacroIdentifier),
+        ("(", TokenType::LPAREN),
+        (")", TokenType::RPAREN),
+        ("suf", TokenType::MacroString),
+        (";", TokenType::SEMI),
+    ]
+)]
+#[case::local_readonly_static(
+    "%local / readonly mv=1;",
+    vec![
+        ("%local", TokenType::KwmLocal),
+        (" ", TokenType::WS),
+        ("/", TokenType::FSLASH),
+        (" ", TokenType::WS),
+        ("readonly", TokenType::MacroString),
+        (" ", TokenType::WS),
+        ("mv", TokenType::MacroString),
+        ("=", TokenType::ASSIGN),
+        ("1", TokenType::MacroString),
+        (";", TokenType::SEMI),
+    ]
+)]
+#[case::local_readonly_dynamic(
+    "%local / read&only mv=1;",
+    vec![
+        ("%local", TokenType::KwmLocal),
+        (" ", TokenType::WS),
+        ("/", TokenType::FSLASH),
+        (" ", TokenType::WS),
+        ("read", TokenType::MacroString),
+        ("&only", TokenType::MacroVarExpr),
+        (" ", TokenType::WS),
+        ("mv", TokenType::MacroString),
+        ("=", TokenType::ASSIGN),
+        ("1", TokenType::MacroString),
+        (";", TokenType::SEMI),
+    ]
+)]
+#[case::global_readonly_static(
+    "%global / readonly mv=1;",
+    vec![
+        ("%global", TokenType::KwmGlobal),
+        (" ", TokenType::WS),
+        ("/", TokenType::FSLASH),
+        (" ", TokenType::WS),
+        ("readonly", TokenType::MacroString),
+        (" ", TokenType::WS),
+        ("mv", TokenType::MacroString),
+        ("=", TokenType::ASSIGN),
+        ("1", TokenType::MacroString),
+        (";", TokenType::SEMI),
+    ]
+)]
+#[case::global_readonly_dynamic(
+    "%global / read&only mv=1;",
+    vec![
+        ("%global", TokenType::KwmGlobal),
+        (" ", TokenType::WS),
+        ("/", TokenType::FSLASH),
+        (" ", TokenType::WS),
+        ("read", TokenType::MacroString),
+        ("&only", TokenType::MacroVarExpr),
+        (" ", TokenType::WS),
+        ("mv", TokenType::MacroString),
+        ("=", TokenType::ASSIGN),
+        ("1", TokenType::MacroString),
+        (";", TokenType::SEMI),
+    ]
+)]
 fn test_macro_rare_stats(#[case] contents: &str, #[case] expected_token: Vec<impl TokenTestCase>) {
     assert_lexing(contents, expected_token, NO_ERRORS);
 }
