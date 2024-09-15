@@ -14,12 +14,15 @@ publish = false
 sas_lexer = { path = "crates/sas_lexer" }
 sas_lexer_macro = { path = "crates/sas_lexer_macro" }
 
+criterion = { version = "0.5.1", features = ["html_reports"] }
 insta = { version = "1.39.0", features = ["yaml"] }
 phf = { version = "0.11.2", features = ["macros"] }
 rmp-serde = "1.3.0"
 rstest = "0.22.0"
 serde = { version = "1.0.204", features = ["derive"] }
 strum = { version = "0.26.3", features = ["derive", "strum_macros"] }
+walkdir = "2.5.0"
+zip = "2.2.0"
 
 [workspace.lints.rust]
 unsafe_code = "warn"
