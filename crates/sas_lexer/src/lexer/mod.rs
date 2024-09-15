@@ -1251,11 +1251,7 @@ impl<'src> Lexer<'src> {
                 self.emit_token(
                     TokenChannel::DEFAULT,
                     // True identifier is only possible if this is the first (and only) token.
-                    if first_token {
-                        TokenType::Identifier
-                    } else {
-                        TokenType::MacroString
-                    },
+                    TokenType::MacroString,
                     Payload::None,
                 );
 
