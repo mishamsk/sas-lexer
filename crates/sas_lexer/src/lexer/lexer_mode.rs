@@ -175,14 +175,19 @@ pub(crate) enum LexerMode {
     /// Nothing is lexed in this mode, rather the stack is populated
     /// based on the lookahead.
     MacroDo,
-    /// Mode for lexing right after %let/%local/%global/%do, where
+    /// Mode for dispatching two types of macro `%local`/`%global` statements.
+    /// The common case is to move into `MacroStatOptionsTextExpr` mode,
+    /// but these statements also have a `/ readonly` variations which
+    /// with the tale performing exactly as `%let`.
+    MacroLocalGlobal { is_local: bool },
+    /// Mode for lexing right after `%let`/`%local`/`%global`/`%do`, where
     /// we expect a variable name expression. Boolean flag indicates if we
     /// have found at least one token of the variable name.
     /// `ErrorType` is used to supply relevant error message, if any is
     /// emitted by SAS if no name is found.
     MacroVarNameExpr(bool, Option<ErrorType>),
     /// Mode for lexing unrestricted macro text expressions terminated by semi.
-    /// These are used for %let initializations, %put, etc.
+    /// These are used for `%let` initializations, `%put`, etc.
     MacroSemiTerminatedTextExpr,
     /// Mode for lexing text expressions where WS is a delimiter and `=` is
     /// lexed as an `assign` token. Also semi terminated.

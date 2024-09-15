@@ -368,6 +368,7 @@ impl<'src> Lexer<'src> {
                 }
                 LexerMode::Default
                 | LexerMode::WsOrCStyleCommentOnly
+                | LexerMode::MacroLocalGlobal { .. }
                 | LexerMode::MaybeMacroCallArgs
                 | LexerMode::MacroSemiTerminatedTextExpr
                 | LexerMode::MacroStatOptionsTextExpr => {
@@ -523,6 +524,9 @@ impl<'src> Lexer<'src> {
             }
             LexerMode::MacroDo => {
                 self.dispatch_macro_do(next_char);
+            }
+            LexerMode::MacroLocalGlobal { is_local } => {
+                self.dispatch_macro_local_global(next_char, is_local);
             }
             LexerMode::MacroVarNameExpr(found_name, err) => {
                 self.dispatch_macro_name_expr(next_char, !found_name, err);
@@ -3564,6 +3568,60 @@ impl<'src> Lexer<'src> {
         }
     }
 
+    /// Performs look-ahead to disambiguate between:
+    /// - %local/%global var1 var2 ... varN;
+    /// - %local/%global / readonly var=...;
+    ///
+    /// Sets the appropriate mode stack for the following tokens.
+    fn dispatch_macro_local_global(&mut self, next_char: char, is_local: bool) {
+        debug_assert!(self
+            .buffer
+            .last_token_info_on_default_channel()
+            .is_some_and(
+                |ti| ti.token_type == TokenType::KwmLocal || ti.token_type == TokenType::KwmGlobal
+            ));
+
+        // Whatever goes next, this mode is done
+        self.pop_mode();
+
+        // We need to look ahead to determine the type of the %do statement.
+        // We are already past all WS and comments after the %do keyword
+        match next_char {
+            '/' => {
+                // readonly;
+                self.start_token();
+                self.cursor.advance();
+                self.emit_token(TokenChannel::DEFAULT, TokenType::FSLASH, Payload::None);
+
+                // In SAS smth. like `%local / &mv_that_resolves_to_readonly real_var=real_value;`
+                // is perfectly valid and possible. So we can't just expect mandatory `readonly`
+                // keyword when lexing. Hence we do what we can - push one name expr mode and
+                // then follow with the full let statement mode stack. This is as close as we can
+                // get to the correct behavior in static lexing.
+
+                // States are pushed in reverse order
+                self.expect_macro_let_stat(
+                    "ERROR: The macro variable name is either all blank or missing.",
+                );
+
+                self.push_mode(LexerMode::MacroVarNameExpr(
+                    false,
+                    Some(ErrorType::MissingExpected(if is_local {
+                        "ERROR: Unrecognized keyword on %LOCAL statement."
+                    } else {
+                        "ERROR: Unrecognized keyword on %GLOBAL statement."
+                    })),
+                ));
+                self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+            }
+            _ => {
+                // var list
+                self.push_mode(LexerMode::ExpectSemiOrEOF);
+                self.push_mode(LexerMode::MacroStatOptionsTextExpr);
+            }
+        }
+    }
+
     #[allow(clippy::too_many_lines)]
     fn dispatch_macro_call_or_stat(&mut self, kw_tok_type: TokenTypeMacroCallOrStat) {
         // Emit the token for the keyword itself
@@ -3722,7 +3780,14 @@ impl<'src> Lexer<'src> {
                 self.expect_macro_until_while_stat_args();
             }
             TokenTypeMacroCallOrStat::KwmLet => {
-                self.expect_macro_let_stat();
+                self.expect_macro_let_stat("ERROR: Expecting a variable name after %LET.");
+            }
+            TokenTypeMacroCallOrStat::KwmLocal | TokenTypeMacroCallOrStat::KwmGlobal => {
+                // First skip WS and comments, then put lexer into dispatch mode
+                self.push_mode(LexerMode::MacroLocalGlobal {
+                    is_local: kw_tok_type == TokenTypeMacroCallOrStat::KwmLocal,
+                });
+                self.push_mode(LexerMode::WsOrCStyleCommentOnly);
             }
             TokenTypeMacroCallOrStat::KwmIf => {
                 self.push_mode(LexerMode::MacroEval {
@@ -3742,8 +3807,7 @@ impl<'src> Lexer<'src> {
             }
             TokenTypeMacroCallOrStat::KwmCopy | TokenTypeMacroCallOrStat::KwmSysmacdelete => {
                 self.expect_macro_name_then_opts();
-            }
-            // TODO!!!!!! PLACEHOLDER - should be exhaustive
+            } // TODO!!!!!! PLACEHOLDER - should be exhaustive
             _ => {
                 self.push_mode(LexerMode::ExpectSemiOrEOF);
                 self.push_mode(LexerMode::MacroSemiTerminatedTextExpr);
@@ -3985,7 +4049,7 @@ impl<'src> Lexer<'src> {
     /// We do not handle the trailing WS for the initializer, instead defer it to the
     /// parser, to avoid excessive lookahead
     #[inline]
-    fn expect_macro_let_stat(&mut self) {
+    fn expect_macro_let_stat(&mut self, err_msg: &'static str) {
         self.push_mode(LexerMode::ExpectSemiOrEOF);
         self.push_mode(LexerMode::MacroSemiTerminatedTextExpr);
         self.push_mode(LexerMode::WsOrCStyleCommentOnly);
@@ -3997,9 +4061,7 @@ impl<'src> Lexer<'src> {
         self.push_mode(LexerMode::WsOrCStyleCommentOnly);
         self.push_mode(LexerMode::MacroVarNameExpr(
             false,
-            Some(ErrorType::MissingExpected(
-                "ERROR: Expecting a variable name after %LET.",
-            )),
+            Some(ErrorType::MissingExpected(err_msg)),
         ));
         self.push_mode(LexerMode::WsOrCStyleCommentOnly);
     }
