@@ -120,8 +120,12 @@ pub enum TokenType {
     MacroIdentifier, // %macro_name
     // Macro built in function keywords
     // Non masking versions
+    KwmCmpres,        // CMPRES
+    KwmCompstor,      // COMPSTOR
+    KwmDatatyp,       // DATATYP
     KwmEval,          // EVAL
     KwmIndex,         // INDEX
+    KwmLeft,          // LEFT
     KwmLength,        // LENGTH
     KwmLowcase,       // LOWCASE
     KwmScan,          // SCAN
@@ -137,8 +141,10 @@ pub enum TokenType {
     KwmSysmexecdepth, // SYSMEXECDEPTH
     KwmSysmexecname,  // SYSMEXECNAME
     KwmSysprod,       // SYSPROD
+    KwmTrim,          // TRIM
     KwmUnquote,       // UNQUOTE
     KwmUpcase,        // UPCASE
+    KwmVerify,        // VERIFY
     // NLS functions (non-masking)
     KwmKCmpres,  // KCMPRES
     KwmKIndex,   // KINDEX
@@ -147,14 +153,19 @@ pub enum TokenType {
     KwmKLowcase, // KLLOWCASE
     KwmKScan,    // KSCAN
     KwmKSubstr,  // KSUBSTR
+    KwmKTrim,    // KTRIM
     KwmKUpcase,  // KUPCASE
+    KwmKVerify,  // KVERIFY
     KwmValidchs, // VALIDCHS
     // Macro Masking versions. They mask the resolved value
     // at runtime, much like quoting functions below, so do not
     // change the lexing itself (but obviously influence downstream)
+    KwmQCmpres,  // QCMPRES
+    KwmQLeft,    // QLEFT
     KwmQLowcase, // QLOWCASE
     KwmQScan,    // QSCAN
     KwmQSubstr,  // QSUBSTR
+    KwmQTrim,    // QTRIM
     KwmQSysfunc, // QSYSFUNC
     KwmQUpcase,  // QUPCASE
     // NLS functions (masking)
@@ -163,6 +174,7 @@ pub enum TokenType {
     KwmQKLowcase, // QKLOWCASE
     KwmQKScan,    // QKSCAN
     KwmQKSubstr,  // QKSUBSTR
+    KwmQKTrim,    // QKTRIM
     KwmQKUpcase,  // QKUPCASE
     // Runtime Quoting functions
     KwmBquote,   // BQUOTE

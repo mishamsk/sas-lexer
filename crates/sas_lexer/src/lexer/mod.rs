@@ -3671,7 +3671,8 @@ impl<'src> Lexer<'src> {
             // Even though we know that some of them have speecific types or number of arguments.
             // E.g. the last 6 are really one argument of var name expr only, but
             // decided to not do too much parsing-like validation here
-            TokenTypeMacroCallOrStat::KwmIndex
+            TokenTypeMacroCallOrStat::KwmDatatyp
+            | TokenTypeMacroCallOrStat::KwmIndex
             | TokenTypeMacroCallOrStat::KwmKIndex
             | TokenTypeMacroCallOrStat::KwmLength
             | TokenTypeMacroCallOrStat::KwmKLength
@@ -3685,10 +3686,18 @@ impl<'src> Lexer<'src> {
             | TokenTypeMacroCallOrStat::KwmQKUpcase
             | TokenTypeMacroCallOrStat::KwmSysmexecname
             | TokenTypeMacroCallOrStat::KwmSysprod
+            | TokenTypeMacroCallOrStat::KwmCmpres
+            | TokenTypeMacroCallOrStat::KwmQCmpres
             | TokenTypeMacroCallOrStat::KwmKCmpres
             | TokenTypeMacroCallOrStat::KwmQKCmpres
+            | TokenTypeMacroCallOrStat::KwmLeft
+            | TokenTypeMacroCallOrStat::KwmQLeft
             | TokenTypeMacroCallOrStat::KwmKLeft
             | TokenTypeMacroCallOrStat::KwmQKLeft
+            | TokenTypeMacroCallOrStat::KwmTrim
+            | TokenTypeMacroCallOrStat::KwmQTrim
+            | TokenTypeMacroCallOrStat::KwmKTrim
+            | TokenTypeMacroCallOrStat::KwmQKTrim
             | TokenTypeMacroCallOrStat::KwmQuote
             | TokenTypeMacroCallOrStat::KwmNrQuote
             | TokenTypeMacroCallOrStat::KwmBquote
@@ -3700,12 +3709,14 @@ impl<'src> Lexer<'src> {
             | TokenTypeMacroCallOrStat::KwmSymLocal
             | TokenTypeMacroCallOrStat::KwmSysget
             | TokenTypeMacroCallOrStat::KwmSysmacexec
-            | TokenTypeMacroCallOrStat::KwmSysmacexist => {
+            | TokenTypeMacroCallOrStat::KwmSysmacexist
+            | TokenTypeMacroCallOrStat::KwmVerify
+            | TokenTypeMacroCallOrStat::KwmKVerify => {
                 self.expect_builtin_macro_call_args();
             }
             // The special built-in beast, that allows named arguments
-            TokenTypeMacroCallOrStat::KwmValidchs => {
-                self.expect_validchs_call_args();
+            TokenTypeMacroCallOrStat::KwmCompstor | TokenTypeMacroCallOrStat::KwmValidchs => {
+                self.expect_builtin_macro_call_named_args();
             }
             // Custom macro or label
             TokenTypeMacroCallOrStat::MacroIdentifier => {
@@ -3986,10 +3997,10 @@ impl<'src> Lexer<'src> {
         self.push_mode(LexerMode::WsOrCStyleCommentOnly);
     }
 
-    /// A helper to populate the expected states for the %validchs call
+    /// A helper to populate the expected states for a couple builints
     /// that allows named arguments. The only built-in that does so.
     #[inline]
-    fn expect_validchs_call_args(&mut self) {
+    fn expect_builtin_macro_call_named_args(&mut self) {
         self.push_mode(LexerMode::ExpectSymbol(
             ')',
             TokenType::RPAREN,
@@ -4095,8 +4106,14 @@ impl<'src> Lexer<'src> {
 ///
 /// Known differences from the SAS lexer:
 /// - String expressions in macro context are lexed as in open code,
-///     for example literals will be lexed as literals, also SAS lexes them
-///     as macro text expressions, verbatim.
+///     for example literals will be lexed as literals, although SAS lexes them
+///     as macro text expressions, verbatim and later interprets at call site.
+/// - As lexer is not aware whether a given macro was defined with or without
+///     parenthesis, it will always lex the following parens as special tokens,
+///     while SAS may not. E.g. `"&m /*c*/ ()"` will yield different tokens in
+///     SAS depending on whether `m` was defined via `%macro m;` or `%macro m();`.
+/// - The exact error when `readonly` is missing after `%local /` and `%global /`
+///    may not be reproduced, but some error conditions are checked.
 ///
 /// # Arguments
 /// * `source: &str` - The source code to lex

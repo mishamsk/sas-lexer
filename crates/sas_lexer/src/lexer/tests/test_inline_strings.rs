@@ -2875,6 +2875,7 @@ fn test_macro_do(#[case] contents: &str, #[case] expected_token: Vec<impl TokenT
 )]
 fn test_macro_simple_builtins(
     #[values(
+        TokenType::KwmDatatyp,
         TokenType::KwmIndex,
         TokenType::KwmKIndex,
         TokenType::KwmLength,
@@ -2889,10 +2890,18 @@ fn test_macro_simple_builtins(
         TokenType::KwmQKUpcase,
         TokenType::KwmSysmexecname,
         TokenType::KwmSysprod,
+        TokenType::KwmCmpres,
+        TokenType::KwmQCmpres,
         TokenType::KwmKCmpres,
         TokenType::KwmQKCmpres,
+        TokenType::KwmLeft,
+        TokenType::KwmQLeft,
         TokenType::KwmKLeft,
         TokenType::KwmQKLeft,
+        TokenType::KwmTrim,
+        TokenType::KwmQTrim,
+        TokenType::KwmKTrim,
+        TokenType::KwmQKTrim,
         TokenType::KwmQuote,
         TokenType::KwmNrQuote,
         TokenType::KwmBquote,
@@ -2904,7 +2913,9 @@ fn test_macro_simple_builtins(
         TokenType::KwmSymLocal,
         TokenType::KwmSysget,
         TokenType::KwmSysmacexec,
-        TokenType::KwmSysmacexist
+        TokenType::KwmSysmacexist,
+        TokenType::KwmVerify,
+        TokenType::KwmKVerify
     )]
     tok_type: TokenType,
     #[case] inner_expr_tokens: Vec<(&str, TokenType)>,
@@ -2937,7 +2948,7 @@ fn test_macro_simple_builtins(
 }
 
 #[rstest]
-// The only built that has named args
+// One of the two built-ins that has named args
 #[case::validchs("%VALIDchs(dsnm=sashelp.class, encoding=utf-8)",
     vec![
         ("%VALIDchs", TokenType::KwmValidchs),
@@ -2950,6 +2961,16 @@ fn test_macro_simple_builtins(
         ("encoding", TokenType::MacroString),
         ("=", TokenType::ASSIGN),
         ("utf-8", TokenType::MacroString),
+        (")", TokenType::RPAREN),
+    ]
+)]
+#[case::compstor("%COMPstor(PATHNAME=lib)",
+    vec![
+        ("%COMPstor", TokenType::KwmCompstor),
+        ("(", TokenType::LPAREN),
+        ("PATHNAME", TokenType::MacroString),
+        ("=", TokenType::ASSIGN),
+        ("lib", TokenType::MacroString),        
         (")", TokenType::RPAREN),
     ]
 )]
