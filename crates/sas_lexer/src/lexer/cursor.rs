@@ -104,8 +104,6 @@ impl<'a> Cursor<'a> {
 
     #[inline]
     pub(super) fn eat_while(&mut self, mut predicate: impl FnMut(char) -> bool) {
-        // It was tried making optimized version of this for eg. line comments, but
-        // LLVM can inline all of this and compile it down to fast iteration over bytes.
         while let Some(c) = self.peek() {
             if !predicate(c) {
                 return;

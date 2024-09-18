@@ -97,6 +97,53 @@ impl MacroEvalExprFlags {
     }
 }
 
+/// The type of the macro call.
+///
+/// - `BuiltIn` for built-in macros like `%scan`
+/// - `MacroCall` for user defined and autocall macros
+#[derive(Debug, Clone, Copy)]
+pub(super) enum MacroCallType {
+    BuiltIn,
+    MacroCall,
+}
+
+/// Packed flags for macro call argument name or value.
+///
+/// The following flags are packed into a single byte:
+/// - The type of the macro call. Built-ins do not support named arguments.
+/// - Whether to auto populate next argument stack or leave
+///    it to the caller to do so.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct MacroArgNameValueFlags(u8);
+
+impl MacroArgNameValueFlags {
+    const CALL_TYPE_MASK: u8 = 0b0000_0001;
+    const POPULATE_NEXT_ARG_STACK_MASK: u8 = 0b0000_0010;
+
+    pub(super) const fn new(call_type: MacroCallType, populate_next_arg_stack: bool) -> Self {
+        let mut bits = 0;
+        if matches!(call_type, MacroCallType::MacroCall) {
+            bits |= Self::CALL_TYPE_MASK;
+        }
+        if populate_next_arg_stack {
+            bits |= Self::POPULATE_NEXT_ARG_STACK_MASK;
+        }
+        Self(bits)
+    }
+
+    pub(super) const fn call_type(self) -> MacroCallType {
+        if self.0 & Self::CALL_TYPE_MASK != 0 {
+            MacroCallType::MacroCall
+        } else {
+            MacroCallType::BuiltIn
+        }
+    }
+
+    pub(super) const fn populate_next_arg_stack(self) -> bool {
+        self.0 & Self::POPULATE_NEXT_ARG_STACK_MASK != 0
+    }
+}
+
 /// The lexer mode
 #[derive(Debug, Clone, PartialEq, Eq, Default, EnumIs)]
 pub(crate) enum LexerMode {
@@ -119,9 +166,10 @@ pub(crate) enum LexerMode {
     /// `ExpectSymbol` but with a special case for EOF
     ExpectSemiOrEOF,
     /// A special mode that goes after non-statement macro identifiers
+    /// and any trailing whitespace or cstyle comments. It is a mode
     /// that checks if the first NON-ws or cstyle follower is (.
     /// If found, adds necessary mode stack to parse the macro call args.
-    /// If not, perorms roll back, so that ws/cstyle comments can be
+    /// If not, performs roll back, so that ws/cstyle comments can be
     /// relexed in different mode.
     ///
     /// Note - it should alwys be preceded by the `WsOrCStyleCommentOnly` mode
@@ -130,21 +178,37 @@ pub(crate) enum LexerMode {
     /// Macro call argument or value mode. I.e. inside the parens of a macro call,
     /// before `=`.
     MacroCallArgOrValue {
+        /// The packed flags for macro argument name or value. See `MacroArgNameValueFlags`
+        flags: MacroArgNameValueFlags,
         /// The current parenthesis nesting level.
         /// Macro arguments allow balanced parenthesis nesting and
         /// inside these parenthesis, `,` and `=` are not treated as
         /// terminators.
         pnl: u32,
     },
+    /// A special mode that goes after `%macro name` and any trailing
+    /// whitespace or cstyle comments.
+    /// It checks if the first NON-ws or cstyle follower is (.
+    /// If found, adds necessary mode stack to parse the macro def args.
+    ///
+    /// Note - it should alwys be preceded by the `WsOrCStyleCommentOnly` mode
+    /// as it literally checks the `next_char` only.    
+    MaybeMacroDefArgs,
+    /// Macro def argument. I.e. inside the parens of a macro definition,
+    /// before an optional `=`. It reads the argument name, optional `=`
+    /// and populates the following mode stack as necessary until all
+    /// arguments are read.
+    MacroDefArg,
+    /// A mode for lexing identifiers in macro definitions. Both the name of the
+    /// macro and argument names. In this mode ascii only identifiers are allowed
+    /// and a SAS error is emitted if no identifier is found.
+    MacroDefName,
     /// Macro call value mode. I.e. inside the parens of a macro call,
     /// after `=` for user defined macros or the only valid mode for
     /// built-in macro calls, since they do not support named arguments.
     MacroCallValue {
-        /// The bool value indicates whether next argument mode should be
-        /// pushed on to the stack upon `,`. `false` is used in some
-        /// built-in macro call lexing, where we pre-populate the stack
-        /// due to special handling of the arguments as eval expressions.
-        populate_next_arg_stack: bool,
+        /// The packed flags for macro argument name or value. See `MacroArgNameValueFlags`
+        flags: MacroArgNameValueFlags,
         /// The current parenthesis nesting level.
         /// Macro arguments allow balanced parenthesis nesting and
         /// inside these parenthesis, `,` is not treated as
@@ -179,7 +243,10 @@ pub(crate) enum LexerMode {
     /// The common case is to move into `MacroStatOptionsTextExpr` mode,
     /// but these statements also have a `/ readonly` variations which
     /// with the tale performing exactly as `%let`.
-    MacroLocalGlobal { is_local: bool },
+    MacroLocalGlobal {
+        /// Boolean flag indicates if this is a local or global statement.
+        is_local: bool,
+    },
     /// Mode for lexing right after `%let`/`%local`/`%global`/`%do`, where
     /// we expect a variable name expression. Boolean flag indicates if we
     /// have found at least one token of the variable name.
