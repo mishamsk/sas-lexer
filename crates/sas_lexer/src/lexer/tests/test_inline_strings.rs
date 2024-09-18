@@ -2983,6 +2983,23 @@ fn test_macro_simple_builtins(
         (")", TokenType::RPAREN),        
     ]
 )]
+// Tests that we correctly populate mode stack for 3+ argument built-ins
+// Note this is not a valid call, the 4th argument can't be `=` as it
+// must be one of the modifiers, but for testing purposes it's fine
+#[case::four_arg_scan("%scan(a=b=c,&mv,=,=)",
+    vec![
+        ("%scan", TokenType::KwmScan),
+        ("(", TokenType::LPAREN),
+        ("a=b=c", TokenType::MacroString),
+        (",", TokenType::COMMA),
+        ("&mv", TokenType::MacroVarExpr),
+        (",", TokenType::COMMA),
+        ("=", TokenType::MacroString),
+        (",", TokenType::COMMA),
+        ("=", TokenType::MacroString),
+        (")", TokenType::RPAREN),
+    ]
+)]
 fn test_macro_special_builtins(
     #[case] contents: &str,
     #[case] expected_token: Vec<impl TokenTestCase>,
