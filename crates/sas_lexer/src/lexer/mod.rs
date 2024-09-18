@@ -1682,6 +1682,11 @@ impl<'src> Lexer<'src> {
                 self.pop_mode();
 
                 if flags.populate_next_arg_stack() {
+                    // Lex the `,` right away
+                    self.start_token();
+                    self.cursor.advance();
+                    self.emit_token(TokenChannel::DEFAULT, TokenType::COMMA, Payload::None);
+
                     let new_flags = MacroArgNameValueFlags::new(
                         flags.call_type(),
                         flags.populate_next_arg_stack(),
@@ -1701,11 +1706,6 @@ impl<'src> Lexer<'src> {
                     self.push_mode(new_mode);
                     // Leading insiginificant WS before the argument
                     self.push_mode(LexerMode::WsOrCStyleCommentOnly);
-                    self.push_mode(LexerMode::ExpectSymbol(
-                        ',',
-                        TokenType::COMMA,
-                        TokenChannel::DEFAULT,
-                    ));
                 }
             }
             ')' if parens_nesting_level == 0 => {
@@ -1717,6 +1717,12 @@ impl<'src> Lexer<'src> {
                 // Found the terminator between argument name and value,
                 // pop the mode and push new modes to expect stuff then return
                 self.pop_mode();
+
+                // Lex the `=` right away
+                self.start_token();
+                self.cursor.advance();
+                self.emit_token(TokenChannel::DEFAULT, TokenType::ASSIGN, Payload::None);
+
                 self.push_mode(LexerMode::MacroCallValue {
                     flags: MacroArgNameValueFlags::new(
                         flags.call_type(),
@@ -1726,11 +1732,6 @@ impl<'src> Lexer<'src> {
                 });
                 // Leading insiginificant WS before the argument
                 self.push_mode(LexerMode::WsOrCStyleCommentOnly);
-                self.push_mode(LexerMode::ExpectSymbol(
-                    '=',
-                    TokenType::ASSIGN,
-                    TokenChannel::DEFAULT,
-                ));
             }
             _ => {
                 // Not a terminator, just a regular character in the string
@@ -1857,6 +1858,11 @@ impl<'src> Lexer<'src> {
                     self.pop_mode();
 
                     if flags.populate_next_arg_stack() {
+                        // Lex the `,` right away
+                        self.start_token();
+                        self.cursor.advance();
+                        self.emit_token(TokenChannel::DEFAULT, TokenType::COMMA, Payload::None);
+
                         let new_flags = MacroArgNameValueFlags::new(
                             flags.call_type(),
                             flags.populate_next_arg_stack(),
@@ -1876,11 +1882,6 @@ impl<'src> Lexer<'src> {
                         self.push_mode(new_mode);
                         // Leading insiginificant WS before the argument
                         self.push_mode(LexerMode::WsOrCStyleCommentOnly);
-                        self.push_mode(LexerMode::ExpectSymbol(
-                            ',',
-                            TokenType::COMMA,
-                            TokenChannel::DEFAULT,
-                        ));
                     }
                     return;
                 }
@@ -1892,6 +1893,12 @@ impl<'src> Lexer<'src> {
                     self.emit_token(TokenChannel::DEFAULT, TokenType::MacroString, Payload::None);
                     // Pop the arg/value mode and push the value mode
                     self.pop_mode();
+
+                    // Lex the `=` right away
+                    self.start_token();
+                    self.cursor.advance();
+                    self.emit_token(TokenChannel::DEFAULT, TokenType::ASSIGN, Payload::None);
+
                     self.push_mode(LexerMode::MacroCallValue {
                         flags: MacroArgNameValueFlags::new(
                             flags.call_type(),
@@ -1901,11 +1908,6 @@ impl<'src> Lexer<'src> {
                     });
                     // Leading insiginificant WS before the argument
                     self.push_mode(LexerMode::WsOrCStyleCommentOnly);
-                    self.push_mode(LexerMode::ExpectSymbol(
-                        '=',
-                        TokenType::ASSIGN,
-                        TokenChannel::DEFAULT,
-                    ));
                     return;
                 }
                 _ => {
