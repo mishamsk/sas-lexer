@@ -2834,10 +2834,178 @@ fn test_macro_eval_empty_logical_operand(
         (" ", TokenType::WS, Payload::None),
         ("0ffx", TokenType::IntegerLiteral, Payload::Integer(255)),
         (";", TokenType::SEMI, Payload::None),
-        ]
+    ]
 )]
 fn test_macro_do(#[case] contents: &str, #[case] expected_token: Vec<impl TokenTestCase>) {
     assert_lexing(contents, expected_token, NO_ERRORS);
+}
+
+#[rstest]
+#[case::no_args_or_opts("%MAcro m;",
+    vec![
+        ("%MAcro", TokenType::KwmMacro, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("m", TokenType::Identifier, Payload::None),
+        (";", TokenType::SEMI, Payload::None),
+    ],
+    NO_ERRORS
+)]
+#[case::empty_args_no_opts("%macro m();",
+    vec![
+        ("%macro", TokenType::KwmMacro, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("m", TokenType::Identifier, Payload::None),
+        ("(", TokenType::LPAREN, Payload::None),
+        (")", TokenType::RPAREN, Payload::None),
+        (";", TokenType::SEMI, Payload::None),
+    ],
+    NO_ERRORS
+)]
+#[case::no_args_with_opts("%macro m /STore;",
+    vec![
+        ("%macro", TokenType::KwmMacro, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("m", TokenType::Identifier, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("/", TokenType::FSLASH, Payload::None),
+        ("STore", TokenType::MacroString, Payload::None),
+        (";", TokenType::SEMI, Payload::None),
+    ],
+    NO_ERRORS
+)]
+#[case::empty_args_with_opts("%macro m()/MINDELIMITER='''z';",
+    vec![
+        ("%macro", TokenType::KwmMacro, Payload::None, "%macro"),
+        (" ", TokenType::WS, Payload::None, " "),
+        ("m", TokenType::Identifier, Payload::None, "m"),
+        ("(", TokenType::LPAREN, Payload::None, "("),
+        (")", TokenType::RPAREN, Payload::None, ")"),
+        ("/", TokenType::FSLASH, Payload::None, "/"),
+        ("MINDELIMITER", TokenType::MacroString, Payload::None, "MINDELIMITER"),
+        ("=", TokenType::ASSIGN, Payload::None, "="),
+        ("'''z'", TokenType::StringLiteral, Payload::StringLiteral(0, 2), "'z"),
+        (";", TokenType::SEMI, Payload::None, ";"),
+    ],
+    NO_ERRORS
+)]
+#[case::all_in_one("%macro /*c*/ m /*c*/ ( /*c*/ no_def, \
+    \n\t/*c*/ arg1 /*c*/ = \"%qscan(&mv,3,&&&)\" , \
+	\n\t/*c*/ arg2 /*c*/ =(,) and 🔥) / DES=\"&mv\" ;",
+    vec![
+        ("%macro", TokenType::KwmMacro, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("/*c*/", TokenType::CStyleComment, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("m", TokenType::Identifier, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("/*c*/", TokenType::CStyleComment, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("(", TokenType::LPAREN, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("/*c*/", TokenType::CStyleComment, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("no_def", TokenType::Identifier, Payload::None),
+        (",", TokenType::COMMA, Payload::None),
+        (" \n\t", TokenType::WS, Payload::None),
+        ("/*c*/", TokenType::CStyleComment, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("arg1", TokenType::Identifier, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("/*c*/", TokenType::CStyleComment, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("=", TokenType::ASSIGN, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("\"", TokenType::StringExprStart, Payload::None),
+        ("%qscan", TokenType::KwmQScan, Payload::None),
+        ("(", TokenType::LPAREN, Payload::None),
+        ("&mv", TokenType::MacroVarExpr, Payload::None),
+        (",", TokenType::COMMA, Payload::None),
+        ("3", TokenType::IntegerLiteral, Payload::Integer(3)),
+        (",", TokenType::COMMA, Payload::None),
+        ("&&&", TokenType::MacroString, Payload::None),
+        (")", TokenType::RPAREN, Payload::None),
+        ("\"", TokenType::StringExprEnd, Payload::None),
+        // Trailing ws, not recognized as WS...
+        (" ", TokenType::MacroString, Payload::None),
+        (",", TokenType::COMMA, Payload::None),
+        (" \n\t", TokenType::WS, Payload::None),
+        ("/*c*/", TokenType::CStyleComment, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("arg2", TokenType::Identifier, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("/*c*/", TokenType::CStyleComment, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("=", TokenType::ASSIGN, Payload::None),
+        ("(,) and 🔥", TokenType::MacroString, Payload::None),
+        (")", TokenType::RPAREN, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("/", TokenType::FSLASH, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("DES", TokenType::MacroString, Payload::None),
+        ("=", TokenType::ASSIGN, Payload::None),
+        ("\"", TokenType::StringExprStart, Payload::None),
+        ("&mv", TokenType::MacroVarExpr, Payload::None),
+        ("\"", TokenType::StringExprEnd, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        (";", TokenType::SEMI, Payload::None),
+    ],
+    NO_ERRORS
+)]
+#[case::single_arg_error_recovery("%macro m(&err = val, \
+    \n\t good );",
+    vec![
+        ("%macro", TokenType::KwmMacro, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("m", TokenType::Identifier, Payload::None),
+        ("(", TokenType::LPAREN, Payload::None),
+        ("&err", TokenType::MacroVarExpr, Payload::None),
+        // lexed as macro call arg => ws not recognized
+        (" ", TokenType::MacroString, Payload::None),
+        ("=", TokenType::ASSIGN, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("val", TokenType::MacroString, Payload::None),
+        (",", TokenType::COMMA, Payload::None),
+        (" \n\t ", TokenType::WS, Payload::None),        
+        ("good", TokenType::Identifier, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        (")", TokenType::RPAREN, Payload::None),
+        (";", TokenType::SEMI, Payload::None),
+    ],
+    vec![(
+        ErrorType::MissingExpected(
+            "ERROR: Invalid macro parameter name. \
+            It should be a valid SAS identifier no longer than 32 characters.\
+            \nERROR: A dummy macro will be compiled.",
+        ), 9
+    )]
+)]
+#[case::macro_name_error_recovery("%macro &err (arg = val);",
+    vec![
+        ("%macro", TokenType::KwmMacro, Payload::None),
+        (" ", TokenType::WS, Payload::None),        
+        ("&err", TokenType::MacroVarExpr, Payload::None),
+        (" ", TokenType::WS, Payload::None),        
+        ("(arg", TokenType::MacroString, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("=", TokenType::ASSIGN, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("val)", TokenType::MacroString, Payload::None),        
+        (";", TokenType::SEMI, Payload::None),
+    ],
+    vec![(
+        ErrorType::MissingExpected(
+            "ERROR: Invalid macro name. \
+            It should be a valid SAS identifier no longer than 32 characters.\
+            \nERROR: A dummy macro will be compiled.",
+        ), 7
+    )]
+)]
+fn test_macro_def(
+    #[case] contents: &str,
+    #[case] expected_token: Vec<impl TokenTestCase>,
+    #[case] expected_errors: Vec<impl ErrorTestCase>,
+) {
+    assert_lexing(contents, expected_token, expected_errors);
 }
 
 /// This test doesn't follow true semantics of built-ins. Most accept

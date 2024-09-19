@@ -1,5 +1,7 @@
 use super::{channel::TokenChannel, error::ErrorType, token_type::TokenType};
 use strum::EnumIs;
+#[cfg(test)]
+use strum::EnumIter;
 
 /// Macro arithmetic/logical expression has integer and float modes.
 /// Float is only enabled in `%sysevalf`
@@ -97,15 +99,25 @@ impl MacroEvalExprFlags {
     }
 }
 
-/// The type of the macro call.
+/// The context of the macro argmunet/value context.
 ///
 /// - `BuiltIn` for built-in macros like `%scan`
-/// - `MacroCall` for user defined and autocall macros
+/// - `MacroCall` for user defined macros and built-ins that allow named arguments
+/// - `MacroDef` for macro definitions
 #[derive(Debug, Clone, Copy)]
-pub(super) enum MacroCallType {
-    BuiltIn,
+#[cfg_attr(test, derive(EnumIter, PartialEq, Eq))]
+#[repr(u8)]
+pub(super) enum MacroArgContext {
+    /// Built-in macro call
+    BuiltInMacro,
+    /// User defined macro call or built-in macro that allows named arguments
     MacroCall,
+    /// Macro definition
+    MacroDef,
 }
+
+const MACRO_CALL_CONTEXT: u8 = MacroArgContext::MacroCall as u8;
+const MACRO_DEF_CONTEXT: u8 = MacroArgContext::MacroDef as u8;
 
 /// Packed flags for macro call argument name or value.
 ///
@@ -117,25 +129,23 @@ pub(super) enum MacroCallType {
 pub(super) struct MacroArgNameValueFlags(u8);
 
 impl MacroArgNameValueFlags {
-    const CALL_TYPE_MASK: u8 = 0b0000_0001;
-    const POPULATE_NEXT_ARG_STACK_MASK: u8 = 0b0000_0010;
+    const CONTEXT_MASK: u8 = 0b0000_0011;
+    const POPULATE_NEXT_ARG_STACK_MASK: u8 = 0b0000_0100;
 
-    pub(super) const fn new(call_type: MacroCallType, populate_next_arg_stack: bool) -> Self {
-        let mut bits = 0;
-        if matches!(call_type, MacroCallType::MacroCall) {
-            bits |= Self::CALL_TYPE_MASK;
-        }
+    pub(super) const fn new(context: MacroArgContext, populate_next_arg_stack: bool) -> Self {
+        let mut bits = 0 | (context as u8);
+
         if populate_next_arg_stack {
             bits |= Self::POPULATE_NEXT_ARG_STACK_MASK;
         }
         Self(bits)
     }
 
-    pub(super) const fn call_type(self) -> MacroCallType {
-        if self.0 & Self::CALL_TYPE_MASK != 0 {
-            MacroCallType::MacroCall
-        } else {
-            MacroCallType::BuiltIn
+    pub(super) const fn context(self) -> MacroArgContext {
+        match self.0 & Self::CONTEXT_MASK {
+            MACRO_CALL_CONTEXT => MacroArgContext::MacroCall,
+            MACRO_DEF_CONTEXT => MacroArgContext::MacroDef,
+            _ => MacroArgContext::BuiltInMacro,
         }
     }
 
@@ -188,10 +198,10 @@ pub(crate) enum LexerMode {
     },
     /// A special mode that goes after `%macro name` and any trailing
     /// whitespace or cstyle comments.
-    /// It checks if the first NON-ws or cstyle follower is (.
+    /// It checks if the first NON-ws or cstyle follower is `(`.
     /// If found, adds necessary mode stack to parse the macro def args.
     ///
-    /// Note - it should alwys be preceded by the `WsOrCStyleCommentOnly` mode
+    /// Note - it should always be preceded by the `WsOrCStyleCommentOnly` mode
     /// as it literally checks the `next_char` only.    
     MaybeMacroDefArgs,
     /// Macro def argument. I.e. inside the parens of a macro definition,
@@ -199,6 +209,15 @@ pub(crate) enum LexerMode {
     /// and populates the following mode stack as necessary until all
     /// arguments are read.
     MacroDefArg,
+    /// A special mode that goes after argument name in macro def argument
+    /// list. It checks if the next non-ws or cstyle follower is `=`, ','
+    /// or something else.
+    /// If `=` found, adds necessary mode stack to parse the default value.
+    /// If `,` found, adds necessary mode stack to parse the next argument.
+    ///
+    /// Note - it should always be preceded by the `WsOrCStyleCommentOnly` mode
+    /// as it literally checks the `next_char` only.
+    MacroDefNextArgOrDefaultValue,
     /// A mode for lexing identifiers in macro definitions. Both the name of the
     /// macro and argument names. In this mode ascii only identifiers are allowed
     /// and a SAS error is emitted if no identifier is found.
@@ -261,4 +280,65 @@ pub(crate) enum LexerMode {
     /// It sued both with macro statement options following the `/` in `%copy`, `%macro`,
     /// and for valists in `%global`, `%local`, `%input` and others.
     MacroStatOptionsTextExpr,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use strum::IntoEnumIterator;
+
+    #[test]
+    fn test_macro_eval_expr_flags() {
+        let flags = MacroEvalExprFlags::new(
+            MacroEvalNumericMode::Float,
+            MacroEvalNextArgumentMode::EvalExpr,
+            true,
+            true,
+        );
+        assert!(flags.float_mode());
+        assert!(flags.terminate_on_comma());
+        assert!(flags.terminate_on_stat());
+        assert!(flags.terminate_on_semi());
+        assert!(flags.followed_by_expr());
+
+        let flags = MacroEvalExprFlags::new(
+            MacroEvalNumericMode::Integer,
+            MacroEvalNextArgumentMode::None,
+            false,
+            false,
+        );
+        assert!(!flags.float_mode());
+        assert!(!flags.terminate_on_comma());
+        assert!(!flags.terminate_on_stat());
+        assert!(!flags.terminate_on_semi());
+        assert!(!flags.followed_by_expr());
+
+        let flags = MacroEvalExprFlags::new(
+            MacroEvalNumericMode::Integer,
+            MacroEvalNextArgumentMode::MacroArg,
+            false,
+            true,
+        );
+        assert!(!flags.float_mode());
+        assert!(flags.terminate_on_comma());
+        assert!(!flags.terminate_on_stat());
+        assert!(flags.terminate_on_semi());
+        assert!(!flags.followed_by_expr());
+    }
+
+    #[test]
+    fn test_macro_arg_name_value_flags() {
+        for context in MacroArgContext::iter() {
+            for populate_next_arg_stack in [true, false].iter() {
+                let flags = MacroArgNameValueFlags::new(context, *populate_next_arg_stack);
+                assert_eq!(flags.context(), context);
+                assert_eq!(flags.populate_next_arg_stack(), *populate_next_arg_stack);
+            }
+        }
+    }
+
+    #[test]
+    fn test_lexer_mode_default() {
+        assert_eq!(LexerMode::default(), LexerMode::Default);
+    }
 }
