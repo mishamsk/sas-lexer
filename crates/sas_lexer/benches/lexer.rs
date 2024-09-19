@@ -1,4 +1,5 @@
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
+use pprof::criterion::{Output, PProfProfiler};
 use sas_lexer::lex;
 use std::fs::File;
 use std::io::{self, Read};
@@ -41,5 +42,9 @@ fn benchmark_lex(c: &mut Criterion) {
         });
 }
 
-criterion_group!(benches, benchmark_lex);
+criterion_group! {
+    name = benches;
+    config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
+    targets = benchmark_lex
+}
 criterion_main!(benches);

@@ -24,6 +24,7 @@ insta = { workspace = true }
 rstest = { workspace = true }
 zip = { workspace = true }
 walkdir = { workspace = true }
+pprof = { workspace = true, features = ["flamegraph", "criterion"] }
 
 
 [lints]
