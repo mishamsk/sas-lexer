@@ -27,10 +27,11 @@ use r#macro::{
     lex_macro_call_stat_or_label,
 };
 use sas_lang::is_valid_sas_name_start;
-use smol_str::SmolStr;
 use std::{cmp::min, str::FromStr};
 use text::{ByteOffset, CharOffset};
-use token_type::{parse_keyword, MacroKwType, TokenType, TokenTypeMacroCallOrStat};
+use token_type::{
+    parse_keyword, MacroKwType, TokenType, TokenTypeMacroCallOrStat, MAX_KEYWORDS_LEN,
+};
 use unicode_ident::{is_xid_continue, is_xid_start};
 
 const MAX_EXPECTED_STACK_DEPTH: usize = 20;
@@ -195,7 +196,7 @@ impl<'src> Lexer<'src> {
     }
 
     fn pop_mode(&mut self) {
-        if !self.mode_stack.pop().is_some() {
+        if self.mode_stack.pop().is_none() {
             self.emit_error(ErrorType::InternalError("Empty mode stack"));
             self.push_mode(LexerMode::default());
         };
@@ -945,7 +946,7 @@ impl<'src> Lexer<'src> {
 
                         // NOTE: this is super expensive look-ahead. If we push down
                         // trailing WS trimming to the parser, it can be avoided.
-                        if !is_macro_stat(self.cursor.chars()) {
+                        if !is_macro_stat(self.cursor.as_str()) {
                             // Not a delimiting statment, but a macro call
                             // Hence preceeding WS is significant and we should not
                             // try lexing the preceeding as a numeric literal
@@ -1597,6 +1598,7 @@ impl<'src> Lexer<'src> {
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     fn dispatch_macro_call_arg_or_value(
         &mut self,
         next_char: char,
@@ -2940,28 +2942,33 @@ impl<'src> Lexer<'src> {
         });
 
         // Now the fun part - dispatch all kinds of identifiers
-        if !is_ascii {
-            // Easy case - not ASCII, just emit the identifier token
+        let pending_ident = self.pending_token_text();
+        let pending_ident_len = pending_ident.len();
+
+        if !is_ascii || pending_ident_len > MAX_KEYWORDS_LEN {
+            // Easy case - not ASCII or longer than any of the keeywords, just emit the identifier token
             self.emit_token(TokenChannel::DEFAULT, TokenType::Identifier, Payload::None);
             return;
         }
 
-        // My guess is this should be quicker than capturing the value as we consume it
-        // avoids the allocation and copying
-        // Using SmolStr is faster as it will be stack allocated
-        let ident = self
-            .pending_token_text()
-            .as_bytes()
-            .iter()
-            .map(|c| c.to_ascii_uppercase() as char)
-            .collect::<SmolStr>();
+        // This is much quicker than capturing the value as we consume the cursor.
+        // Using fixed size buffer, similar to SmolStr crate and others
+        let mut buf = [0u8; MAX_KEYWORDS_LEN];
 
-        if let Some(kw_tok_type) = parse_keyword(&ident) {
+        #[allow(clippy::indexing_slicing)]
+        for (i, c) in pending_ident.as_bytes().iter().enumerate() {
+            buf[i] = c.to_ascii_uppercase();
+        }
+
+        #[allow(unsafe_code, clippy::indexing_slicing)]
+        let ident = unsafe { ::core::str::from_utf8_unchecked(&buf[..pending_ident_len]) };
+
+        if let Some(kw_tok_type) = parse_keyword(ident) {
             self.emit_token(TokenChannel::DEFAULT, kw_tok_type, Payload::None);
             return;
         }
 
-        match ident.as_str() {
+        match ident {
             "DATALINES" | "CARDS" | "LINES" => {
                 if !self.lex_datalines(false) {
                     self.emit_token(TokenChannel::DEFAULT, TokenType::Identifier, Payload::None);
@@ -2985,7 +2992,7 @@ impl<'src> Lexer<'src> {
     /// argument names may only be ASCII identifiers, and not even
     /// text expressions.
     ///
-    /// Emits a SAS-like error if the next_char is not ASCII. Othwerise
+    /// Emits a SAS-like error if the `next_char` is not ASCII. Othwerise
     /// consumes the identifier (ascii only) and emits the token.
     ///
     /// Assumes caller has called `self.start_token()` and handles

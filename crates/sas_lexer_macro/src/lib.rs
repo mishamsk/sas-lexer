@@ -47,7 +47,7 @@ pub fn generate_keyword_map(input: TokenStream) -> TokenStream {
         })
         .unwrap_or(Ident::new("KEYWORDS", Span::call_site()));
 
-    let variant_code = variants
+    let keywords_and_variants = variants
         .iter()
         .filter(|variant| {
             variant.ident.to_string().starts_with("Kw")
@@ -68,28 +68,41 @@ pub fn generate_keyword_map(input: TokenStream) -> TokenStream {
 
             #[allow(clippy::indexing_slicing)]
             let default_keyword = &ident[2..].to_ascii_uppercase();
-            let keywords = keywords.map_or_else(
-                || vec![default_keyword.clone()],
-                |kws| {
-                    kws.into_iter()
-                        .map(|kw| kw.value().to_ascii_uppercase())
-                        .collect()
-                },
-            );
 
-            keywords.into_iter().map(move |keyword| {
-                quote! {
-                    #keyword => #name::#variant_ident,
-                }
-            })
+            keywords
+                .map_or_else(
+                    || vec![default_keyword.clone()],
+                    |kws| {
+                        kws.into_iter()
+                            .map(|kw| kw.value().to_ascii_uppercase())
+                            .collect()
+                    },
+                )
+                .into_iter()
+                .map(move |kw: String| (kw, variant_ident))
         });
+
+    let max_keyword_len = keywords_and_variants
+        .clone()
+        .fold(0, |acc, (kw, _)| acc.max(kw.len()));
+
+    let variant_code = keywords_and_variants.map(move |(keyword, variant_ident)| {
+        quote! {
+            #keyword => #name::#variant_ident,
+        }
+    });
 
     assert!(
         variant_code.clone().count() != 0,
         "No variants found that start with 'Kw'"
     );
 
+    let const_name = format!("MAX_{kw_map_name}_LEN");
+    let const_ident = Ident::new(&const_name, kw_map_name.span());
+
     let expanded = quote! {
+        pub(crate) const #const_ident: usize = #max_keyword_len;
+
         pub(crate) static #kw_map_name: phf::Map<&'static str, #name> = phf_map! {
             #(#variant_code)*
         };
@@ -138,7 +151,7 @@ pub fn generate_macro_keyword_map(input: TokenStream) -> TokenStream {
         })
         .unwrap_or(Ident::new("MACRO_KEYWORDS", Span::call_site()));
 
-    let variant_code = variants
+    let keywords_and_variants = variants
         .iter()
         .filter(|variant| variant.ident.to_string().starts_with("Kwm"))
         .flat_map(|variant| {
@@ -156,28 +169,41 @@ pub fn generate_macro_keyword_map(input: TokenStream) -> TokenStream {
 
             #[allow(clippy::indexing_slicing)]
             let default_keyword = &ident[3..].to_ascii_uppercase();
-            let keywords = keywords.map_or_else(
-                || vec![default_keyword.clone()],
-                |kws| {
-                    kws.into_iter()
-                        .map(|kw| kw.value().to_ascii_uppercase())
-                        .collect()
-                },
-            );
 
-            keywords.into_iter().map(move |keyword| {
-                quote! {
-                    #keyword => #name::#variant_ident,
-                }
-            })
+            keywords
+                .map_or_else(
+                    || vec![default_keyword.clone()],
+                    |kws| {
+                        kws.into_iter()
+                            .map(|kw| kw.value().to_ascii_uppercase())
+                            .collect()
+                    },
+                )
+                .into_iter()
+                .map(move |kw: String| (kw, variant_ident))
         });
+
+    let max_keyword_len = keywords_and_variants
+        .clone()
+        .fold(0, |acc, (kw, _)| acc.max(kw.len()));
+
+    let variant_code = keywords_and_variants.map(move |(keyword, variant_ident)| {
+        quote! {
+            #keyword => #name::#variant_ident,
+        }
+    });
 
     assert!(
         variant_code.clone().count() != 0,
         "No variants found that start with 'Kwm'"
     );
 
+    let const_name = format!("MAX_{kwm_map_name}_LEN");
+    let const_ident = Ident::new(&const_name, kwm_map_name.span());
+
     let expanded = quote! {
+        pub(crate) const #const_ident: usize = #max_keyword_len;
+
         pub(crate) static #kwm_map_name: phf::Map<&'static str, #name> = phf_map! {
             #(#variant_code)*
         };

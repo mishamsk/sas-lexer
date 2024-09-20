@@ -14,7 +14,6 @@ phf = { workspace = true }
 rmp-serde = { workspace = true }
 sas_lexer_macro = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
-smol_str = "0.2.2"
 strum = { workspace = true }
 unicode-ident = "1.0.12"
 
