@@ -133,7 +133,7 @@ impl MacroArgNameValueFlags {
     const POPULATE_NEXT_ARG_STACK_MASK: u8 = 0b0000_0100;
 
     pub(super) const fn new(context: MacroArgContext, populate_next_arg_stack: bool) -> Self {
-        let mut bits = 0 | (context as u8);
+        let mut bits = context as u8;
 
         if populate_next_arg_stack {
             bits |= Self::POPULATE_NEXT_ARG_STACK_MASK;

@@ -1,5 +1,3 @@
-use crate::TokenType;
-use smol_str::SmolStr;
 use std::result::Result;
 use unicode_ident::is_xid_continue;
 
@@ -7,8 +5,8 @@ use super::{
     cursor::Cursor,
     sas_lang::is_valid_sas_name_start,
     token_type::{
-        parse_macro_keyword, TokenTypeMacroCallOrStat, MACRO_QUOTE_CALL_TOKEN_TYPE_RANGE,
-        MACRO_STAT_TOKEN_TYPE_RANGE,
+        parse_macro_keyword, TokenType, TokenTypeMacroCallOrStat,
+        MACRO_QUOTE_CALL_TOKEN_TYPE_RANGE, MACRO_STAT_TOKEN_TYPE_RANGE, MAX_MKEYWORDS_LEN,
     },
 };
 
@@ -142,37 +140,36 @@ pub(super) fn lex_macro_call_stat_or_label(
         }
     });
 
-    // If the identifier is not ASCII, we can safely return true
-    // must be a macro call
-    if !is_ascii {
+    let ident_end_byte_offset = (start_rem_length - cursor.remaining_len()) as usize;
+    let pending_ident = source_view
+        .get(1..ident_end_byte_offset)
+        .ok_or("Unexpected error getting ident slice in `lex_macro_call_stat_or_label`")?;
+    let pending_ident_len = ident_end_byte_offset - 1;
+
+    // If the identifier is not ASCII or longer then max length,
+    // we can safely return true must be a macro call
+    if !is_ascii || pending_ident_len > MAX_MKEYWORDS_LEN {
         return Ok((
             TokenTypeMacroCallOrStat::MacroIdentifier,
             cursor.char_offset() - start_char_offset,
         ));
     }
 
-    // Ok, ascii - check if we match a statement
+    // Ok, ascii and short enough - check if we match a macro keyword
 
-    // My guess is this should be quicker than capturing the value as we consume it
-    // avoids the allocation and copying
-    let ident_end_byte_offset = start_rem_length - cursor.remaining_len();
+    // This is much quicker than capturing the value as we consume the cursor.
+    // Using fixed size buffer, similar to SmolStr crate and others
+    let mut buf = [0u8; MAX_MKEYWORDS_LEN];
 
-    let ident = source_view
-        .get(1..ident_end_byte_offset as usize)
-        .ok_or("Unexpected error getting ident slice in `lex_macro_call_stat_or_label`")?
-        .as_bytes()
-        .iter()
-        .map(|c| c.to_ascii_uppercase() as char)
-        .collect::<SmolStr>();
-
-    if ident.is_empty() {
-        // Something like %*
-        return Err(
-            "Unexpected error in `lex_macro_call_stat_or_label` - no identifier followed %",
-        );
+    #[allow(clippy::indexing_slicing)]
+    for (i, c) in pending_ident.as_bytes().iter().enumerate() {
+        buf[i] = c.to_ascii_uppercase();
     }
 
-    parse_macro_keyword(&ident)
+    #[allow(unsafe_code, clippy::indexing_slicing)]
+    let ident = unsafe { ::core::str::from_utf8_unchecked(&buf[..pending_ident_len]) };
+
+    parse_macro_keyword(ident)
         .map_or(Ok(TokenTypeMacroCallOrStat::MacroIdentifier), |t| {
             TokenTypeMacroCallOrStat::try_from(t)
         })
@@ -244,34 +241,46 @@ pub(super) fn is_macro_eval_mnemonic<I: Iterator<Item = char>>(
 /// Predicate to do a lookahead and check if the following `%ccc` is strictly
 /// a macro statement keyword.
 ///
-/// Must be passed an iterator that starts with the first % character
-///
-/// Consumes the iterator! Pass a clone if you need to keep the original.
-/// Returns a tuple of:
-/// - `Option<TokenType>`: `Some(TokenType)` if the mnemonic is a macro logical
-///    expression mnemonic, `None` otherwise.
-/// - `u32`: number of symbols in mnemonic besides the start char.
-pub(super) fn is_macro_stat<I: Iterator<Item = char> + Clone>(chars: I) -> bool {
-    debug_assert!(chars.clone().next().map_or(false, |c| c == '%'));
+/// Must be passed a slice that starts with the first % character
+pub(super) fn is_macro_stat(input: &str) -> bool {
+    debug_assert!(input.as_bytes().iter().next().map_or(false, |&c| c == b'%'));
 
     // Unfortunatelly this one needs a very inefficient lookahead
     // to check if we have any statement upfront.
-    let ident = chars
-        // Move past the % to the first character of the identifier
-        .skip(1)
-        .map(|c| {
-            // For simplicity of code, given rare realistic usage of unicode,
-            // we just replace unicode with empty char, which will effectivly
-            // make the following logic correct, since the first non-ascii
-            // char guarantees this is not a statement keyword
+    let mut is_ascii = true;
+
+    // Start past the % to the first character of the identifier
+    let pending_ident_len = input[1..]
+        .find(|c: char| {
             if c.is_ascii() {
-                c.to_ascii_uppercase()
+                !matches!(c, 'a'..='z' | 'A'..='Z' | '0'..='9' | '_')
+            } else if is_xid_continue(c) {
+                is_ascii = false;
+                false
             } else {
-                ' '
+                true
             }
         })
-        .take_while(|c| matches!(c, 'a'..='z' | 'A'..='Z' | '0'..='9' | '_'))
-        .collect::<SmolStr>();
+        .unwrap_or_else(|| input.len() - 1);
+    let pending_ident = &input[1..=pending_ident_len];
 
-    parse_macro_keyword(&ident).is_some_and(is_macro_stat_tok_type)
+    if !is_ascii || pending_ident_len > MAX_MKEYWORDS_LEN {
+        return false;
+    }
+
+    // Ok, ascii and short enough - check if we match a macro keyword
+
+    // This is much quicker than capturing the value as we consume the cursor.
+    // Using fixed size buffer, similar to SmolStr crate and others
+    let mut buf = [0u8; MAX_MKEYWORDS_LEN];
+
+    #[allow(clippy::indexing_slicing)]
+    for (i, c) in pending_ident.as_bytes().iter().enumerate() {
+        buf[i] = c.to_ascii_uppercase();
+    }
+
+    #[allow(unsafe_code, clippy::indexing_slicing)]
+    let ident = unsafe { ::core::str::from_utf8_unchecked(&buf[..pending_ident_len]) };
+
+    parse_macro_keyword(ident).is_some_and(is_macro_stat_tok_type)
 }

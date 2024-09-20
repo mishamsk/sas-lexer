@@ -394,6 +394,12 @@ mod tests {
         // Check a couple of keywords in macro map are NOT in the main map
         assert_eq!(parse_keyword("BQUOTE"), None);
         assert_eq!(parse_keyword("NRQUOTE"), None);
+        assert_eq!(
+            KEYWORDS
+                .into_iter()
+                .fold(0usize, |acc, new| acc.max(new.0.len())),
+            MAX_KEYWORDS_LEN
+        );
     }
 
     #[test]
@@ -404,6 +410,12 @@ mod tests {
         // Check a couple of keywords in main map are NOT in the macro map
         assert_eq!(parse_macro_keyword("EQ"), None);
         assert_eq!(parse_macro_keyword("_NULL_"), None);
+        assert_eq!(
+            MKEYWORDS
+                .into_iter()
+                .fold(0usize, |acc, new| acc.max(new.0.len())),
+            MAX_MKEYWORDS_LEN
+        );
     }
 
     #[test]
