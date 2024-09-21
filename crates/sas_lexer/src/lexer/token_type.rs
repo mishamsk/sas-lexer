@@ -2,6 +2,9 @@ use phf::phf_map;
 use sas_lexer_macro::{KeywordMap, MacroKeywordMap, TokenTypeSubset};
 use strum::{Display, EnumCount, EnumIter};
 
+#[cfg(feature = "serde")]
+use serde_repr::Serialize_repr;
+
 /// What you expect - the token types.
 ///
 /// Order of variants are VERY important, as multiple
@@ -25,10 +28,11 @@ use strum::{Display, EnumCount, EnumIter};
     MacroKeywordMap,
     TokenTypeSubset,
 )]
+#[cfg_attr(feature = "serde", derive(Serialize_repr))]
 #[kw_map_name = "KEYWORDS"]
 #[kwm_map_name = "MKEYWORDS"]
-#[repr(u16)]
 #[subset(name = TokenTypeMacroCallOrStat, start = MacroIdentifier, end = KwmRun)]
+#[repr(u16)]
 pub enum TokenType {
     EOF,
     UNKNOWN,

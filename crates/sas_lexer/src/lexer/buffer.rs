@@ -1,6 +1,7 @@
 use std::fmt;
 use std::ops::Range;
 
+#[cfg(feature = "serde")]
 use serde::Serialize;
 
 use super::channel::TokenChannel;
@@ -18,6 +19,11 @@ impl TokenIdx {
     #[must_use]
     fn new(val: u32) -> Self {
         TokenIdx(val)
+    }
+
+    #[must_use]
+    pub fn get(self) -> u32 {
+        self.0
     }
 }
 
@@ -38,8 +44,9 @@ impl LineIdx {
 }
 
 /// Enum representing varios types of extra data associated with a token.
-#[derive(Debug, PartialEq, Clone, Copy, Serialize)]
-#[serde(untagged)]
+#[derive(Debug, PartialEq, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
+#[cfg_attr(feature = "serde", serde(untagged))]
 pub enum Payload {
     None,
     /// Stores parsed integer value. We do not parse -N as a single token
@@ -438,53 +445,47 @@ impl WorkTokenizedBuffer {
     }
 }
 
-/// A struct with all token information usable without the `TokenizedBuffer` in
-/// mostly ANTLR compatible format.
-#[derive(Debug, Serialize)]
-pub struct ResolvedAntlrTokenInfo {
+/// A struct with all token information usable without the `TokenizedBuffer`
+#[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
+pub struct ResolvedTokenInfo {
     /// Channel of the token.
-    channel: u8,
+    pub channel: TokenChannel,
 
-    /// Type of the token. This is the same as regular `TokenType`, except that EOF is -1
-    /// which forces us to use i16.
-    token_type: i16,
+    /// Type of the token.
+    pub token_type: TokenType,
 
     /// Token index
-    token_index: u32,
+    pub token_index: u32,
 
     /// Zero-based char index of the token start in the source string.
     /// Char here means a Unicode code point, not graphemes. This is
     /// what Python uses to index strings, and IDEs show for cursor position.
     /// u32 as we only support 4gb files
-    start: u32,
+    pub start: u32,
 
-    /// Zero-based char index of the token end. Unlike ANTLR, this will
-    /// point to the character after the token. This was we avoid the need
-    /// to use i64 for the end index, which seems ridiculous just to support
-    /// super rare cases of first token being empty
-    /// (which in ANTLR will have stop=-1)
-    stop: u32,
+    /// Zero-based char index of the token end in the source string. Will
+    /// point to the character immediatelly after the token.
+    /// Char here means a Unicode code point, not graphemes. This is
+    /// what Python uses to index strings, and IDEs show for cursor position.
+    /// u32 as we only support 4gb files
+    pub stop: u32,
 
     /// Starting line of the token, 1-based.    
-    line: u32,
+    pub line: u32,
 
     /// Zero-based column of the token start on the start line.
-    column: u32,
+    pub column: u32,
 
-    /// Even though ANTLR tokens do not have the end line, it is calculated
-    /// in the parser on most tokens eventually, since it is easy to
-    /// calculate here in lexer we store it.
-    end_line: u32,
+    /// Ending line of the token, 1-based.
+    pub end_line: u32,
 
-    /// Even though ANTLR tokens do not have the end column, it is calculated
-    /// in the parser on most tokens eventually, since it is easy to
-    /// calculate here in lexer we store it.
-    end_column: u32,
+    /// Zero-based column of the token end on the end line.
+    /// This is the column of the character immediatelly after the token.
+    pub end_column: u32,
 
-    /// Extra data associated with the token. Unlike regular ANTLR tokens,
-    /// we do some string and numeric literals parsing in the lexer, so we
-    /// store the parsed values here.
-    payload: Payload,
+    /// Extra data associated with the token.
+    pub payload: Payload,
 }
 
 /// A special structure produced by the lexer that stores the full information
@@ -519,6 +520,12 @@ impl TokenizedBuffer {
         // theoretically number of tokens may be larger than text size,
         // which checked to be no more than u32, but this is not possible in practice
         self.token_infos.len() as u32
+    }
+
+    /// Returns the string literals buffer used to resolve token Payload with string literals.
+    #[must_use]
+    pub fn string_literals_buffer(&self) -> &str {
+        self.string_literals_buffer.as_str()
     }
 
     fn iter(&self) -> std::iter::Map<std::ops::Range<u32>, fn(u32) -> TokenIdx> {
@@ -809,7 +816,7 @@ impl TokenizedBuffer {
     /// by a downstream ANTLR parser.
     #[must_use]
     #[allow(clippy::indexing_slicing)]
-    pub fn into_antlr_token_vec(&self) -> Vec<ResolvedAntlrTokenInfo> {
+    pub fn into_resolved_token_vec(&self) -> Vec<ResolvedTokenInfo> {
         // SAFETY: this is theoretically possible, but extremely unlikely
         // that even 4gb source file will yield > u32::MAX tokens
         let mut tok_idx = 0u32;
@@ -832,10 +839,10 @@ impl TokenizedBuffer {
                             && cur_tok.byte_offset < next_tok.byte_offset,
                     );
 
-                vec.push(ResolvedAntlrTokenInfo {
-                    channel: cur_tok.channel as u8,
+                vec.push(ResolvedTokenInfo {
+                    channel: cur_tok.channel,
                     // This can't be EOF, so it is safe to cast
-                    token_type: cur_tok.token_type as i16,
+                    token_type: cur_tok.token_type,
                     token_index: tok_idx,
                     start: cur_tok.start.get(),
                     stop: next_tok.start.get(),
@@ -854,10 +861,10 @@ impl TokenizedBuffer {
         }
 
         // Now add the EOF token. cur_tok will point to it
-        vec.push(ResolvedAntlrTokenInfo {
-            channel: cur_tok.channel as u8,
+        vec.push(ResolvedTokenInfo {
+            channel: cur_tok.channel,
             // This can't be EOF, so it is safe to cast
-            token_type: -1,
+            token_type: cur_tok.token_type,
             token_index: tok_idx,
             start: cur_tok.start.get(),
             stop: cur_tok.start.get(),

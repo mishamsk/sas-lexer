@@ -11,9 +11,10 @@ version = { workspace = true }
 
 [dependencies]
 phf = { workspace = true }
-rmp-serde = { workspace = true }
 sas_lexer_macro = { workspace = true }
-serde = { workspace = true, features = ["derive"] }
+rmp-serde = { workspace = true, optional = true }
+serde = { workspace = true, features = ["derive"], optional = true }
+serde_repr = { version = "0.1.19", optional = true }
 strum = { workspace = true }
 unicode-ident = "1.0.12"
 
@@ -25,6 +26,8 @@ zip = { workspace = true }
 walkdir = { workspace = true }
 pprof = { workspace = true, features = ["flamegraph", "criterion"] }
 
+[features]
+serde = ["dep:serde", "dep:rmp-serde", "dep:serde_repr"]
 
 [lints]
 workspace = true

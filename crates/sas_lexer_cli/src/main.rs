@@ -1,22 +1,24 @@
 #![allow(clippy::print_stderr, clippy::print_stdout)]
 
+mod print;
+mod stat;
+
 use clap::Parser;
 use clap::Subcommand;
 use convert_case::Boundary;
 use convert_case::Case;
 use convert_case::Converter;
 use sas_lexer::error::ErrorType;
+use sas_lexer::ResolvedTokenInfo;
 use sas_lexer::TokenType;
 use std::io::Write;
 use strum::EnumCount;
 use strum::IntoEnumIterator;
 
+use print::error_to_string;
+use print::token_to_string;
 use sas_lexer::error::ErrorInfo;
 use sas_lexer::lex;
-use sas_lexer::print::error_to_string;
-use sas_lexer::print::token_to_string;
-use sas_lexer::TokenIdx;
-use sas_lexer::TokenizedBuffer;
 use walkdir::WalkDir;
 
 use std::fs;
@@ -60,30 +62,44 @@ enum Commands {
     },
 }
 
-pub fn print_tokens<'a, I, S>(dst: &mut impl Write, tokens: I, buffer: &TokenizedBuffer, source: &S)
-where
-    I: IntoIterator<Item = TokenIdx>,
-    S: AsRef<str> + 'a,
-{
+pub fn print_tokens(
+    dst: &mut impl Write,
+    tokens: &Vec<ResolvedTokenInfo>,
+    string_literals_buffer: &str,
+    source: &str,
+) {
     for token in tokens {
-        writeln!(dst, "{}", token_to_string(token, buffer, source)).unwrap();
+        writeln!(
+            dst,
+            "{}",
+            token_to_string(token, string_literals_buffer, source)
+        )
+        .unwrap();
     }
 }
 
-pub fn print_errors<'a, I, S>(dst: &mut impl Write, errors: I, buffer: &TokenizedBuffer, source: &S)
-where
-    I: IntoIterator<Item = ErrorInfo>,
-    S: AsRef<str> + 'a,
-{
+pub fn print_errors(
+    dst: &mut impl Write,
+    errors: &Vec<ErrorInfo>,
+    tokens: &Vec<ResolvedTokenInfo>,
+    string_literals_buffer: &str,
+    source: &str,
+) {
     for error in errors {
-        writeln!(dst, "{}", error_to_string(&error, buffer, source)).unwrap();
+        writeln!(
+            dst,
+            "{}",
+            error_to_string(&error, tokens, string_literals_buffer, source)
+        )
+        .unwrap();
     }
 }
 
 fn lex_and_print(source: &String, print: bool, err_only: bool) {
     let result = catch_unwind(|| match lex(source) {
         Ok((tok_buffer, errors)) => {
-            let tokens: Vec<TokenIdx> = tok_buffer.into_iter().collect();
+            let tokens = tok_buffer.into_resolved_token_vec();
+            let string_literals_buffer = tok_buffer.string_literals_buffer();
 
             let total_tokens = tokens.len();
             let (c_int, c_unknown, c_user) =
@@ -103,12 +119,12 @@ fn lex_and_print(source: &String, print: bool, err_only: bool) {
 
                 if !err_only {
                     writeln!(lock, "Tokens:").unwrap();
-                    print_tokens(&mut lock, tokens, &tok_buffer, source);
+                    print_tokens(&mut lock, &tokens, &string_literals_buffer, source);
                 }
 
                 if errors.len() > 0 {
                     writeln!(lock, "Errors:").unwrap();
-                    print_errors(&mut lock, errors.clone(), &tok_buffer, source);
+                    print_errors(&mut lock, &errors, &tokens, &string_literals_buffer, source);
                 }
             }
 
