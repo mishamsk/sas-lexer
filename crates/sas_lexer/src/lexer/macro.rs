@@ -3,6 +3,7 @@ use unicode_ident::is_xid_continue;
 
 use super::{
     cursor::Cursor,
+    error::ErrorType,
     sas_lang::is_valid_sas_name_start,
     token_type::{
         parse_macro_keyword, TokenType, TokenTypeMacroCallOrStat,
@@ -110,7 +111,7 @@ pub(super) const fn is_macro_eval_logical_op(tok_type: TokenType) -> bool {
 /// Error in this function means a bug, but is returned for safety
 pub(super) fn lex_macro_call_stat_or_label(
     cursor: &mut Cursor,
-) -> Result<(TokenTypeMacroCallOrStat, u32), &'static str> {
+) -> Result<(TokenTypeMacroCallOrStat, u32), ErrorType> {
     debug_assert_eq!(cursor.peek(), Some('%'));
     debug_assert!(is_valid_sas_name_start(cursor.peek_next()));
 
@@ -143,7 +144,7 @@ pub(super) fn lex_macro_call_stat_or_label(
     let ident_end_byte_offset = (start_rem_length - cursor.remaining_len()) as usize;
     let pending_ident = source_view
         .get(1..ident_end_byte_offset)
-        .ok_or("Unexpected error getting ident slice in `lex_macro_call_stat_or_label`")?;
+        .ok_or(ErrorType::InternalErrorOutOfBounds)?;
     let pending_ident_len = ident_end_byte_offset - 1;
 
     // If the identifier is not ASCII or longer then max length,
@@ -174,7 +175,7 @@ pub(super) fn lex_macro_call_stat_or_label(
             TokenTypeMacroCallOrStat::try_from(t)
         })
         .map(|t| (t, cursor.char_offset() - start_char_offset))
-        .map_err(|()| "Unexpected error in `parse_macro_keyword` - not a keyword returned")
+        .map_err(|()| ErrorType::InternalErrorOutOfBounds)
 }
 
 /// Predicate to check if the following chracters are one of macro logical

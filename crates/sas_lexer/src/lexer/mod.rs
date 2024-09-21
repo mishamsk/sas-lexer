@@ -14,7 +14,7 @@ pub(crate) mod token_type;
 
 use buffer::{LineIdx, Payload, TokenIdx, TokenInfo, TokenizedBuffer, WorkTokenizedBuffer};
 use channel::TokenChannel;
-use error::{ErrorInfo, ErrorType, OPEN_CODE_RECURSION_ERR};
+use error::{ErrorInfo, ErrorType};
 use lexer_mode::{
     LexerMode, MacroArgContext, MacroArgNameValueFlags, MacroEvalExprFlags,
     MacroEvalNextArgumentMode, MacroEvalNumericMode,
@@ -138,13 +138,13 @@ impl<'src> Lexer<'src> {
             self.cur_token_line = checkpoint.cur_token_line;
             self.mode_stack.truncate(checkpoint.mode_stack_len);
 
-            if let Err(e) = self.buffer.rollback(checkpoint.last_token_idx) {
+            if let Err(err_type) = self.buffer.rollback(checkpoint.last_token_idx) {
                 // This is an internal error, we should always be able to correctly rollback
-                self.emit_error(ErrorType::InternalError(e));
+                self.emit_error(err_type);
             }
         } else {
             // Emit an error, we should not be here
-            self.emit_error(ErrorType::InternalError("No checkpoint to rollback"));
+            self.emit_error(ErrorType::InternalErrorMissingCheckpoint);
         }
     }
 
@@ -164,7 +164,7 @@ impl<'src> Lexer<'src> {
             .get(self.cur_token_byte_offset.into()..self.cur_byte_offset().into())
             .unwrap_or_else(|| {
                 // This is an internal error, we should always have a token text
-                self.emit_error(ErrorType::InternalError("No token text"));
+                self.emit_error(ErrorType::InternalErrorNoTokenText);
                 ""
             })
     }
@@ -183,7 +183,7 @@ impl<'src> Lexer<'src> {
             .get(start_byte_offset.into()..end_byte_offset.into())
             .unwrap_or_else(|| {
                 // This is an internal error, this should at least be an empty string
-                self.emit_error(ErrorType::InternalError("Requested out of bounds text"));
+                self.emit_error(ErrorType::InternalErrorOutOfBounds);
                 ""
             });
 
@@ -197,7 +197,7 @@ impl<'src> Lexer<'src> {
 
     fn pop_mode(&mut self) {
         if self.mode_stack.pop().is_none() {
-            self.emit_error(ErrorType::InternalError("Empty mode stack"));
+            self.emit_error(ErrorType::InternalErrorEmptyModeStack);
             self.push_mode(LexerMode::default());
         };
     }
@@ -206,7 +206,7 @@ impl<'src> Lexer<'src> {
         match self.mode_stack.last() {
             Some(mode) => mode.clone(),
             None => {
-                self.emit_error(ErrorType::InternalError("Empty mode stack"));
+                self.emit_error(ErrorType::InternalErrorEmptyModeStack);
                 self.push_mode(LexerMode::default());
                 LexerMode::default()
             }
@@ -287,7 +287,7 @@ impl<'src> Lexer<'src> {
     ) {
         if !self.buffer.update_last_token(channel, token_type, payload) {
             // This is an internal error, we should always have a token to replace
-            self.emit_error(ErrorType::InternalError("No token to replace"));
+            self.emit_error(ErrorType::InternalErrorNoTokenToReplace);
 
             self.buffer.add_token(
                 channel,
@@ -359,10 +359,10 @@ impl<'src> Lexer<'src> {
             self.start_token();
 
             match mode {
-                LexerMode::ExpectSymbol(expected_char, tok_type, tok_channel) => {
+                LexerMode::ExpectSymbol(tok_type, tok_channel) => {
                     // If we were expecting a token - call lexing that will effectively
                     // emit an error and the token
-                    self.lex_expected_token(None, expected_char, tok_type, tok_channel);
+                    self.lex_expected_token(None, tok_type, tok_channel);
                 }
                 LexerMode::ExpectSemiOrEOF | LexerMode::MacroDo => {
                     // If we were expecting a semicolon or EOF - emit a virtual semicolon for parser convenience.
@@ -390,9 +390,7 @@ impl<'src> Lexer<'src> {
                     // closing parens to balance it out
 
                     if pnl > 0 {
-                        self.emit_error(ErrorType::MissingExpected(
-                            "Missing closing parenthesis to balance the expression",
-                        ));
+                        self.emit_error(ErrorType::MissingExpectedRParen);
 
                         for _ in 0..pnl {
                             self.emit_token(
@@ -416,11 +414,7 @@ impl<'src> Lexer<'src> {
                 LexerMode::MacroDefName => {
                     // This would trigger an error in SAS. For simplicity we use the same
                     // error text for macro name and args, as it is close enough approximation
-                    self.emit_error(ErrorType::MissingExpected(
-                        "ERROR: Invalid macro name.  \
-                        It should be a valid SAS identifier no longer than 32 characters.\
-                        \nERROR: A dummy macro will be compiled.",
-                    ));
+                    self.emit_error(ErrorType::InvalidMacroDefName);
                 }
             }
         }
@@ -458,9 +452,9 @@ impl<'src> Lexer<'src> {
                 }
             },
             LexerMode::Default => self.dispatch_mode_default(next_char),
-            LexerMode::ExpectSymbol(expected_char, tok_type, tok_channel) => {
+            LexerMode::ExpectSymbol(tok_type, tok_channel) => {
                 self.start_token();
-                self.lex_expected_token(Some(next_char), expected_char, tok_type, tok_channel);
+                self.lex_expected_token(Some(next_char), tok_type, tok_channel);
             }
             LexerMode::ExpectSemiOrEOF => {
                 self.start_token();
@@ -473,7 +467,7 @@ impl<'src> Lexer<'src> {
                     // Not a EOF and not a ';' => expected token not found.
                     // Emit an error which will point at previous token.
                     // The token itself is emitted below
-                    self.emit_error(ErrorType::MissingExpected("';' or end of file"));
+                    self.emit_error(ErrorType::MissingExpectedSemiOrEOF);
                 }
 
                 self.emit_token(TokenChannel::DEFAULT, TokenType::SEMI, Payload::None);
@@ -550,20 +544,40 @@ impl<'src> Lexer<'src> {
     fn lex_expected_token(
         &mut self,
         next_char: Option<char>,
-        expected_char: char,
         tok_type: TokenType,
         tok_channel: TokenChannel,
     ) {
         debug_assert!(
-            self.mode() == LexerMode::ExpectSymbol(expected_char, tok_type, tok_channel)
+            self.mode() == LexerMode::ExpectSymbol(tok_type, tok_channel)
                 || self.cursor.peek().is_none() // EOF
         );
-        debug_assert!(!expected_char.is_ascii_alphabetic());
+        debug_assert!(matches!(
+            tok_type,
+            TokenType::RPAREN
+                | TokenType::ASSIGN
+                | TokenType::LPAREN
+                | TokenType::COMMA
+                | TokenType::FSLASH
+        ));
+
+        let (expected_char, error_type) = match tok_type {
+            TokenType::RPAREN => (')', ErrorType::MissingExpectedRParen),
+            TokenType::ASSIGN => ('=', ErrorType::MissingExpectedAssign),
+            TokenType::LPAREN => ('(', ErrorType::MissingExpectedLParen),
+            TokenType::COMMA => (',', ErrorType::MissingExpectedComma),
+            TokenType::FSLASH => ('/', ErrorType::MissingExpectedFSlash),
+            _ => {
+                // This is an internal error, we should not have this token type here
+                self.emit_error(ErrorType::InternalErrorUnexpectedTokenType);
+                self.pop_mode();
+                return;
+            }
+        };
 
         if next_char.map_or(true, |c| c != expected_char) {
             // Expected token not found. Emit an error which will point at previous token
             // The token itself is emitted below
-            self.emit_error(ErrorType::MissingExpectedChar(expected_char));
+            self.emit_error(error_type);
         } else {
             // Consume the expected content
             self.cursor.advance();
@@ -1025,7 +1039,7 @@ impl<'src> Lexer<'src> {
             )
             .unwrap_or_else(|| {
                 // This is an internal error, we should always have a token text
-                self.emit_error(ErrorType::InternalError("No token text"));
+                self.emit_error(ErrorType::InternalErrorNoTokenText);
                 ""
             });
 
@@ -1169,10 +1183,7 @@ impl<'src> Lexer<'src> {
                     // It doesn't allow bare empty condition.
 
                     if expr_end {
-                        self.emit_error(ErrorType::SASSessionUnrecoverableError(
-                            "ERROR: A character operand was found in the %EVAL function or %IF \
-                            condition where a numeric operand is required.",
-                        ));
+                        self.emit_error(ErrorType::CharExpressionInEvalContext);
                     }
 
                     self.emit_empty_macro_string_token();
@@ -1216,7 +1227,7 @@ impl<'src> Lexer<'src> {
             {
                 *found_name = true;
             } else {
-                lexer.emit_error(ErrorType::InternalError("Unexpected mode stack"));
+                lexer.emit_error(ErrorType::InternalErrorUnexpectedModeStack);
             };
         };
 
@@ -1577,7 +1588,6 @@ impl<'src> Lexer<'src> {
 
             // Populate the remaining expected states for the macro call
             self.push_mode(LexerMode::ExpectSymbol(
-                ')',
                 TokenType::RPAREN,
                 TokenChannel::DEFAULT,
             ));
@@ -1947,7 +1957,6 @@ impl<'src> Lexer<'src> {
 
             // Populate the remaining expected states for the macro definition arguments list
             self.push_mode(LexerMode::ExpectSymbol(
-                ')',
                 TokenType::RPAREN,
                 TokenChannel::DEFAULT,
             ));
@@ -2624,8 +2633,8 @@ impl<'src> Lexer<'src> {
                             // lex them.
                             // We have to first save the error info at the last byte offset,
                             // and only then lex the macro identifier to report at the correct position
-                            let err_info =
-                                self.prep_error_info_at_cur_offset(OPEN_CODE_RECURSION_ERR);
+                            let err_info = self
+                                .prep_error_info_at_cur_offset(ErrorType::OpenCodeRecursionError);
 
                             self.lex_macro_identifier();
 
@@ -3017,17 +3026,9 @@ impl<'src> Lexer<'src> {
             // This would trigger an error in SAS. For simplicity we use the same
             // error text for macro name and args, as it is close enough approximation
             if is_argument {
-                self.emit_error(ErrorType::MissingExpected(
-                    "ERROR: Invalid macro parameter name. \
-                It should be a valid SAS identifier no longer than 32 characters.\
-                \nERROR: A dummy macro will be compiled.",
-                ));
+                self.emit_error(ErrorType::InvalidMacroDefArgName);
             } else {
-                self.emit_error(ErrorType::MissingExpected(
-                    "ERROR: Invalid macro name. \
-                It should be a valid SAS identifier no longer than 32 characters.\
-                \nERROR: A dummy macro will be compiled.",
-                ));
+                self.emit_error(ErrorType::InvalidMacroDefName);
             };
 
             // Report that we did not lex a token
@@ -3567,7 +3568,7 @@ impl<'src> Lexer<'src> {
                 // Unknown something, consume the character, emit an unknown token, push error
                 self.cursor.advance();
                 self.emit_token(TokenChannel::HIDDEN, TokenType::UNKNOWN, Payload::None);
-                self.emit_error(ErrorType::UnknownCharacter(c));
+                self.emit_error(ErrorType::UnexpectedCharacter);
             }
         }
     }
@@ -3647,7 +3648,7 @@ impl<'src> Lexer<'src> {
         // as we are only allowing macro calls and not macro statements
         let (tok_type, advance_by) = lex_macro_call_stat_or_label(&mut self.cursor.clone())
             .unwrap_or_else(|err| {
-                self.emit_error(ErrorType::InternalError(err));
+                self.emit_error(err);
                 (TokenTypeMacroCallOrStat::MacroIdentifier, 0)
             });
 
@@ -3677,7 +3678,7 @@ impl<'src> Lexer<'src> {
             // ERROR: Open code statement recursion detected.
             // so we emit an error here in addition to missing )
             // that will emit during mode stack pop
-            self.emit_error(OPEN_CODE_RECURSION_ERR);
+            self.emit_error(ErrorType::OpenCodeRecursionError);
         }
 
         MacroKwType::MacroStat
@@ -3729,7 +3730,7 @@ impl<'src> Lexer<'src> {
         // a token type but also consumed
         let (kw_tok_type, _) =
             lex_macro_call_stat_or_label(&mut self.cursor).unwrap_or_else(|err| {
-                self.emit_error(ErrorType::InternalError(err));
+                self.emit_error(err);
                 (TokenTypeMacroCallOrStat::MacroIdentifier, 0)
             });
 
@@ -3784,7 +3785,6 @@ impl<'src> Lexer<'src> {
                     });
                     self.push_mode(LexerMode::WsOrCStyleCommentOnly);
                     self.push_mode(LexerMode::ExpectSymbol(
-                        '=',
                         TokenType::ASSIGN,
                         TokenChannel::DEFAULT,
                     ));
@@ -3807,17 +3807,13 @@ impl<'src> Lexer<'src> {
                 });
                 self.push_mode(LexerMode::WsOrCStyleCommentOnly);
                 self.push_mode(LexerMode::ExpectSymbol(
-                    '=',
                     TokenType::ASSIGN,
                     TokenChannel::DEFAULT,
                 ));
                 self.push_mode(LexerMode::WsOrCStyleCommentOnly);
                 self.push_mode(LexerMode::MacroVarNameExpr(
                     false,
-                    Some(ErrorType::MissingExpected(
-                        "ERROR: An unexpected semicolon occurred in the %DO statement.\n\
-                        ERROR: A dummy macro will be compiled.",
-                    )),
+                    Some(ErrorType::UnexpectedSemiInDoLoop),
                 ));
             }
         }
@@ -3855,17 +3851,15 @@ impl<'src> Lexer<'src> {
                 // get to the correct behavior in static lexing.
 
                 // States are pushed in reverse order
-                self.expect_macro_let_stat(
-                    "ERROR: The macro variable name is either all blank or missing.",
-                );
+                self.expect_macro_let_stat(ErrorType::InvalidMacroLocalGlobalReadonlyVarName);
 
                 self.push_mode(LexerMode::MacroVarNameExpr(
                     false,
-                    Some(ErrorType::MissingExpected(if is_local {
-                        "ERROR: Unrecognized keyword on %LOCAL statement."
+                    Some(if is_local {
+                        ErrorType::MissingMacroLocalReadonlyKw
                     } else {
-                        "ERROR: Unrecognized keyword on %GLOBAL statement."
-                    })),
+                        ErrorType::MissingMacroGlobalReadonlyKw
+                    }),
                 ));
                 self.push_mode(LexerMode::WsOrCStyleCommentOnly);
             }
@@ -4046,7 +4040,7 @@ impl<'src> Lexer<'src> {
                 self.expect_macro_until_while_stat_args();
             }
             TokenTypeMacroCallOrStat::KwmLet => {
-                self.expect_macro_let_stat("ERROR: Expecting a variable name after %LET.");
+                self.expect_macro_let_stat(ErrorType::InvalidMacroLetVarName);
             }
             TokenTypeMacroCallOrStat::KwmLocal | TokenTypeMacroCallOrStat::KwmGlobal => {
                 // First skip WS and comments, then put lexer into dispatch mode
@@ -4135,13 +4129,11 @@ impl<'src> Lexer<'src> {
         // interpreted as macro calls or removed (like spaces)
 
         self.push_mode(LexerMode::ExpectSymbol(
-            ')',
             TokenType::RPAREN,
             TokenChannel::HIDDEN,
         ));
         self.push_mode(LexerMode::MacroStrQuotedExpr { mask_macro, pnl: 0 });
         self.push_mode(LexerMode::ExpectSymbol(
-            '(',
             TokenType::LPAREN,
             TokenChannel::HIDDEN,
         ));
@@ -4153,7 +4145,6 @@ impl<'src> Lexer<'src> {
     #[inline]
     fn expect_eval_call_args(&mut self, is_sysevalf: bool) {
         self.push_mode(LexerMode::ExpectSymbol(
-            ')',
             TokenType::RPAREN,
             TokenChannel::DEFAULT,
         ));
@@ -4179,7 +4170,6 @@ impl<'src> Lexer<'src> {
         // Leading insiginificant WS before the first argument
         self.push_mode(LexerMode::WsOrCStyleCommentOnly);
         self.push_mode(LexerMode::ExpectSymbol(
-            '(',
             TokenType::LPAREN,
             TokenChannel::DEFAULT,
         ));
@@ -4192,7 +4182,6 @@ impl<'src> Lexer<'src> {
     #[inline]
     fn expect_scan_or_substr_call_args(&mut self, is_scan: bool) {
         self.push_mode(LexerMode::ExpectSymbol(
-            ')',
             TokenType::RPAREN,
             TokenChannel::DEFAULT,
         ));
@@ -4214,7 +4203,6 @@ impl<'src> Lexer<'src> {
         // First argument and following comma + WS
         self.push_mode(LexerMode::WsOrCStyleCommentOnly);
         self.push_mode(LexerMode::ExpectSymbol(
-            ',',
             TokenType::COMMA,
             TokenChannel::DEFAULT,
         ));
@@ -4225,7 +4213,6 @@ impl<'src> Lexer<'src> {
         // Leading insiginificant WS before the first argument
         self.push_mode(LexerMode::WsOrCStyleCommentOnly);
         self.push_mode(LexerMode::ExpectSymbol(
-            '(',
             TokenType::LPAREN,
             TokenChannel::DEFAULT,
         ));
@@ -4239,7 +4226,6 @@ impl<'src> Lexer<'src> {
     fn expect_builtin_macro_call_args(&mut self) {
         // All built-ins have arguments, so we may avoid the `maybe` version
         self.push_mode(LexerMode::ExpectSymbol(
-            ')',
             TokenType::RPAREN,
             TokenChannel::DEFAULT,
         ));
@@ -4253,7 +4239,6 @@ impl<'src> Lexer<'src> {
         // Leading insiginificant WS before the first argument
         self.push_mode(LexerMode::WsOrCStyleCommentOnly);
         self.push_mode(LexerMode::ExpectSymbol(
-            '(',
             TokenType::LPAREN,
             TokenChannel::DEFAULT,
         ));
@@ -4266,7 +4251,6 @@ impl<'src> Lexer<'src> {
     #[inline]
     fn expect_builtin_macro_call_named_args(&mut self) {
         self.push_mode(LexerMode::ExpectSymbol(
-            ')',
             TokenType::RPAREN,
             TokenChannel::DEFAULT,
         ));
@@ -4278,7 +4262,6 @@ impl<'src> Lexer<'src> {
         // Leading insiginificant WS before the first argument
         self.push_mode(LexerMode::WsOrCStyleCommentOnly);
         self.push_mode(LexerMode::ExpectSymbol(
-            '(',
             TokenType::LPAREN,
             TokenChannel::DEFAULT,
         ));
@@ -4294,7 +4277,6 @@ impl<'src> Lexer<'src> {
         self.push_mode(LexerMode::ExpectSemiOrEOF);
         self.push_mode(LexerMode::WsOrCStyleCommentOnly);
         self.push_mode(LexerMode::ExpectSymbol(
-            ')',
             TokenType::RPAREN,
             TokenChannel::DEFAULT,
         ));
@@ -4310,7 +4292,6 @@ impl<'src> Lexer<'src> {
         // Leading insiginificant WS before the first argument
         self.push_mode(LexerMode::WsOrCStyleCommentOnly);
         self.push_mode(LexerMode::ExpectSymbol(
-            '(',
             TokenType::LPAREN,
             TokenChannel::DEFAULT,
         ));
@@ -4327,20 +4308,16 @@ impl<'src> Lexer<'src> {
     /// We do not handle the trailing WS for the initializer, instead defer it to the
     /// parser, to avoid excessive lookahead
     #[inline]
-    fn expect_macro_let_stat(&mut self, err_msg: &'static str) {
+    fn expect_macro_let_stat(&mut self, err_type: ErrorType) {
         self.push_mode(LexerMode::ExpectSemiOrEOF);
         self.push_mode(LexerMode::MacroSemiTerminatedTextExpr);
         self.push_mode(LexerMode::WsOrCStyleCommentOnly);
         self.push_mode(LexerMode::ExpectSymbol(
-            '=',
             TokenType::ASSIGN,
             TokenChannel::DEFAULT,
         ));
         self.push_mode(LexerMode::WsOrCStyleCommentOnly);
-        self.push_mode(LexerMode::MacroVarNameExpr(
-            false,
-            Some(ErrorType::MissingExpected(err_msg)),
-        ));
+        self.push_mode(LexerMode::MacroVarNameExpr(false, Some(err_type)));
         self.push_mode(LexerMode::WsOrCStyleCommentOnly);
     }
 
@@ -4354,16 +4331,13 @@ impl<'src> Lexer<'src> {
         self.push_mode(LexerMode::MacroStatOptionsTextExpr);
         self.push_mode(LexerMode::WsOrCStyleCommentOnly);
         self.push_mode(LexerMode::ExpectSymbol(
-            '/',
             TokenType::FSLASH,
             TokenChannel::DEFAULT,
         ));
         self.push_mode(LexerMode::WsOrCStyleCommentOnly);
         self.push_mode(LexerMode::MacroVarNameExpr(
             false,
-            Some(ErrorType::MissingExpected(
-                "ERROR 180-322: Statement is not valid or it is used out of proper order.",
-            )),
+            Some(ErrorType::InvalidOrOutOfOrderStatement),
         ));
         self.push_mode(LexerMode::WsOrCStyleCommentOnly);
     }
@@ -4399,8 +4373,11 @@ impl<'src> Lexer<'src> {
 /// let result = lex(&source);
 /// assert!(result.is_ok());
 /// ```
-pub fn lex<S: AsRef<str>>(source: &S) -> Result<(TokenizedBuffer, Box<[ErrorInfo]>), &'static str> {
+pub fn lex<S: AsRef<str>>(source: &S) -> Result<(TokenizedBuffer, Box<[ErrorInfo]>), String> {
     let lexer = Lexer::new(source.as_ref(), None)?;
     let (buffer, errors) = lexer.lex();
-    Ok((buffer.into_detached()?, errors))
+    match buffer.into_detached() {
+        Ok(buffer) => Ok((buffer, errors)),
+        Err(err) => Err(err.to_string()),
+    }
 }
