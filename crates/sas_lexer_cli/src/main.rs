@@ -91,8 +91,8 @@ fn lex_and_print(source: &String, print: bool, err_only: bool) {
                     .iter()
                     .fold((0, 0, 0), |(c_int, c_unknown, c_user), e| {
                         match e.error_type() {
-                            ErrorType::InternalError(_) => (c_int + 1, c_unknown, c_user),
-                            ErrorType::UnknownCharacter(_) => (c_int, c_unknown + 1, c_user),
+                            e if e.is_internal() => (c_int + 1, c_unknown, c_user),
+                            ErrorType::UnexpectedCharacter => (c_int, c_unknown + 1, c_user),
                             _ => (c_int, c_unknown, c_user + 1),
                         }
                     });

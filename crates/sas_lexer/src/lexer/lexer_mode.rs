@@ -171,7 +171,7 @@ pub(crate) enum LexerMode {
     /// A special mode where only a specific non-letter char is expected.
     /// In this mode we also auto-recover if the expected character is not found
     /// emitting an error but also creating the expected token    
-    ExpectSymbol(char, TokenType, TokenChannel),
+    ExpectSymbol(TokenType, TokenChannel),
     /// A common case where we expect a semicolon or EOF. Works like
     /// `ExpectSymbol` but with a special case for EOF
     ExpectSemiOrEOF,

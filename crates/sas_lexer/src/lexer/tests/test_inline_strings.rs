@@ -6,7 +6,6 @@ use crate::Payload;
 use crate::{error::ErrorType, lex, TokenChannel, TokenType};
 use rstest::{fixture, rstest};
 
-use super::super::error::OPEN_CODE_RECURSION_ERR;
 use super::super::token_type::{KEYWORDS, MKEYWORDS};
 use super::util::{assert_lexing, mangle_case, ErrorTestCase, TokenTestCase};
 
@@ -363,7 +362,7 @@ fn test_complex_string_expr(
         (";", TokenType::SEMI),        
         ],
     vec![
-        (OPEN_CODE_RECURSION_ERR, 6),
+        (ErrorType::OpenCodeRecursionError, 6),
         ]
 )]
 fn test_string_expr_error_recovery(
@@ -578,7 +577,7 @@ fn test_keywords_followed_by_unicode(
             (keyword, keyword_tok, TokenChannel::DEFAULT),
             ("🔥", TokenType::UNKNOWN, TokenChannel::HIDDEN),
         ],
-        vec![ErrorType::UnknownCharacter('🔥')],
+        vec![ErrorType::UnexpectedCharacter],
     );
 }
 
@@ -592,7 +591,7 @@ fn test_keywords_followed_by_unicode(
         ("_myvar", TokenType::Identifier, TokenChannel::DEFAULT),
         ("©", TokenType::UNKNOWN, TokenChannel::HIDDEN)
         ],
-    vec![ErrorType::UnknownCharacter('©')]
+    vec![ErrorType::UnexpectedCharacter]
 )]
 #[case::num_start("9_9myvar",
     vec![
@@ -1026,7 +1025,7 @@ fn test_macro_let(#[case] contents: &str, #[case] expected_token: Vec<impl Token
         ],
     // Real SAS error will be: 
     // /* ERROR: Symbolic variable name a[resolved %m call].b must contain only letters, digits, and underscores. */
-    vec![(ErrorType::MissingExpectedChar('='), 8)]
+    vec![(ErrorType::MissingExpectedAssign, 8)]
 )]
 #[case::miss_assign("%let a b=1;",
     vec![
@@ -1039,7 +1038,7 @@ fn test_macro_let(#[case] contents: &str, #[case] expected_token: Vec<impl Token
         ("b=1", TokenType::MacroString),
         (";", TokenType::SEMI),
         ],
-    vec![(ErrorType::MissingExpectedChar('='), 7)]
+    vec![(ErrorType::MissingExpectedAssign, 7)]
 )]
 #[case::miss_assign_2("%let a &mv=1;",
 vec![
@@ -1053,7 +1052,7 @@ vec![
     ("=1", TokenType::MacroString),
     (";", TokenType::SEMI),
     ],
-    vec![(ErrorType::MissingExpectedChar('='), 7)]
+    vec![(ErrorType::MissingExpectedAssign, 7)]
 )]
 #[case::miss_name_str_literal("%let 'v'=v;",
     vec![
@@ -1066,8 +1065,8 @@ vec![
         (";", TokenType::SEMI),
         ],
     vec![
-        (ErrorType::MissingExpected("ERROR: Expecting a variable name after %LET."), 5),
-        (ErrorType::MissingExpectedChar('='), 5)
+        (ErrorType::InvalidMacroLetVarName, 5),
+        (ErrorType::MissingExpectedAssign, 5)
         ]
 )]
 #[case::miss_name_at_end("%let",
@@ -1080,8 +1079,8 @@ vec![
         ("", TokenType::SEMI),        
         ],
     vec![
-        (ErrorType::MissingExpected("ERROR: Expecting a variable name after %LET."), 4),
-        (ErrorType::MissingExpectedChar('='), 4)
+        (ErrorType::InvalidMacroLetVarName, 4),
+        (ErrorType::MissingExpectedAssign, 4)
         ]
 )]
 #[case::miss_name_wrong_ident_start("%let 9v=1;",
@@ -1094,8 +1093,8 @@ vec![
         (";", TokenType::SEMI),
         ],
     vec![
-        (ErrorType::MissingExpected("ERROR: Expecting a variable name after %LET."), 5),
-        (ErrorType::MissingExpectedChar('='), 5)
+        (ErrorType::InvalidMacroLetVarName, 5),
+        (ErrorType::MissingExpectedAssign, 5)
         ]
 )]
 // For the following tests, the real SAS error is something like:
@@ -1116,7 +1115,7 @@ vec![
     ("=2", TokenType::MacroString, TokenChannel::DEFAULT),
     (";", TokenType::SEMI, TokenChannel::DEFAULT),
     ],
-    vec![(ErrorType::MissingExpectedChar('='), 6)]
+    vec![(ErrorType::MissingExpectedAssign, 6)]
 )]
 #[case::quote_call_in_name_2("%let a%quote(a)=2;",
 vec![
@@ -1132,7 +1131,7 @@ vec![
     ("=2", TokenType::MacroString),
     (";", TokenType::SEMI)
     ],
-    vec![(ErrorType::MissingExpectedChar('='), 6)]
+    vec![(ErrorType::MissingExpectedAssign, 6)]
 )]
 #[case::quote_call_in_name_3("%let a%str(%inner())=2;",
 vec![
@@ -1150,7 +1149,7 @@ vec![
     ("=2", TokenType::MacroString, TokenChannel::DEFAULT),
     (";", TokenType::SEMI, TokenChannel::DEFAULT)
     ],
-    vec![(ErrorType::MissingExpectedChar('='), 6)]
+    vec![(ErrorType::MissingExpectedAssign, 6)]
 )]
 fn test_macro_let_error_recovery(
     #[case] contents: &str,
@@ -1492,8 +1491,8 @@ fn test_macro_str_call(#[case] contents: &str, #[case] expected_token: Vec<impl 
         (";", TokenType::SEMI, TokenChannel::DEFAULT),
         ],
     vec![
-        (OPEN_CODE_RECURSION_ERR, 6),
-        (ErrorType::MissingExpectedChar(')'), 6)
+        (ErrorType::OpenCodeRecursionError, 6),
+        (ErrorType::MissingExpectedRParen, 6)
         ]
 )]
 fn test_macro_str_call_error_recovery(
@@ -1690,7 +1689,7 @@ fn test_macro_nrstr_call(#[case] contents: &str, #[case] expected_token: Vec<imp
         (")", TokenType::RPAREN, TokenChannel::HIDDEN),
         ],
     vec![
-        (ErrorType::MissingExpectedChar('('), 8)
+        (ErrorType::MissingExpectedLParen, 8)
         ]
 )]
 #[case::missing_closing_paren("%nrstr(%%%)",
@@ -1702,7 +1701,7 @@ fn test_macro_nrstr_call(#[case] contents: &str, #[case] expected_token: Vec<imp
         ("", TokenType::RPAREN, TokenChannel::HIDDEN, Payload::None, ""),
         ],
     vec![
-        (ErrorType::MissingExpectedChar(')'), 11)
+        (ErrorType::MissingExpectedRParen, 11)
         ]
 )]
 fn test_macro_nrstr_call_error_recovery(
@@ -1769,10 +1768,7 @@ fn test_macro_simple_stats(
             ("", TokenType::SEMI),
             ("+", TokenType::PLUS),
         ],
-        vec![(
-            ErrorType::MissingExpected("';' or end of file"),
-            tok_str.len(),
-        )],
+        vec![(ErrorType::MissingExpectedSemiOrEOF, tok_str.len())],
     );
 }
 
@@ -1849,16 +1845,8 @@ fn test_macro_stats_with_semi_term_tail(
             v
         },
         vec![
-            (
-                ErrorType::SASSessionUnrecoverableError(
-                    "ERROR: Open code statement recursion detected.",
-                ),
-                test_str.len(),
-            ),
-            (
-                ErrorType::MissingExpected("';' or end of file"),
-                test_str.len(),
-            ),
+            (ErrorType::OpenCodeRecursionError, test_str.len()),
+            (ErrorType::MissingExpectedSemiOrEOF, test_str.len()),
         ],
     );
 }
@@ -1960,16 +1948,8 @@ fn test_macro_stats_with_stat_opts_tail(
             v
         },
         vec![
-            (
-                ErrorType::SASSessionUnrecoverableError(
-                    "ERROR: Open code statement recursion detected.",
-                ),
-                test_str.len(),
-            ),
-            (
-                ErrorType::MissingExpected("';' or end of file"),
-                test_str.len(),
-            ),
+            (ErrorType::OpenCodeRecursionError, test_str.len()),
+            (ErrorType::MissingExpectedSemiOrEOF, test_str.len()),
         ],
     );
 }
@@ -2972,11 +2952,7 @@ fn test_macro_do(#[case] contents: &str, #[case] expected_token: Vec<impl TokenT
         (";", TokenType::SEMI, Payload::None),
     ],
     vec![(
-        ErrorType::MissingExpected(
-            "ERROR: Invalid macro parameter name. \
-            It should be a valid SAS identifier no longer than 32 characters.\
-            \nERROR: A dummy macro will be compiled.",
-        ), 9
+        ErrorType::InvalidMacroDefArgName, 9
     )]
 )]
 #[case::macro_name_error_recovery("%macro &err (arg = val);",
@@ -2993,11 +2969,7 @@ fn test_macro_do(#[case] contents: &str, #[case] expected_token: Vec<impl TokenT
         (";", TokenType::SEMI, Payload::None),
     ],
     vec![(
-        ErrorType::MissingExpected(
-            "ERROR: Invalid macro name. \
-            It should be a valid SAS identifier no longer than 32 characters.\
-            \nERROR: A dummy macro will be compiled.",
-        ), 7
+        ErrorType::InvalidMacroDefName, 7
     )]
 )]
 fn test_macro_def(

@@ -1,4 +1,4 @@
-use crate::error::ErrorInfo;
+use crate::error::{ErrorInfo, ErrorType};
 /// Functions to print the token
 use crate::lexer::buffer::{Payload, TokenIdx, TokenizedBuffer};
 
@@ -6,7 +6,7 @@ fn token_to_string_inner<S: AsRef<str>>(
     token: TokenIdx,
     buffer: &TokenizedBuffer,
     source: &S,
-) -> Result<String, &'static str> {
+) -> Result<String, ErrorType> {
     let start_line = buffer.get_token_start_line(token)?;
     let end_line = buffer.get_token_end_line(token)?;
     let start_column = buffer.get_token_start_column(token)?;
@@ -49,7 +49,7 @@ pub fn token_to_string<S: AsRef<str>>(
     buffer: &TokenizedBuffer,
     source: &S,
 ) -> String {
-    token_to_string_inner(token, buffer, source).unwrap_or_else(std::string::ToString::to_string)
+    token_to_string_inner(token, buffer, source).unwrap_or_else(|err| err.to_string())
 }
 
 pub fn error_to_string<S: AsRef<str>>(

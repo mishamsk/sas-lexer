@@ -103,7 +103,7 @@ pub(super) fn parse_numeric_hex_str(number: &str) -> ((TokenType, Payload), Opti
                     // or an invalid HEX literal when called from the macro eval lexer
                     (
                         (TokenType::IntegerLiteral, Payload::Integer(0)),
-                        Some(ErrorType::InternalError("Failed to parse HEX literal")),
+                        Some(ErrorType::InternalErrorFailedToParseHexLiteral),
                     )
                 }
             }
