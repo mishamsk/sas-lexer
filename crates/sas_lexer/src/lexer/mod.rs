@@ -5,7 +5,6 @@ pub mod error;
 mod lexer_mode;
 mod r#macro;
 mod numeric;
-pub mod print;
 mod sas_lang;
 #[cfg(test)]
 mod tests;
@@ -331,7 +330,7 @@ impl<'src> Lexer<'src> {
 
     /// Main lexing loop, responsible for driving the lexing forwards
     /// as well as finalizing it with a mandatroy EOF roken.
-    fn lex(mut self) -> (WorkTokenizedBuffer, Box<[ErrorInfo]>) {
+    fn lex(mut self) -> (WorkTokenizedBuffer, Vec<ErrorInfo>) {
         while let Some(next_char) = self.cursor.peek() {
             self.lex_token(next_char);
 
@@ -345,7 +344,7 @@ impl<'src> Lexer<'src> {
 
         self.finalize_lexing();
 
-        (self.buffer, self.errors.into_boxed_slice())
+        (self.buffer, self.errors)
     }
 
     /// This function gracefully unwinds the stack, emitting any ephemeral
@@ -4373,7 +4372,7 @@ impl<'src> Lexer<'src> {
 /// let result = lex(&source);
 /// assert!(result.is_ok());
 /// ```
-pub fn lex<S: AsRef<str>>(source: &S) -> Result<(TokenizedBuffer, Box<[ErrorInfo]>), String> {
+pub fn lex<S: AsRef<str>>(source: &S) -> Result<(TokenizedBuffer, Vec<ErrorInfo>), String> {
     let lexer = Lexer::new(source.as_ref(), None)?;
     let (buffer, errors) = lexer.lex();
     match buffer.into_detached() {

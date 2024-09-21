@@ -1,7 +1,5 @@
-use crate::{
-    lex,
-    print::{error_to_string, token_to_string},
-};
+use super::util::{error_to_string, token_to_string};
+use crate::lex;
 use insta::assert_yaml_snapshot;
 use rstest::rstest;
 use std::{fs, path::PathBuf};
