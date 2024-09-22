@@ -1,6 +1,7 @@
 use sas_lexer::error::ErrorInfo;
 /// Functions to print the token
 use sas_lexer::{Payload, ResolvedTokenInfo};
+use std::io::Write;
 
 pub(crate) fn get_token_raw_text(token: &ResolvedTokenInfo, source: &str) -> String {
     let token_start = token.start as usize;
@@ -98,4 +99,37 @@ pub(crate) fn error_to_string(
         "{error_type:?} at byte offset {at_byte_offset}, char offset {at_char_offset}, \
         L{on_line}:C{at_column}. Last token: {last_token_str}"
     )
+}
+
+pub(crate) fn print_tokens(
+    dst: &mut impl Write,
+    tokens: &Vec<ResolvedTokenInfo>,
+    string_literals_buffer: &str,
+    source: &str,
+) {
+    for token in tokens {
+        writeln!(
+            dst,
+            "{}",
+            token_to_string(token, string_literals_buffer, source)
+        )
+        .unwrap();
+    }
+}
+
+pub(crate) fn print_errors(
+    dst: &mut impl Write,
+    errors: &Vec<ErrorInfo>,
+    tokens: &Vec<ResolvedTokenInfo>,
+    string_literals_buffer: &str,
+    source: &str,
+) {
+    for error in errors {
+        writeln!(
+            dst,
+            "{}",
+            error_to_string(&error, tokens, string_literals_buffer, source)
+        )
+        .unwrap();
+    }
 }
