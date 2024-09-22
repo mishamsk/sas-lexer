@@ -1,29 +1,20 @@
 #![allow(clippy::print_stderr, clippy::print_stdout)]
 
+mod antlr;
+mod lex;
 mod print;
 mod stat;
 
+use antlr::write_tokens_file;
 use clap::Parser;
 use clap::Subcommand;
-use convert_case::Boundary;
-use convert_case::Case;
-use convert_case::Converter;
-use sas_lexer::error::ErrorType;
-use sas_lexer::ResolvedTokenInfo;
-use sas_lexer::TokenType;
-use std::io::Write;
-use strum::EnumCount;
-use strum::IntoEnumIterator;
+use lex::lex_and_print;
+use stat::gen_stats;
 
-use print::error_to_string;
-use print::token_to_string;
-use sas_lexer::error::ErrorInfo;
-use sas_lexer::lex;
 use walkdir::WalkDir;
 
 use std::fs;
 use std::io;
-use std::panic::catch_unwind;
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -33,10 +24,6 @@ use std::path::PathBuf;
 struct Cli {
     #[command(subcommand)]
     command: Commands,
-
-    /// Turn debugging information on. Unused currently.
-    #[arg(short, long, action = clap::ArgAction::Count)]
-    debug: u8,
 }
 
 #[derive(Subcommand)]
@@ -58,118 +45,20 @@ enum Commands {
     /// Generate ANTLR .tokens file
     Gen {
         /// The path to output the .tokens file to. If not provided, writes to stdout.
-        grammar: Option<PathBuf>,
+        grammar_file_path: Option<PathBuf>,
     },
-}
+    /// Run lexing over samples and generate various statistics used for
+    /// debugging and optimization.
+    Stats {
+        /// Path to put the resulting stat tabls to. If not provided
+        /// only the summary report on console is produced
+        #[arg(short, long)]
+        output: Option<PathBuf>,
 
-pub fn print_tokens(
-    dst: &mut impl Write,
-    tokens: &Vec<ResolvedTokenInfo>,
-    string_literals_buffer: &str,
-    source: &str,
-) {
-    for token in tokens {
-        writeln!(
-            dst,
-            "{}",
-            token_to_string(token, string_literals_buffer, source)
-        )
-        .unwrap();
-    }
-}
-
-pub fn print_errors(
-    dst: &mut impl Write,
-    errors: &Vec<ErrorInfo>,
-    tokens: &Vec<ResolvedTokenInfo>,
-    string_literals_buffer: &str,
-    source: &str,
-) {
-    for error in errors {
-        writeln!(
-            dst,
-            "{}",
-            error_to_string(&error, tokens, string_literals_buffer, source)
-        )
-        .unwrap();
-    }
-}
-
-fn lex_and_print(source: &String, print: bool, err_only: bool) {
-    let result = catch_unwind(|| match lex(source) {
-        Ok((tok_buffer, errors)) => {
-            let tokens = tok_buffer.into_resolved_token_vec();
-            let string_literals_buffer = tok_buffer.string_literals_buffer();
-
-            let total_tokens = tokens.len();
-            let (c_int, c_unknown, c_user) =
-                errors
-                    .iter()
-                    .fold((0, 0, 0), |(c_int, c_unknown, c_user), e| {
-                        match e.error_type() {
-                            e if e.is_internal() => (c_int + 1, c_unknown, c_user),
-                            ErrorType::UnexpectedCharacter => (c_int, c_unknown + 1, c_user),
-                            _ => (c_int, c_unknown, c_user + 1),
-                        }
-                    });
-
-            if print {
-                let stdout = std::io::stdout();
-                let mut lock = stdout.lock();
-
-                if !err_only {
-                    writeln!(lock, "Tokens:").unwrap();
-                    print_tokens(&mut lock, &tokens, &string_literals_buffer, source);
-                }
-
-                if errors.len() > 0 {
-                    writeln!(lock, "Errors:").unwrap();
-                    print_errors(&mut lock, &errors, &tokens, &string_literals_buffer, source);
-                }
-            }
-
-            if !err_only || errors.len() > 0 {
-                println!("Done! Found {total_tokens} tokens.");
-
-                if c_int > 0 {
-                    println!("Internal errors: {c_int}");
-                }
-
-                if c_unknown > 0 {
-                    println!("Unknown characters: {c_unknown}");
-                }
-
-                if c_user > 0 {
-                    println!("User errors: {c_user}");
-                }
-            }
-        }
-        Err(error) => eprintln!("Error: {error}"),
-    });
-
-    if let Err(err) = result {
-        if let Some(s) = err.downcast_ref::<&str>() {
-            println!("Panic occurred while lexing: {s}");
-        } else {
-            println!("Panic occurred, but can't read the message");
-        }
-    }
-}
-
-fn generate_tokens_file() -> String {
-    let mut result = String::with_capacity(TokenType::COUNT * 40);
-    let conv = Converter::new()
-        .from_case(Case::Pascal)
-        .remove_boundaries(&[Boundary::LowerDigit, Boundary::UpperDigit])
-        .to_case(Case::UpperSnake);
-
-    for token in TokenType::iter().filter(|t| *t != TokenType::EOF) {
-        result.push_str(conv.convert(token.to_string()).as_str());
-        result.push('=');
-        result.push_str((token as u16).to_string().as_str());
-        result.push('\n');
-    }
-    result
+        /// A folder with samples. Reads all files with the `.sas` extension.
+        #[arg(env = "SAS_LEX_SAMPLES", required = true)]
+        samples: PathBuf,
+    },
 }
 
 fn main() -> io::Result<()> {
@@ -223,15 +112,12 @@ fn main() -> io::Result<()> {
                 }
             }
         }
-        Commands::Gen { grammar } => {
-            let tokens_file = generate_tokens_file();
-
-            if let Some(grammar_path) = grammar {
-                fs::write(grammar_path, tokens_file)?;
-            } else {
-                println!("{tokens_file}");
-            }
+        Commands::Gen {
+            grammar_file_path: grammar,
+        } => {
+            write_tokens_file(grammar)?;
         }
+        Commands::Stats { output, samples } => gen_stats(output, samples),
     }
 
     Ok(())
