@@ -145,8 +145,8 @@ fn gen_stats_inner(output: &Option<PathBuf>, samples: &PathBuf) -> Result<(), Po
         let mut string_buffer_length = None;
 
         if let Ok(contents) = fs::read_to_string(entry_path) {
-            match safe_lex(&contents) {
-                Some((tok_buffer, errors)) => {
+            match safe_lex(&contents, false, false) {
+                Some((tok_buffer, errors, _)) => {
                     let tokens = tok_buffer.into_resolved_token_vec();
                     let string_literals_buffer = tok_buffer.string_literals_buffer();
                     string_buffer_length = Some(string_literals_buffer.len() as u32);
