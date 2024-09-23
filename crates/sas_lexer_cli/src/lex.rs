@@ -1,5 +1,8 @@
-use std::io::Write;
 use std::panic::catch_unwind;
+use std::{
+    io::Write,
+    time::{Duration, Instant},
+};
 
 use sas_lexer::{
     error::{ErrorInfo, ErrorType},
@@ -8,22 +11,32 @@ use sas_lexer::{
 
 use crate::print::{print_errors, print_tokens};
 
-pub(crate) fn safe_lex(source: &String) -> Option<(TokenizedBuffer, Vec<ErrorInfo>)> {
+pub(crate) fn safe_lex(
+    source: &String,
+    print_lex_return_errors: bool,
+    print_stack_unwind_errors: bool,
+) -> Option<(TokenizedBuffer, Vec<ErrorInfo>, Duration)> {
+    let start = Instant::now();
+
     let result = catch_unwind(|| match lex(source) {
-        Ok((tok_buffer, errors)) => Some((tok_buffer, errors)),
+        Ok((tok_buffer, errors)) => Some((tok_buffer, errors, start.elapsed())),
         Err(error) => {
-            eprintln!("Error: {error}");
+            if print_lex_return_errors {
+                eprintln!("Error: {error}");
+            }
             None
         }
     });
 
     match result {
         Err(err) => {
-            if let Some(s) = err.downcast_ref::<&str>() {
-                println!("Panic occurred while lexing: {s}");
-            } else {
-                println!("Panic occurred, but can't read the message");
-            };
+            if print_stack_unwind_errors {
+                if let Some(s) = err.downcast_ref::<&str>() {
+                    println!("Panic occurred while lexing: {s}");
+                } else {
+                    println!("Panic occurred, but can't read the message");
+                };
+            }
 
             None
         }
@@ -31,13 +44,28 @@ pub(crate) fn safe_lex(source: &String) -> Option<(TokenizedBuffer, Vec<ErrorInf
     }
 }
 
-pub(super) fn lex_and_print(source: &String, print: bool, err_only: bool) {
-    match safe_lex(source) {
-        Some((tok_buffer, errors)) => {
-            let tokens = tok_buffer.into_resolved_token_vec();
-            let string_literals_buffer = tok_buffer.string_literals_buffer();
+pub(super) struct LexDurations {
+    pub(super) lex_duration: Duration,
+    pub(super) gen_tok_vec_duration: Duration,
+}
 
-            let total_tokens = tokens.len();
+pub(super) struct LexPrintConfig {
+    pub(super) print_tokens: bool,
+    pub(super) print_token_totals: bool,
+    pub(super) print_errors: bool,
+    pub(super) print_error_totals: bool,
+    pub(super) print_lex_return_errors: bool,
+    pub(super) print_stack_unwind_errors: bool,
+}
+
+pub(super) fn lex_and_print(source: &String, print_config: LexPrintConfig) -> Option<LexDurations> {
+    match safe_lex(
+        source,
+        print_config.print_lex_return_errors,
+        print_config.print_stack_unwind_errors,
+    ) {
+        Some((tok_buffer, errors, lex_duration)) => {
+            let total_tokens = tok_buffer.token_count();
             let (c_int, c_unknown, c_user) =
                 errors
                     .iter()
@@ -49,37 +77,56 @@ pub(super) fn lex_and_print(source: &String, print: bool, err_only: bool) {
                         }
                     });
 
-            if print {
+            let mut gen_tok_vec_duration = Duration::default();
+
+            if print_config.print_tokens || print_config.print_errors {
                 let stdout = std::io::stdout();
                 let mut lock = stdout.lock();
 
-                if !err_only {
+                let start = Instant::now();
+                let tokens = tok_buffer.into_resolved_token_vec();
+                gen_tok_vec_duration = start.elapsed();
+
+                let string_literals_buffer = tok_buffer.string_literals_buffer();
+
+                if print_config.print_tokens && tokens.len() > 0 {
                     writeln!(lock, "Tokens:").unwrap();
                     print_tokens(&mut lock, &tokens, &string_literals_buffer, source);
                 }
 
-                if errors.len() > 0 {
+                if print_config.print_errors && errors.len() > 0 {
                     writeln!(lock, "Errors:").unwrap();
                     print_errors(&mut lock, &errors, &tokens, &string_literals_buffer, source);
                 }
             }
 
-            if !err_only || errors.len() > 0 {
+            if print_config.print_token_totals {
                 println!("Done! Found {total_tokens} tokens.");
+            }
 
-                if c_int > 0 {
-                    println!("Internal errors: {c_int}");
-                }
+            if print_config.print_error_totals {
+                if errors.len() > 0 {
+                    if c_int > 0 {
+                        println!("Internal errors: {c_int}");
+                    }
 
-                if c_unknown > 0 {
-                    println!("Unknown characters: {c_unknown}");
-                }
+                    if c_unknown > 0 {
+                        println!("Unknown characters: {c_unknown}");
+                    }
 
-                if c_user > 0 {
-                    println!("User errors: {c_user}");
+                    if c_user > 0 {
+                        println!("User errors: {c_user}");
+                    }
+                } else {
+                    println!("No errors found!");
                 }
             }
+
+            Some(LexDurations {
+                lex_duration,
+                gen_tok_vec_duration,
+            })
         }
-        None => {}
-    };
+        None => None,
+    }
 }
