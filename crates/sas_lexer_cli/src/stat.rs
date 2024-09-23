@@ -172,7 +172,12 @@ fn gen_stats_inner(output: &Option<PathBuf>, samples: &PathBuf) -> Result<(), Po
         file_str_buf_len.push(string_buffer_length);
     }
 
-    pb.finish_with_message("done");
+    let total_readable = file_readable.clone().iter().filter(|&&b| b).count();
+    let total_lexed = file_lexed.clone().iter().filter(|&&b| b).count();
+
+    pb.finish_with_message(format!(
+        "Done. Readable: {total_readable}/{total_files}, Lexed: {total_lexed}/{total_files}",
+    ));
 
     println!("Combining all DataFrame's...");
 
@@ -219,7 +224,7 @@ fn gen_stats_inner(output: &Option<PathBuf>, samples: &PathBuf) -> Result<(), Po
     let line_ratio = col("size").cast(DataType::Float64) / col("lines");
     let str_buf_ratio = when(col("string_buffer_length").gt(0))
         .then(col("size").cast(DataType::Float64) / col("string_buffer_length"))
-        .otherwise(0);
+        .otherwise(lit(NULL));
 
     let tok_report = sources_df
         .join(
@@ -235,6 +240,15 @@ fn gen_stats_inner(output: &Option<PathBuf>, samples: &PathBuf) -> Result<(), Po
                 .floor()
                 .cast(DataType::UInt32)
                 .alias("tok_ratio_min"),
+            col("name")
+                .sort_by(
+                    [tok_ratio.clone().floor().cast(DataType::UInt32)],
+                    SortMultipleOptions::default()
+                        .with_nulls_last(true)
+                        .with_order_descending(false),
+                )
+                .first()
+                .alias("file_with_min_size_to_token_ratio"),
             tok_ratio
                 .clone()
                 .max()
@@ -253,6 +267,15 @@ fn gen_stats_inner(output: &Option<PathBuf>, samples: &PathBuf) -> Result<(), Po
                 .floor()
                 .cast(DataType::UInt32)
                 .alias("line_ratio_min"),
+            col("name")
+                .sort_by(
+                    [line_ratio.clone().floor().cast(DataType::UInt32)],
+                    SortMultipleOptions::default()
+                        .with_nulls_last(true)
+                        .with_order_descending(false),
+                )
+                .first()
+                .alias("file_with_min_size_to_line_ratio"),
             line_ratio
                 .clone()
                 .max()
@@ -271,6 +294,15 @@ fn gen_stats_inner(output: &Option<PathBuf>, samples: &PathBuf) -> Result<(), Po
                 .floor()
                 .cast(DataType::UInt32)
                 .alias("str_buf_ratio_min"),
+            col("name")
+                .sort_by(
+                    [str_buf_ratio.clone().floor().cast(DataType::UInt32)],
+                    SortMultipleOptions::default()
+                        .with_nulls_last(true)
+                        .with_order_descending(false),
+                )
+                .first()
+                .alias("file_with_min_size_to_str_buf_ratio"),
             str_buf_ratio
                 .clone()
                 .max()
@@ -289,7 +321,7 @@ fn gen_stats_inner(output: &Option<PathBuf>, samples: &PathBuf) -> Result<(), Po
                 .alias("max_unique_token_types"),
             col("name")
                 .sort_by(
-                    [col("unique_token_types").cast(DataType::UInt64)],
+                    [col("unique_token_types")],
                     SortMultipleOptions::default()
                         .with_nulls_last(true)
                         .with_order_descending(true),
