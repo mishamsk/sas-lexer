@@ -11,8 +11,10 @@ use serde_repr::Serialize_repr;
 /// predicates rely on integer values of the variants that
 /// are generated automatically from the order.
 ///
-/// Naming also is used to autogenerate static hash maps
-/// for regular keywords and macro keywords.
+/// Naming also is also important. Namely all non-macro keywords
+/// must be preceeded with `Kw` and macro keywords are all start
+/// with `Kwm`. These is used to autogenerate static hash maps
+/// for keywords and other downstream codegen outside of this crate
 #[derive(
     Debug,
     PartialEq,
@@ -74,7 +76,6 @@ pub enum TokenType {
     AT,         // '@'
     HASH,       // '#'
     QUESTION,   // '?'
-    TermQuote,  // *'; and *" ";
     // Mnemonics for logical expressions
     KwLT,           // LT
     KwLE,           // LE
@@ -110,6 +111,7 @@ pub enum TokenType {
     TimeLiteralExprEnd,       // "&mv.stuff"t
     HexStringLiteralExprEnd,  // "&mv.stuff"x
     CStyleComment,            // /* ... */
+    PredictedCommentStat,     // * ...;
     DatalinesStart,           // datalines/cards[4];
     DatalinesData,            // datalines data
     // the closing ;[;;;] after dataines is lexed as SEMI
@@ -119,7 +121,7 @@ pub enum TokenType {
     MacroVarExpr,     // &&mvar&another. etc.
     MacroString,      // %let var = macro_string;
     MacroStringEmpty, // implicit empty macro string in logical expr `%eval(= rhs)`
-    // From here and on to KwmList are the token type subset `TokenTypeMacroCallOrStat`
+    // From here and on to KwmRun are the token type subset `TokenTypeMacroCallOrStat`
     // DO NOT ADD ANYTHING IN BETWEEN
     MacroIdentifier, // %macro_name
     // Macro built in function keywords
@@ -234,7 +236,6 @@ pub enum TokenType {
     KwLET,
     KwNET,
     // Global SAS statement keywords & shared keywords
-    KwComment,
     KwLibname,
     KwFilename,
     KwClear,
@@ -367,11 +368,11 @@ pub(super) enum MacroKwType {
     MacroStat,
 }
 
-pub(super) fn parse_keyword<S: AsRef<str>>(ident: S) -> Option<TokenType> {
+pub(super) fn parse_keyword(ident: &str) -> Option<TokenType> {
     KEYWORDS.get(ident.as_ref()).copied()
 }
 
-pub(super) fn parse_macro_keyword<S: AsRef<str>>(ident: S) -> Option<TokenType> {
+pub(super) fn parse_macro_keyword(ident: &str) -> Option<TokenType> {
     MKEYWORDS.get(ident.as_ref()).copied()
 }
 

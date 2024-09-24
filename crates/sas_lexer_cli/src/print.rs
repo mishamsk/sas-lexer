@@ -1,24 +1,27 @@
 use sas_lexer::error::ErrorInfo;
 /// Functions to print the token
 use sas_lexer::{Payload, ResolvedTokenInfo};
+use std::cmp::Ordering;
 use std::io::Write;
 
 pub(crate) fn get_token_raw_text(token: &ResolvedTokenInfo, source: &str) -> String {
     let token_start = token.start as usize;
     let token_stop = token.stop as usize;
 
-    if token_stop < token_start {
-        // Should never happen, but just in case
-        "<invalid text range>".into()
-    } else if token_stop == token_start {
-        // Ephemeral token
-        "<no text>".into()
-    } else {
-        source
+    match token_stop.cmp(&token_start) {
+        Ordering::Less => {
+            // Should never happen, but just in case
+            "<invalid text range>".into()
+        }
+        Ordering::Equal => {
+            // Ephemeral token
+            "<no text>".into()
+        }
+        Ordering::Greater => source
             .chars()
             .skip(token_start)
             .take(token_stop - token_start)
-            .collect()
+            .collect(),
     }
 }
 
@@ -74,7 +77,7 @@ pub(crate) fn token_to_string(
 
 pub(crate) fn error_to_string(
     error: &ErrorInfo,
-    tokens: &Vec<ResolvedTokenInfo>,
+    tokens: &[ResolvedTokenInfo],
     string_literals_buffer: &str,
     source: &str,
 ) -> String {
@@ -120,7 +123,7 @@ pub(crate) fn print_tokens(
 pub(crate) fn print_errors(
     dst: &mut impl Write,
     errors: &Vec<ErrorInfo>,
-    tokens: &Vec<ResolvedTokenInfo>,
+    tokens: &[ResolvedTokenInfo],
     string_literals_buffer: &str,
     source: &str,
 ) {
@@ -128,7 +131,7 @@ pub(crate) fn print_errors(
         writeln!(
             dst,
             "{}",
-            error_to_string(&error, tokens, string_literals_buffer, source)
+            error_to_string(error, tokens, string_literals_buffer, source)
         )
         .unwrap();
     }

@@ -92,9 +92,11 @@ pub(super) const fn is_macro_eval_logical_op(tok_type: TokenType) -> bool {
     )
 }
 
-/// Consumes the cursor starting at % and followed by a valid sas name start,
+/// Consumes the cursor starting at a valid sas name start after %,
 /// returning a token type (either one of the built-in call/stats) or a macro
 /// identifier token.
+///
+/// Cursor should be advanced past the % character.
 ///
 /// We are not making distinction between a label and a custom call, i.e. doesn't do a lookahead
 /// past the identifier to see if colon follows. So far it seems that SAS would
@@ -112,15 +114,15 @@ pub(super) const fn is_macro_eval_logical_op(tok_type: TokenType) -> bool {
 pub(super) fn lex_macro_call_stat_or_label(
     cursor: &mut Cursor,
 ) -> Result<(TokenTypeMacroCallOrStat, u32), ErrorType> {
-    debug_assert_eq!(cursor.peek(), Some('%'));
-    debug_assert!(is_valid_sas_name_start(cursor.peek_next()));
+    debug_assert!(
+        cursor.peek().is_some_and(is_valid_sas_name_start),
+        "Unexpected first character in the cursor: {:?}",
+        cursor.peek()
+    );
 
     let start_rem_length = cursor.remaining_len();
     let start_char_offset = cursor.char_offset();
     let source_view = cursor.as_str();
-
-    // Move past the % to the first character of the identifier
-    cursor.advance();
 
     // Start tracking whether the identifier is ASCII
     // It is necessary, as we need to upper case the identifier if it is ASCII
@@ -141,11 +143,10 @@ pub(super) fn lex_macro_call_stat_or_label(
         }
     });
 
-    let ident_end_byte_offset = (start_rem_length - cursor.remaining_len()) as usize;
+    let pending_ident_len = (start_rem_length - cursor.remaining_len()) as usize;
     let pending_ident = source_view
-        .get(1..ident_end_byte_offset)
+        .get(..pending_ident_len)
         .ok_or(ErrorType::InternalErrorOutOfBounds)?;
-    let pending_ident_len = ident_end_byte_offset - 1;
 
     // If the identifier is not ASCII or longer then max length,
     // we can safely return true must be a macro call

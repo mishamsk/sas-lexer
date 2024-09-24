@@ -508,13 +508,15 @@ fn test_not_datalines() {
 #[case("}", TokenType::RCURLY)]
 #[case("[", TokenType::LBRACK)]
 #[case("]", TokenType::RBRACK)]
-#[case("*", TokenType::STAR)]
+// This is now predicted as a comment stat missing the closing ; at EOF
+// #[case("*", TokenType::STAR)]
 #[case("!", TokenType::EXCL)]
 #[case("!!", TokenType::EXCL2)]
 #[case("¦", TokenType::BPIPE)]
 #[case("¦¦", TokenType::BPIPE2)]
 #[case("||", TokenType::PIPE2)]
-#[case("**", TokenType::STAR2)]
+// This is now predicted as a comment stat missing the closing ; at EOF
+// #[case("**", TokenType::STAR2)]
 #[case("¬", TokenType::NOT)]
 #[case("^", TokenType::NOT)]
 #[case("~", TokenType::NOT)]
@@ -542,8 +544,8 @@ fn test_not_datalines() {
 #[case("@", TokenType::AT)]
 #[case("#", TokenType::HASH)]
 #[case("?", TokenType::QUESTION)]
-#[case("*';", (TokenType::TermQuote, TokenChannel::HIDDEN))]
-#[case("*\";", (TokenType::TermQuote, TokenChannel::HIDDEN))]
+#[case("*';", TokenType::PredictedCommentStat)]
+#[case("*\";", TokenType::PredictedCommentStat)]
 fn test_all_single_symbols(#[case] contents: &str, #[case] expected_token: impl TokenTestCase) {
     assert_lexing(contents, vec![expected_token], NO_ERRORS);
 }
@@ -3348,4 +3350,119 @@ fn test_macro_special_builtins(
 )]
 fn test_macro_rare_stats(#[case] contents: &str, #[case] expected_token: Vec<impl TokenTestCase>) {
     assert_lexing(contents, expected_token, NO_ERRORS);
+}
+
+#[rstest]
+// No error cases
+#[case::first_line_simple("*--comment--;",
+    vec![
+        ("*--comment--;", TokenType::PredictedCommentStat),
+    ],
+    NO_ERRORS,
+)]
+#[case::last_line_simple("data;*--comment--",
+    vec![
+        ("data", TokenType::KwData),
+        (";", TokenType::SEMI),
+        ("*--comment--", TokenType::PredictedCommentStat),
+    ],
+    NO_ERRORS,
+)]
+#[case::first_line_with_macro("*c&mv.%mc(;,arg=some(;));",
+    vec![
+        ("*c&mv.%mc(;,arg=some(;));", TokenType::PredictedCommentStat),
+    ],
+    NO_ERRORS,
+)]
+#[case::after_stat_simple("data;*--comment--;",
+    vec![
+        ("data", TokenType::KwData),
+        (";", TokenType::SEMI),
+        ("*--comment--;", TokenType::PredictedCommentStat),
+    ],
+    NO_ERRORS,
+)]
+#[case::after_stat_with_macro("data;*c&mv.%mc(;,arg=some(;));",
+    vec![
+        ("data", TokenType::KwData),
+        (";", TokenType::SEMI),
+        ("*c&mv.%mc(;,arg=some(;));", TokenType::PredictedCommentStat),
+    ],
+    NO_ERRORS,
+)]
+#[case::do_end_comment("%do; * /*c*/ 2; %end;",
+vec![
+    ("%do", TokenType::KwmDo),
+    (";", TokenType::SEMI),
+    (" ", TokenType::WS),
+    ("* /*c*/ 2;", TokenType::PredictedCommentStat),
+    (" ", TokenType::WS),
+    ("%end", TokenType::KwmEnd),
+    (";", TokenType::SEMI),
+    ],
+    NO_ERRORS,
+)]
+// Three following stats that we "allow" for * to be recognized as math op
+#[case::do_end_not_comment("%do; * /*c*/ 2 %end;",
+    vec![
+        ("%do", TokenType::KwmDo, Payload::None),
+        (";", TokenType::SEMI, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("*", TokenType::STAR, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("/*c*/", TokenType::CStyleComment, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("2", TokenType::IntegerLiteral, Payload::Integer(2)),
+        (" ", TokenType::WS, Payload::None),
+        ("%end", TokenType::KwmEnd, Payload::None),
+        (";", TokenType::SEMI, Payload::None),
+    ],
+    NO_ERRORS,
+)]
+#[case::before_mend_not_comment("* /*c*/ 2 %mend;",
+    vec![
+        ("*", TokenType::STAR, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("/*c*/", TokenType::CStyleComment, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("2", TokenType::IntegerLiteral, Payload::Integer(2)),
+        (" ", TokenType::WS, Payload::None),
+        ("%mend", TokenType::KwmMend, Payload::None),
+        (";", TokenType::SEMI, Payload::None),
+    ],
+    NO_ERRORS,
+)]
+#[case::before_else_not_comment("* /*c*/ 2 %else",
+    vec![
+        ("*", TokenType::STAR, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("/*c*/", TokenType::CStyleComment, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("2", TokenType::IntegerLiteral, Payload::Integer(2)),
+        (" ", TokenType::WS, Payload::None),
+        ("%else", TokenType::KwmElse, Payload::None),        
+    ],
+    NO_ERRORS,
+)]
+// Error cases. We "predict" a comment before %let and all other stats
+// so we recover missing semicolon
+#[case::before_let_stat("* /*c*/ 2 %let v=;",
+    vec![
+        ("* /*c*/ 2 ", TokenType::PredictedCommentStat),
+        ("%let", TokenType::KwmLet),
+        (" ", TokenType::WS),
+        ("v", TokenType::MacroString),
+        ("=", TokenType::ASSIGN),
+        (";", TokenType::SEMI),
+    ],
+    vec![
+        (ErrorType::InvalidOrOutOfOrderStatement, 10)
+    ]
+)]
+fn test_comment_prediction(
+    #[case] contents: &str,
+    #[case] expected_token: Vec<impl TokenTestCase>,
+    #[case] expected_error: Vec<impl ErrorTestCase>,
+) {
+    assert_lexing(contents, expected_token, expected_error);
 }

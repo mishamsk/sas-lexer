@@ -27,9 +27,10 @@ fn generate_tokens_file_as_string() -> String {
 
 pub(super) fn write_tokens_file(path: &Option<PathBuf>) -> Result<(), io::Error> {
     let tokens_file = generate_tokens_file_as_string();
-    Ok(if let Some(grammar_path) = path {
+    if let Some(grammar_path) = path {
         fs::write(grammar_path, tokens_file)?;
     } else {
         println!("{tokens_file}");
-    })
+    };
+    Ok(())
 }

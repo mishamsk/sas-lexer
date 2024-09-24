@@ -26,6 +26,3 @@ polars = { version = "0.43.1", features = [
 indicatif = "0.17.8"
 
 [dev-dependencies]
-
-[lints]
-workspace = true

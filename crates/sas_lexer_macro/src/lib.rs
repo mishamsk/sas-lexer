@@ -7,6 +7,9 @@ use syn::{
     LitStr, Meta, MetaNameValue, Token,
 };
 
+/// Macro to generate a keyword map for an enum. Takes all variants that start with "Kw"
+/// but not "Kwm" and generates a map from the uppercase keyword text to the variant.
+///
 /// # Panics
 /// Panics if the input is not an enum.
 #[proc_macro_derive(KeywordMap, attributes(keyword, kw_map_name))]
@@ -111,6 +114,9 @@ pub fn generate_keyword_map(input: TokenStream) -> TokenStream {
     TokenStream::from(expanded)
 }
 
+/// Macro to generate a SAS macro keyword map for an enum. Takes all variants that start with "Kwm"
+/// and generates a map from the uppercase keyword (without the leading %) text to the variant.
+///
 /// # Panics
 /// Panics if the input is not an enum.
 #[proc_macro_derive(MacroKeywordMap, attributes(keyword, kwm_map_name))]
@@ -212,8 +218,22 @@ pub fn generate_macro_keyword_map(input: TokenStream) -> TokenStream {
     TokenStream::from(expanded)
 }
 
+/// Custom derive macro to generate a subset of an enum.
+/// The subset enum is generated with the same variants as the original enum
+/// but only the ones between the start and end variants (inclusive).
+///
+/// The subset enum is generated with the following impls:
+/// - Debug, Clone, Copy, PartialEq, Eq, EnumIter
+///
+/// Also, the following impls are generated:
+/// - From<SubsetEnum> for FullEnum
+/// - TryFrom<FullEnum> for SubsetEnum
+///
+/// Also currently assumes `repr(u16)`.
+///
 /// # Panics
 /// Panics if the input is not an enum and other conditions are not met.
+#[allow(clippy::doc_markdown)]
 #[proc_macro_derive(TokenTypeSubset, attributes(subset))]
 pub fn derive_token_type_subset(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);

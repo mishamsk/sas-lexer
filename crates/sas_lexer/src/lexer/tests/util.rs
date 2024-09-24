@@ -115,7 +115,9 @@ impl TokenTestCase for (&str, TokenType) {
     fn token_channel(&self) -> TokenChannel {
         match self.1 {
             TokenType::WS => TokenChannel::HIDDEN,
-            TokenType::CStyleComment | TokenType::MacroComment => TokenChannel::COMMENT,
+            TokenType::PredictedCommentStat
+            | TokenType::CStyleComment
+            | TokenType::MacroComment => TokenChannel::COMMENT,
             _ => TokenChannel::default(),
         }
     }
@@ -141,7 +143,9 @@ impl TokenTestCase for (&str, TokenType, Payload) {
     fn token_channel(&self) -> TokenChannel {
         match self.1 {
             TokenType::WS => TokenChannel::HIDDEN,
-            TokenType::CStyleComment | TokenType::MacroComment => TokenChannel::COMMENT,
+            TokenType::PredictedCommentStat
+            | TokenType::CStyleComment
+            | TokenType::MacroComment => TokenChannel::COMMENT,
             _ => TokenChannel::default(),
         }
     }
@@ -167,7 +171,9 @@ impl TokenTestCase for (&str, TokenType, Payload, &str) {
     fn token_channel(&self) -> TokenChannel {
         match self.1 {
             TokenType::WS => TokenChannel::HIDDEN,
-            TokenType::CStyleComment | TokenType::MacroComment => TokenChannel::COMMENT,
+            TokenType::PredictedCommentStat
+            | TokenType::CStyleComment
+            | TokenType::MacroComment => TokenChannel::COMMENT,
             _ => TokenChannel::default(),
         }
     }
@@ -231,7 +237,9 @@ impl TokenTestCase for (TokenType, Payload, &str) {
     fn token_channel(&self) -> TokenChannel {
         match self.0 {
             TokenType::WS => TokenChannel::HIDDEN,
-            TokenType::CStyleComment | TokenType::MacroComment => TokenChannel::COMMENT,
+            TokenType::PredictedCommentStat
+            | TokenType::CStyleComment
+            | TokenType::MacroComment => TokenChannel::COMMENT,
             _ => TokenChannel::default(),
         }
     }
@@ -309,7 +317,9 @@ impl TokenTestCase for TokenType {
     fn token_channel(&self) -> TokenChannel {
         match self {
             TokenType::WS => TokenChannel::HIDDEN,
-            TokenType::CStyleComment | TokenType::MacroComment => TokenChannel::COMMENT,
+            TokenType::PredictedCommentStat
+            | TokenType::CStyleComment
+            | TokenType::MacroComment => TokenChannel::COMMENT,
             _ => TokenChannel::default(),
         }
     }
@@ -355,7 +365,9 @@ impl TokenTestCase for (TokenType, f64) {
     fn token_channel(&self) -> TokenChannel {
         match self.0 {
             TokenType::WS => TokenChannel::HIDDEN,
-            TokenType::CStyleComment | TokenType::MacroComment => TokenChannel::COMMENT,
+            TokenType::PredictedCommentStat
+            | TokenType::CStyleComment
+            | TokenType::MacroComment => TokenChannel::COMMENT,
             _ => TokenChannel::default(),
         }
     }
@@ -383,7 +395,9 @@ impl TokenTestCase for (TokenType, u64) {
     fn token_channel(&self) -> TokenChannel {
         match self.0 {
             TokenType::WS => TokenChannel::HIDDEN,
-            TokenType::CStyleComment | TokenType::MacroComment => TokenChannel::COMMENT,
+            TokenType::PredictedCommentStat
+            | TokenType::CStyleComment
+            | TokenType::MacroComment => TokenChannel::COMMENT,
             _ => TokenChannel::default(),
         }
     }

@@ -13,6 +13,9 @@ pub(crate) mod token_type;
 
 use buffer::{LineIdx, Payload, TokenIdx, TokenInfo, TokenizedBuffer, WorkTokenizedBuffer};
 use channel::TokenChannel;
+use cursor::Cursor;
+#[cfg(debug_assertions)]
+use cursor::EOF_CHAR;
 use error::{ErrorInfo, ErrorType};
 use lexer_mode::{
     LexerMode, MacroArgContext, MacroArgNameValueFlags, MacroEvalExprFlags,
@@ -109,7 +112,11 @@ impl<'src> Lexer<'src> {
         })
     }
 
-    /// Create a checkpoint for the lexer
+    /// Create a checkpoint for the lexer.
+    ///
+    /// Checkpoint only stores the mode stack length at the moment of the call,
+    /// and hence assumes that modes will not be popped beyond that point before
+    /// rollback.
     ///
     /// Make sure to always clear the checkpoint, even if not rolling back
     fn checkpoint(&mut self) {
@@ -3369,23 +3376,163 @@ impl<'src> Lexer<'src> {
         };
     }
 
+    fn lex_predicted_comment(&mut self) -> bool {
+        // Check if the last token on default channel was a semicolon or
+        // nothing at all (start of the file)
+        match self.buffer.last_token_info_on_default_channel() {
+            Some(tok_info) if tok_info.token_type != TokenType::SEMI => return false,
+            // Either the last token was a semicolon or we are at the start of the file
+            // hence this may be a predicted comment, continue
+            _ => {}
+        };
+
+        // Checkpoint to be able to rollback
+        self.checkpoint();
+
+        // Track parens nesting
+        let mut parens_nesting = 0u32;
+
+        while let Some(c) = self.cursor.advance() {
+            match c {
+                '(' => parens_nesting += 1,
+                ')' => {
+                    // I believe SAS would fail on non-balanced parens in a comment
+                    // but from masking standpoint it is easier to just ignore them.
+                    // The important part is to handle `* mcall_with_semi(;) still a comment;`
+                    parens_nesting = parens_nesting.saturating_sub(1);
+                }
+                '\n' => {
+                    self.add_line();
+                }
+                '%' if self.cursor.peek().is_some_and(is_valid_sas_name_start) => {
+                    // Pass a clone of the actual cursor to perform lookahead
+                    let mut la_cursor = self.cursor.clone();
+
+                    let (kw_tok_type, advance_by) = lex_macro_call_stat_or_label(&mut la_cursor)
+                        .unwrap_or_else(|err| {
+                            self.emit_error(err);
+                            (TokenTypeMacroCallOrStat::MacroIdentifier, 0)
+                        });
+
+                    // Here comes the core part of our prediction: if macro stat follows
+                    // we distinguish two cases - a statement that our heuristics thinks as
+                    // a possible follower to a genuine partial arithmetic expression and all
+                    // the rest.
+                    match kw_tok_type {
+                        TokenTypeMacroCallOrStat::KwmEnd
+                        | TokenTypeMacroCallOrStat::KwmMend
+                        | TokenTypeMacroCallOrStat::KwmElse => {
+                            // We assume the following usage possible:
+                            // ```sas
+                            // macro m; * 2 &mend;
+                            // data _null_; a = 1 &m();
+                            // ```
+                            // hence we rollback, and tell the caller "no, this is not a comment"
+                            self.rollback();
+
+                            return false;
+                        }
+                        kwm if is_macro_stat_tok_type(kwm.into()) => {
+                            // All other cases of following statmenets we assume this was a comment,
+                            // but missing the semicolon. Hence we emit the comment token, the
+                            // error and return
+
+                            // Clear the checkpoint
+                            self.clear_checkpoint();
+
+                            // Move our cursor back one char ('%')
+                            // SAFETY: our cursor has been advanced past the '%', so it current
+                            // byte and char offest must be > 0
+                            #[cfg(not(debug_assertions))]
+                            {
+                                self.cursor = Cursor::new_at_offset(
+                                    &self.source[self.cur_byte_offset().get() as usize - 1..],
+                                    self.cur_char_offset().get() - 1,
+                                );
+                            }
+                            #[cfg(debug_assertions)]
+                            {
+                                self.cursor = Cursor::new_at_offset(
+                                    &self.source[self.cur_byte_offset().get() as usize - 1..],
+                                    self.cur_char_offset().get() - 1,
+                                    // Restoring previous char before '%' for debugging without
+                                    // impacting the production code path is hard and not worth it.
+                                    // So far, debug assertions that rely on prev_char won't trigger
+                                    // after this code path, so we can safely ignore it
+                                    EOF_CHAR,
+                                );
+                            }
+                            // Emit the comment token without advancing the cursor, so the
+                            // statement that was found is lexed separately
+                            self.emit_token(
+                                TokenChannel::COMMENT,
+                                TokenType::PredictedCommentStat,
+                                Payload::None,
+                            );
+
+                            // Emit the error
+                            self.emit_error(ErrorType::InvalidOrOutOfOrderStatement);
+
+                            // Report that we lexed a token
+                            return true;
+                        }
+                        _ => {
+                            // Not a macro stat, just a macro call
+                            // Advance the actual cursor to the end of the macro call
+                            // which is the length of the identifier + 1 for the %
+                            self.cursor.advance_by(advance_by);
+                        }
+                    }
+                }
+                ';' if parens_nesting == 0 => {
+                    // Found the end of the comment
+                    // Clear the checkpoint
+                    self.clear_checkpoint();
+
+                    // Emit the comment token
+                    self.emit_token(
+                        TokenChannel::COMMENT,
+                        TokenType::PredictedCommentStat,
+                        Payload::None,
+                    );
+
+                    // Report that we lexed a token
+                    return true;
+                }
+                _ => {}
+            }
+        }
+
+        // EOF reached without a closing semicolon, which is fine
+        // Clear the checkpoint
+        self.clear_checkpoint();
+
+        // Emit the comment token
+        self.emit_token(
+            TokenChannel::COMMENT,
+            TokenType::PredictedCommentStat,
+            Payload::None,
+        );
+
+        // Report that we lexed a token
+        true
+    }
+
     #[allow(clippy::too_many_lines)]
     fn lex_symbols(&mut self, c: char) {
         match c {
             '*' => {
                 self.cursor.advance();
-                match (self.cursor.peek(), self.cursor.peek_next()) {
-                    (Some('\'' | '"'), ';') => {
-                        self.cursor.advance();
-                        self.cursor.advance();
-                        self.emit_token(TokenChannel::HIDDEN, TokenType::TermQuote, Payload::None);
-                    }
-                    (Some('*'), _) => {
-                        self.cursor.advance();
-                        self.emit_token(TokenChannel::DEFAULT, TokenType::STAR2, Payload::None);
-                    }
-                    _ => {
-                        self.emit_token(TokenChannel::DEFAULT, TokenType::STAR, Payload::None);
+
+                if !self.lex_predicted_comment() {
+                    match self.cursor.peek() {
+                        Some('*') => {
+                            self.cursor.advance();
+                            self.emit_token(TokenChannel::DEFAULT, TokenType::STAR2, Payload::None);
+                        }
+                        _ => {
+                            self.emit_token(TokenChannel::DEFAULT, TokenType::STAR, Payload::None);
+                        }
                     }
                 }
             }
@@ -3645,8 +3792,12 @@ impl<'src> Lexer<'src> {
 
         // Pass a clone of the actual cursor to perform lookahead,
         // as we are only allowing macro calls and not macro statements
-        let (tok_type, advance_by) = lex_macro_call_stat_or_label(&mut self.cursor.clone())
-            .unwrap_or_else(|err| {
+        let mut la_cursor = self.cursor.clone();
+        // Move past the % to the actual identifier
+        la_cursor.advance();
+
+        let (tok_type, advance_by) =
+            lex_macro_call_stat_or_label(&mut la_cursor).unwrap_or_else(|err| {
                 self.emit_error(err);
                 (TokenTypeMacroCallOrStat::MacroIdentifier, 0)
             });
@@ -3663,7 +3814,9 @@ impl<'src> Lexer<'src> {
                 return MacroKwType::None;
             }
 
-            self.cursor.advance_by(advance_by);
+            // Advance the actual cursor to the end of the macro call
+            // which is the length of the identifier + 1 for the %
+            self.cursor.advance_by(advance_by + 1);
 
             self.dispatch_macro_call_or_stat(tok_type);
 
@@ -3727,6 +3880,10 @@ impl<'src> Lexer<'src> {
 
         // Pass the actual cursor so it will not only be lexed into
         // a token type but also consumed
+
+        // Consume the % before the identifier
+        self.cursor.advance();
+
         let (kw_tok_type, _) =
             lex_macro_call_stat_or_label(&mut self.cursor).unwrap_or_else(|err| {
                 self.emit_error(err);
