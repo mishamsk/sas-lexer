@@ -4,7 +4,7 @@ from time import perf_counter_ns
 
 from sas_lexer import lex_str
 
-PERF_ALL_SAMPLES = os.environ["PERF_ALL_SAMPLES"]
+SAS_LEX_SAMPLES = os.environ["SAS_LEX_SAMPLES"]
 PERF_LARGE_SAMPLE = os.environ["PERF_LARGE_SAMPLE"]
 
 
@@ -17,7 +17,7 @@ def test_wip():
     st = perf_counter_ns()
     file_count = 0
     tokens_count = 0
-    for sas_file in Path(PERF_ALL_SAMPLES).rglob("*.sas"):
+    for sas_file in Path(SAS_LEX_SAMPLES).rglob("*.sas"):
         sas_file.read_text(errors="replace")
 
     print(f"Plain read from {file_count} files. Elapsed: {(perf_counter_ns() - st) / 1_000_000} ms")
@@ -25,7 +25,7 @@ def test_wip():
     st = perf_counter_ns()
     file_count = 0
     tokens_count = 0
-    for sas_file in Path(PERF_ALL_SAMPLES).rglob("*.sas"):
+    for sas_file in Path(SAS_LEX_SAMPLES).rglob("*.sas"):
         ret = lex_str(sas_file.read_text(errors="replace"))
         file_count += 1
         tokens_count += len(ret)
