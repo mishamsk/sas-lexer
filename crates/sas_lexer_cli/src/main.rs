@@ -1,5 +1,3 @@
-#![allow(clippy::print_stderr, clippy::print_stdout)]
-
 mod antlr;
 mod lex;
 mod print;
@@ -76,6 +74,7 @@ enum Commands {
     },
 }
 
+#[allow(clippy::too_many_lines)]
 fn main() -> io::Result<()> {
     let cli = Cli::parse();
 
@@ -118,10 +117,8 @@ fn main() -> io::Result<()> {
                                     total_lex_duration += durations.lex_duration;
                                     total_gen_tok_vec_duration += durations.gen_tok_vec_duration;
                                 }
-                            } else {
-                                if *print_file_name {
-                                    eprintln!("Failed to read file: {}", entry_path.display());
-                                }
+                            } else if *print_file_name {
+                                eprintln!("Failed to read file: {}", entry_path.display());
                             }
                         }
                     }

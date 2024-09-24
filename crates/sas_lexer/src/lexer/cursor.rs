@@ -27,6 +27,27 @@ impl<'a> Cursor<'a> {
         }
     }
 
+    /// Creates a new cursor at a specific char offset.
+    #[cfg(not(debug_assertions))]
+    pub(super) fn new_at_offset(input: &'a str, char_offset: u32) -> Cursor<'a> {
+        Cursor {
+            chars: input.chars(),
+            char_offset,
+        }
+    }
+
+    /// Creates a new cursor at a specific char offset.
+    ///
+    /// Debug version that also stores the previous char.
+    #[cfg(debug_assertions)]
+    pub(super) fn new_at_offset(input: &'a str, char_offset: u32, prev_char: char) -> Cursor<'a> {
+        Cursor {
+            chars: input.chars(),
+            char_offset,
+            prev_char,
+        }
+    }
+
     pub(super) fn as_str(&self) -> &'a str {
         self.chars.as_str()
     }

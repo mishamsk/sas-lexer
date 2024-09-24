@@ -89,14 +89,14 @@ pub(super) fn lex_and_print(source: &String, print_config: LexPrintConfig) -> Op
 
                 let string_literals_buffer = tok_buffer.string_literals_buffer();
 
-                if print_config.print_tokens && tokens.len() > 0 {
+                if print_config.print_tokens && !tokens.is_empty() {
                     writeln!(lock, "Tokens:").unwrap();
-                    print_tokens(&mut lock, &tokens, &string_literals_buffer, source);
+                    print_tokens(&mut lock, &tokens, string_literals_buffer, source);
                 }
 
-                if print_config.print_errors && errors.len() > 0 {
+                if print_config.print_errors && !errors.is_empty() {
                     writeln!(lock, "Errors:").unwrap();
-                    print_errors(&mut lock, &errors, &tokens, &string_literals_buffer, source);
+                    print_errors(&mut lock, &errors, &tokens, string_literals_buffer, source);
                 }
             }
 
@@ -105,7 +105,7 @@ pub(super) fn lex_and_print(source: &String, print_config: LexPrintConfig) -> Op
             }
 
             if print_config.print_error_totals {
-                if errors.len() > 0 {
+                if errors.is_empty() {
                     if c_int > 0 {
                         println!("Internal errors: {c_int}");
                     }

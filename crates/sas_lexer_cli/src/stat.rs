@@ -100,9 +100,10 @@ fn create_token_df(
     Ok(df
         .clone()
         .lazy()
-        .with_columns([lit(file_id).cast(DataType::UInt32).alias("file_id").into()]))
+        .with_columns([lit(file_id).cast(DataType::UInt32).alias("file_id")]))
 }
 
+#[allow(clippy::cast_possible_truncation)]
 fn gen_stats_inner(output: &Option<PathBuf>, samples: &PathBuf) -> Result<(), PolarsError> {
     let all_files = WalkDir::new(samples)
         .into_iter()
@@ -145,21 +146,27 @@ fn gen_stats_inner(output: &Option<PathBuf>, samples: &PathBuf) -> Result<(), Po
         let mut string_buffer_length = None;
 
         if let Ok(contents) = fs::read_to_string(entry_path) {
-            match safe_lex(&contents, false, false) {
-                Some((tok_buffer, errors, _)) => {
-                    let tokens = tok_buffer.into_resolved_token_vec();
-                    let string_literals_buffer = tok_buffer.string_literals_buffer();
-                    string_buffer_length = Some(string_literals_buffer.len() as u32);
+            // Skip whitespace only files, including empty files
+            if contents.trim().is_empty() {
+                readable = false;
+                lexed = false;
+            } else {
+                match safe_lex(&contents, false, false) {
+                    Some((tok_buffer, errors, _)) => {
+                        let tokens = tok_buffer.into_resolved_token_vec();
+                        let string_literals_buffer = tok_buffer.string_literals_buffer();
+                        string_buffer_length = Some(string_literals_buffer.len() as u32);
 
-                    token_dfs.push(create_token_df(
-                        file_id,
-                        &tokens,
-                        string_literals_buffer,
-                        &contents,
-                    )?);
-                }
-                None => {
-                    lexed = false;
+                        token_dfs.push(create_token_df(
+                            file_id,
+                            &tokens,
+                            string_literals_buffer,
+                            &contents,
+                        )?);
+                    }
+                    None => {
+                        lexed = false;
+                    }
                 }
             }
         } else {
@@ -234,15 +241,10 @@ fn gen_stats_inner(output: &Option<PathBuf>, samples: &PathBuf) -> Result<(), Po
             JoinArgs::new(JoinType::Inner),
         )
         .select([
-            tok_ratio
-                .clone()
-                .min()
-                .floor()
-                .cast(DataType::UInt32)
-                .alias("tok_ratio_min"),
+            tok_ratio.clone().min().round(2).alias("tok_ratio_min"),
             col("name")
                 .sort_by(
-                    [tok_ratio.clone().floor().cast(DataType::UInt32)],
+                    [tok_ratio.clone().round(2)],
                     SortMultipleOptions::default()
                         .with_nulls_last(true)
                         .with_order_descending(false),
@@ -343,6 +345,5 @@ fn gen_stats_inner(output: &Option<PathBuf>, samples: &PathBuf) -> Result<(), Po
 pub(super) fn gen_stats(output: &Option<PathBuf>, samples: &PathBuf) {
     if let Err(err) = gen_stats_inner(output, samples) {
         eprintln!("Failed to generate stats: {err:?}");
-        return;
     }
 }
