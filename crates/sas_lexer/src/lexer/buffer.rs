@@ -112,10 +112,10 @@ pub(super) struct TokenInfo {
 const MIN_CAPACITY: usize = 4;
 
 /// Heursitic for determining an optimal initial capactiy for `line_infos` vector
-const LINE_INFO_CAPACITY_DIVISOR: usize = 88;
+const LINE_INFO_CAPACITY_DIVISOR: usize = 40;
 
 /// Heursitic for determining an optimal initial capactiy for `token_infos` vector
-const TOKEN_INFO_CAPACITY_DIVISOR: usize = 4;
+const TOKEN_INFO_CAPACITY_DIVISOR: usize = 3;
 
 /// Heursitic for determining an optimal initial capactiy for unescaped string literals vector
 /// I didn't do a scientific test of the frequency of quote usage, but between

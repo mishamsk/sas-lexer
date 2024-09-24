@@ -44,7 +44,9 @@ fn benchmark_lex(c: &mut Criterion) {
 
 criterion_group! {
     name = benches;
-    config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
+    config = Criterion::default()
+        .sample_size(60)
+        .with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
     targets = benchmark_lex
 }
 criterion_main!(benches);
