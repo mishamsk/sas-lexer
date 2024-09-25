@@ -1,112 +1,208 @@
-use super::buffer::Payload;
+use std::num::NonZeroUsize;
+
 /// A collection of functions that converts
 /// SAS numeric literals (hex & decimal) to their respective values
-use std::str::FromStr;
+use lexical::{
+    format_is_valid, parse_partial_with_options,
+    Error::{EmptyExponent, Overflow, Underflow},
+    NumberFormatBuilder, ParseFloatOptions, ParseIntegerOptions,
+};
 
-use super::error::ErrorType;
-use super::token_type::TokenType;
+use super::{buffer::Payload, error::ErrorType, token_type::TokenType};
 
-/// Tries to parses a possibly valid SAS number.
-///
-/// # Returns
-///
-/// A tuple with the parsed token and an optional error
-#[allow(clippy::cast_precision_loss)]
-pub(super) fn parse_numeric(number: &str) -> ((TokenType, Payload), Option<ErrorType>) {
-    let Ok(fvalue) = f64::from_str(number) else {
-        return (
-            (TokenType::IntegerLiteral, Payload::Integer(0)),
-            Some(ErrorType::InvalidNumericLiteral),
-        );
-    };
+/// The default SAS numeric parser format, works for integers and floats
+const SAS_DECIMAL: u128 = NumberFormatBuilder::new()
+    // Disable leading sign, since we handle it separately
+    .no_positive_mantissa_sign(true)
+    // Disable all special numbers, such as Nan and Inf.
+    .no_special(true)
+    .build();
 
-    // See if it is an integer
-    if fvalue.fract() == 0.0 && fvalue.abs() < u64::MAX as f64 {
-        // For integers we need to emit different tokens, depending on
-        // the presence of the dot as we use different token types.
-        // The later is unfortunatelly necesasry due to SAS numeric formats
-        // context sensitivity and no way of disambiguating between a number `1.`
-        // and the same numeric format `1.`
+const SAS_HEX: u128 = NumberFormatBuilder::rebuild(NumberFormatBuilder::hexadecimal())
+    // Disable all special numbers, such as Nan and Inf.
+    .no_special(true)
+    .build();
 
-        // Leading 0 - we can emit the integer token, can't be a format
-        #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-        let payload = Payload::Integer(fvalue as u64);
+const SAS_PARSE_FLOAT_OPTIONS: ParseFloatOptions = ParseFloatOptions::new();
+const SAS_PARSE_INT_OPTIONS: ParseIntegerOptions = ParseIntegerOptions::new();
 
-        // Unwrap here is safe, as we know the length is > 0
-        // but we still provide default value to avoid panics
-        match *number.as_bytes().first().unwrap_or(&b'_') {
-            b'0' => ((TokenType::IntegerLiteral, payload), None),
-            _ => {
-                if number.contains('.') {
-                    ((TokenType::IntegerDotLiteral, payload), None)
-                } else {
-                    ((TokenType::IntegerLiteral, payload), None)
-                }
-            }
+pub(super) struct NumericParserResult {
+    /// The parsed token
+    pub(super) token: (TokenType, Payload),
+    /// The length of the parsed token
+    /// in bytes (not characters).
+    pub(super) length: NonZeroUsize,
+    /// An optional error (e.g. overflow)
+    pub(super) error: Option<ErrorType>,
+}
+
+fn _try_parse_integer(byte_view: &[u8]) -> Option<NumericParserResult> {
+    match parse_partial_with_options::<u64, _, SAS_DECIMAL>(byte_view, &SAS_PARSE_INT_OPTIONS) {
+        Ok((value, len)) => {
+            // If len is 0, it means that the number was not parsed
+            NonZeroUsize::new(len).map(|length| NumericParserResult {
+                token: (TokenType::IntegerLiteral, Payload::Integer(value)),
+                length,
+                error: None,
+            })
         }
-    } else {
-        // And for floats, similarly it is important whether it
-        // it was created from scientific notation or not, but
-        // this function only handles the decimal literals, so
-        // no need to check for that
-        ((TokenType::FloatLiteral, Payload::Float(fvalue)), None)
+        // Anything else, including overflow means it can't be parsed as an u64 integer
+        Err(_) => None,
     }
 }
 
-/// Parses a possibly valid SAS HEX number (sans the trailing `x` or `X`).
-///
-/// # Returns
-///
-/// A tuple with the parsed token and an optional error
-#[allow(clippy::cast_precision_loss)]
-pub(super) fn parse_numeric_hex_str(number: &str) -> ((TokenType, Payload), Option<ErrorType>) {
-    // Try parse as u64. SAS only allows up-to 8 bytes (16 HEX digits)
-    // for HEX literals, with the first one capped at 9F, so it is
-    // slightly less then +/-(2^63 - 1) and theoretically can't overflow
-    // but who knows what SAS users can come up with;)
-    match u64::from_str_radix(number, 16) {
-        Ok(value) => ((TokenType::IntegerLiteral, Payload::Integer(value)), None),
-        Err(e) => {
-            match e.kind() {
-                std::num::IntErrorKind::NegOverflow | std::num::IntErrorKind::PosOverflow => {
-                    // Wow, very big number;) Ok
+fn _try_parse_float(byte_view: &[u8]) -> Option<NumericParserResult> {
+    match parse_partial_with_options::<f64, _, SAS_DECIMAL>(byte_view, &SAS_PARSE_FLOAT_OPTIONS) {
+        Ok((value, len)) => {
+            // For floats, it is important whether it
+            // it was created from scientific notation or not,
+            // due to ambiguity in formats parsing
 
-                    // Check length, SAS itself wil not allow more than 16 HEX digits
-                    let (emit_error, truncated) = if number.len() > 16 {
-                        // Emit an error, but truncate the number to parse something
+            #[allow(clippy::indexing_slicing)]
+            // SAFETY: parser returns the length of the parsed number, so the slice is valid
+            let token_type = if byte_view[..len].contains(&b'e') || byte_view[..len].contains(&b'E')
+            {
+                TokenType::FloatExponentLiteral
+            } else {
+                TokenType::FloatLiteral
+            };
 
-                        // Unwrap here is safe really, as we know the length is > 16
-                        // but we still provide default value to avoid panics
-                        (true, number.get(..16).unwrap_or(number))
-                    } else {
-                        (false, number)
-                    };
+            // If len is 0, it means that the number was not parsed
+            NonZeroUsize::new(len).map(|length| NumericParserResult {
+                token: (token_type, Payload::Float(value)),
+                length,
+                error: None,
+            })
+        }
+        Err(Overflow(_) | Underflow(_)) => {
+            // Should not happen in real life, but just in case.
+            // We need to calculate the length of the number to "consume" it
+            let mut seen_dot = false;
 
-                    // This must work! We truncated the number to 16 HEX digits
-                    let int_vale = u64::from_str_radix(truncated, 16)
-                        .expect("The truncated number should be valid HEX number");
-
-                    // Convert to f64 and apply the sign
-                    let fvalue = int_vale as f64;
-
-                    if emit_error {
-                        return (
-                            (TokenType::FloatLiteral, Payload::Float(int_vale as f64)),
-                            Some(ErrorType::InvalidNumericLiteral),
-                        );
+            let len = byte_view
+                .iter()
+                .map(|&c| {
+                    if c == b'.' {
+                        if seen_dot {
+                            // Effectively break the loop
+                            return b'_';
+                        }
+                        seen_dot = true;
                     }
 
-                    ((TokenType::FloatLiteral, Payload::Float(fvalue)), None)
+                    c
+                })
+                .position(|c| !c.is_ascii_digit() && c != b'.')
+                .unwrap_or(byte_view.len());
+
+            // If len is 0, it means that the number was not parsed
+            NonZeroUsize::new(len).map(|length| NumericParserResult {
+                token: (TokenType::FloatLiteral, Payload::Float(0.0)),
+                length,
+                error: Some(ErrorType::InvalidNumericLiteral),
+            })
+        }
+        Err(EmptyExponent(len)) => {
+            // Realistically len can't be 0 here, but type-safety...
+            NonZeroUsize::new(len).map(|length| NumericParserResult {
+                token: (TokenType::FloatLiteral, Payload::Float(0.0)),
+                length,
+                error: Some(ErrorType::InvalidNumericLiteral),
+            })
+        }
+        // Anything else means not a kind of error we recognize
+        Err(_) => None,
+    }
+}
+
+/// Tries to parses a possibly valid SAS number from the source str.
+///
+/// The function will try to parse the number as an u64 integer and an f64 float,
+/// based on the `try_integer` and `try_float` flags.
+///
+/// Overflowing integers will be parsed as floats. Leading `+` sign is not
+/// allowed explicitly by this function, and the leading `-` is not supposed
+/// to be present in the source string.
+pub(super) fn try_parse_decimal(
+    source: &str,
+    try_integer: bool,
+    try_float: bool,
+) -> Option<NumericParserResult> {
+    debug_assert!(format_is_valid::<SAS_DECIMAL>());
+
+    let byte_view = source.as_bytes();
+
+    let int_result = if try_integer {
+        _try_parse_integer(byte_view)
+    } else {
+        None
+    };
+
+    let float_result = if try_float {
+        _try_parse_float(byte_view)
+    } else {
+        None
+    };
+
+    match (int_result, float_result) {
+        (Some(int_result), Some(float_result)) => {
+            // If both are present, we need to compare the lengths
+            // to see which one is longer
+            if int_result.length >= float_result.length {
+                Some(int_result)
+            } else {
+                Some(float_result)
+            }
+        }
+        (Some(int_result), None) => Some(int_result),
+        (None, Some(float_result)) => Some(float_result),
+        // None of the parsers succeeded
+        (None, None) => None,
+    }
+}
+
+/// Parses a possibly valid SAS HEX number from the source str (sans the trailing `x` or `X`).
+///
+/// By default tries to parse as u64. SAS only allows up-to 8 bytes (16 HEX digits)
+/// for HEX literals, with the first one capped at 9F, so it is
+/// slightly less then +/-(2^63 - 1) and theoretically can't overflow.
+/// But who knows what SAS users can come up with;) =>
+/// we revert to f64 if the number is too big, but will return an error
+/// along with the token, since this would be a SAS error.
+pub(super) fn try_parse_hex_integer(source: &str) -> Option<NumericParserResult> {
+    debug_assert!(format_is_valid::<SAS_HEX>());
+
+    let byte_view = source.as_bytes();
+
+    match parse_partial_with_options::<u64, _, SAS_HEX>(byte_view, &SAS_PARSE_INT_OPTIONS) {
+        Ok((value, len)) => {
+            // If len is 0, it means that the number was not parsed
+            NonZeroUsize::new(len).map(|length| NumericParserResult {
+                token: (TokenType::IntegerLiteral, Payload::Integer(value)),
+                length,
+                error: None,
+            })
+        }
+        Err(Overflow(_)) => {
+            match parse_partial_with_options::<f64, _, SAS_HEX>(byte_view, &SAS_PARSE_FLOAT_OPTIONS)
+            {
+                Ok((value, len)) => {
+                    // Len can't be possibly 0 here, as we already tried to parse as u64 and
+                    // it failed with overflow (meaning the number is too big but still valid).
+                    // But type-safety...
+                    NonZeroUsize::new(len).map(|length| NumericParserResult {
+                        token: (TokenType::FloatLiteral, Payload::Float(value)),
+                        length,
+                        error: Some(ErrorType::InvalidNumericLiteral),
+                    })
                 }
                 _ => {
-                    // This is an internal error if called from regular lexer
-                    // or an invalid HEX literal when called from the macro eval lexer
-                    (
-                        (TokenType::IntegerLiteral, Payload::Integer(0)),
-                        Some(ErrorType::InternalErrorFailedToParseHexLiteral),
-                    )
+                    // This should not happen in real life (a HEX literal too big for f64?)
+                    None
                 }
             }
         }
+        // Anything else means not a HEX number
+        Err(_) => None,
     }
 }

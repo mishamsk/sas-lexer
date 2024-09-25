@@ -639,22 +639,25 @@ fn test_char_format(#[case] contents: &str, #[case] expected_token: Vec<impl Tok
 // Decimal notation
 #[case::int1("1", (TokenType::IntegerLiteral, 1))]
 #[case::int001("001", (TokenType::IntegerLiteral, 1))]
-#[case::int1_dot("1.", (TokenType::IntegerDotLiteral, 1))]
-#[case::int_dot_0(".0", (TokenType::IntegerDotLiteral, 0))]
-#[case::int1_dot00("1.00", (TokenType::IntegerDotLiteral, 1))]
-#[case::int01_dot("01.", (TokenType::IntegerLiteral, 1))]
-#[case::int01_dot00("01.00", (TokenType::IntegerLiteral, 1))]
+#[case::int1_dot("1.", (TokenType::FloatLiteral, 1.))]
+#[case::int_dot_0(".0", (TokenType::FloatLiteral, 0.))]
+#[case::int1_dot00("1.00", (TokenType::FloatLiteral, 1.))]
+#[case::int01_dot("01.", (TokenType::FloatLiteral, 1.))]
+#[case::int01_dot00("01.00", (TokenType::FloatLiteral, 1.))]
 // one more than u64::MAX
-#[case::i64_overlow("18446744073709551616", (TokenType::FloatLiteral, 18446744073709551616.0))]
+#[case::u64_overlow("18446744073709551616", (TokenType::FloatLiteral, 18446744073709551616.0))]
 // Hexadecimal notation
 #[case::hex("02Ax", (TokenType::IntegerLiteral, 42))]
 #[case::hex_one_digit("9X", (TokenType::IntegerLiteral, 9))]
 // Scientific notation
-#[case::sci("1e3", (TokenType::FloatLiteral, 1000.0))]
-#[case::sci_plus("1E+3", (TokenType::FloatLiteral, 1000.0))]
-#[case::sci_minus("1e-3", (TokenType::FloatLiteral, 0.001))]
-#[case::sci_dot("4.2e3", (TokenType::FloatLiteral, 4200.0))]
-#[case::sci_dot_only(".1E3", (TokenType::FloatLiteral, 100.0))]
+#[case::sci("1e3", (TokenType::FloatExponentLiteral, 1000.0))]
+#[case::sci_plus("1E+3", (TokenType::FloatExponentLiteral, 1000.0))]
+#[case::sci_minus("1e-3", (TokenType::FloatExponentLiteral, 0.001))]
+#[case::sci_dot("4.2e3", (TokenType::FloatExponentLiteral, 4200.0))]
+#[case::sci_dot_only(".1E3", (TokenType::FloatExponentLiteral, 100.0))]
+#[case::sci_dot_only_no_decimal("1.E3", (TokenType::FloatExponentLiteral, 1000.0))]
+// Almost ambiguous cases
+#[case::sci_or_hex("1E1", (TokenType::FloatExponentLiteral, 10.0))]
 fn test_numeric_literal(#[case] contents: &str, #[case] expected_token: impl TokenTestCase) {
     assert_lexing(contents, vec![expected_token], NO_ERRORS);
 }
@@ -665,13 +668,13 @@ fn test_numeric_literal(#[case] contents: &str, #[case] expected_token: impl Tok
 #[rstest]
 // Decimal notation
 #[case::int001_minus("001", ("001", TokenType::IntegerLiteral, Payload::Integer(1)))]
-#[case::int1_minus_dot("1.", ("1.", TokenType::IntegerDotLiteral, Payload::Integer(1)))]
-#[case::int01_minus_dot("01.", ("01.", TokenType::IntegerLiteral, Payload::Integer(1)))]
+#[case::int1_minus_dot("1.", ("1.", TokenType::FloatLiteral, Payload::Float(1.)))]
+#[case::int01_minus_dot("01.", ("01.", TokenType::FloatLiteral, Payload::Float(1.)))]
 #[case::neg_dec_only(".1", (".1", TokenType::FloatLiteral, Payload::Float(0.1)))]
 #[case::hex_max("9ffFFffFFffFFffFx", ("9ffFFffFFffFFffFx", TokenType::IntegerLiteral, Payload::Integer(11529215046068469759)))]
-#[case::sci_neg("1E3", ("1E3", TokenType::FloatLiteral, Payload::Float(1000.0)))]
-#[case::sci_neg_minus("1E-3", ("1E-3", TokenType::FloatLiteral, Payload::Float(0.001)))]
-#[case::sci_neg_dot_only(".1E3", (".1E3", TokenType::FloatLiteral, Payload::Float(100.0)))]
+#[case::sci_neg("1E3", ("1E3", TokenType::FloatExponentLiteral, Payload::Float(1000.0)))]
+#[case::sci_neg_minus("1E-3", ("1E-3", TokenType::FloatExponentLiteral, Payload::Float(0.001)))]
+#[case::sci_neg_dot_only(".1E3", (".1E3", TokenType::FloatExponentLiteral, Payload::Float(100.0)))]
 fn test_numeric_literal_with_leading_sign(
     #[case] contents: &str,
     #[case] expected_token: (&str, TokenType, Payload),
@@ -689,11 +692,11 @@ fn test_numeric_literal_with_leading_sign(
 
 // Makes sure that traiing sings are not causing erros in scientific notation
 #[rstest]
-#[case::sci("1e3", (TokenType::FloatLiteral, 1000.0))]
-#[case::sci_plus("1E+3", (TokenType::FloatLiteral, 1000.0))]
-#[case::sci_minus("1e-3", (TokenType::FloatLiteral, 0.001))]
-#[case::sci_dot("4.2e3", (TokenType::FloatLiteral, 4200.0))]
-#[case::sci_dot_only(".1E3", (TokenType::FloatLiteral, 100.0))]
+#[case::sci("1e3", (TokenType::FloatExponentLiteral, 1000.0))]
+#[case::sci_plus("1E+3", (TokenType::FloatExponentLiteral, 1000.0))]
+#[case::sci_minus("1e-3", (TokenType::FloatExponentLiteral, 0.001))]
+#[case::sci_dot("4.2e3", (TokenType::FloatExponentLiteral, 4200.0))]
+#[case::sci_dot_only(".1E3", (TokenType::FloatExponentLiteral, 100.0))]
 fn test_scientific_numeric_literal_with_suffix(
     #[case] contents: &str,
     #[case] expected_token: (TokenType, f64),
@@ -718,7 +721,7 @@ fn test_scientific_numeric_literal_with_suffix(
 #[case(".1e", (TokenType::FloatLiteral, 0.0), ErrorType::InvalidNumericLiteral)]
 #[case(".1E", (TokenType::FloatLiteral, 0.0), ErrorType::InvalidNumericLiteral)]
 #[case("02A", (TokenType::IntegerLiteral, 42), ErrorType::UnterminatedHexNumericLiteral)]
-#[case("9ffFFffFFffFFffF123AFx", (TokenType::FloatLiteral, 1.152921504606847e19), ErrorType::InvalidNumericLiteral)]
+#[case("9ffFFffFFffFFffF123AFx", (TokenType::FloatLiteral, 1.2089258196146292e25), ErrorType::InvalidNumericLiteral)]
 fn test_numeric_literal_error_recovery(
     #[case] contents: &str,
     #[case] expected_token: impl TokenTestCase,
@@ -2233,6 +2236,15 @@ fn test_macro_strings_with_mnemonics_eval_expr(#[case] op_str: &str) {
         ("3.4", TokenType::MacroString, Payload::None),
     ]
 )]
+#[case::looks_like_but_not_integer("12s ~= 01m3", 
+    vec![
+        ("12s", TokenType::MacroString, Payload::None),
+        (" ", TokenType::WS, Payload::None),            
+        ("~=", TokenType::NE, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("01m3", TokenType::MacroString, Payload::None),
+    ]
+)]
 #[case::hex_integer_literals("0FFx < 9ffX",
     vec![
         ("0FFx", TokenType::IntegerLiteral, Payload::Integer(255)),
@@ -2242,9 +2254,9 @@ fn test_macro_strings_with_mnemonics_eval_expr(#[case] op_str: &str) {
         ("9ffX", TokenType::IntegerLiteral, Payload::Integer(2559)),        
     ]
 )]
-#[case::not_hex_integer_literals("0_FFx eq fffX",
+#[case::not_hex_integer_literals("0F_Fx eq fffX",
     vec![
-        ("0_FFx", TokenType::MacroString, Payload::None),
+        ("0F_Fx", TokenType::MacroString, Payload::None),
         (" ", TokenType::WS, Payload::None),            
         ("eq", TokenType::KwEQ, Payload::None),
         (" ", TokenType::WS, Payload::None),
@@ -2377,9 +2389,9 @@ fn test_macro_eval_expr(
         ("9ffX", TokenType::IntegerLiteral, Payload::Integer(2559)),        
     ]
 )]
-#[case::not_hex_integer_literals("0_FFx eq fffX",
+#[case::not_hex_integer_literals("0F_Fx eq fffX",
     vec![
-        ("0_FFx", TokenType::MacroString, Payload::None),
+        ("0F_Fx", TokenType::MacroString, Payload::None),
         (" ", TokenType::WS, Payload::None),            
         ("eq", TokenType::KwEQ, Payload::None),
         (" ", TokenType::WS, Payload::None),
