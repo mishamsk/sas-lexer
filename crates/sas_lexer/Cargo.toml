@@ -17,6 +17,7 @@ serde = { workspace = true, features = ["derive"], optional = true }
 serde_repr = { version = "0.1.19", optional = true }
 strum = { workspace = true }
 unicode-ident = "1.0.12"
+lexical = { version = "7.0.2", default-features = false, features = ["std", "power-of-two", "parse-floats", "parse-integers", "format"] }
 
 [dev-dependencies]
 criterion = { workspace = true, features = ["html_reports"] }

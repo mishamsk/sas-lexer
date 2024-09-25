@@ -88,12 +88,9 @@ pub enum TokenType {
     KwOR,           // OR
     KwNOT,          // NOT
     IntegerLiteral, // 42
-    // 42., 42.000 - this is seprate due to ambiguity with numeric formats
-    // but not 042. or [-/+]42. because width in the format can't be 0 and can't be
-    // preceded by a sign
-    IntegerDotLiteral,
-    FloatLiteral,             // 42.1, .42
-    FloatExponentLiteral,     // 42.1e[+,-,]1 - separate due to ambiguity with numeric formats
+    FloatLiteral,   // 42.1, .42
+    // separate due to format ambiguity with numeric formats
+    FloatExponentLiteral,     // 42.1e[+,-,]1
     StringLiteral,            // 'string'
     BitTestingLiteral,        // 'stuff'b
     DateLiteral,              // 'stuff'd

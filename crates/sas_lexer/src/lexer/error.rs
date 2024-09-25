@@ -85,8 +85,6 @@ pub enum ErrorType {
     InternalErrorUnexpectedTokenType,
     #[strum(message = "Unexpected mode stack")]
     InternalErrorUnexpectedModeStack,
-    #[strum(message = "Failed to parse HEX literal")]
-    InternalErrorFailedToParseHexLiteral,
     #[strum(message = "Missing EOF token in buffer")]
     InternalErrorMissingEOFToken,
 }

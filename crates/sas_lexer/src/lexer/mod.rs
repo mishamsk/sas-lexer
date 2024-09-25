@@ -22,14 +22,14 @@ use lexer_mode::{
     MacroEvalNextArgumentMode, MacroEvalNumericMode,
 };
 
-use numeric::{parse_numeric, parse_numeric_hex_str};
+use numeric::{try_parse_decimal, try_parse_hex_integer, NumericParserResult};
 use r#macro::{
     is_macro_amp, is_macro_eval_logical_op, is_macro_eval_mnemonic, is_macro_eval_quotable_op,
     is_macro_percent, is_macro_quote_call_tok_type, is_macro_stat, is_macro_stat_tok_type,
     lex_macro_call_stat_or_label,
 };
 use sas_lang::is_valid_sas_name_start;
-use std::{cmp::min, str::FromStr};
+use std::{cmp::min, num::NonZeroUsize};
 use text::{ByteOffset, CharOffset};
 use token_type::{
     parse_keyword, MacroKwType, TokenType, TokenTypeMacroCallOrStat, MAX_KEYWORDS_LEN,
@@ -1058,39 +1058,17 @@ impl<'src> Lexer<'src> {
                     && macro_string.as_bytes()[0].is_ascii_digit()
                 {
                     // Try hex
-                    let ((tok_type, payload), error) = parse_numeric_hex_str(
+                    match try_parse_hex_integer(
                         macro_string.get(..macro_string.len() - 1).unwrap_or(""),
-                    );
-
-                    if error.is_none() {
-                        self.emit_token(TokenChannel::DEFAULT, tok_type, payload);
-                    } else {
-                        // Emit as macro string
-                        self.emit_token(
-                            TokenChannel::DEFAULT,
-                            TokenType::MacroString,
-                            Payload::None,
-                        );
-                    };
-                } else {
-                    // Try integer/float depending on the flag
-                    let ((tok_type, payload), error) = parse_numeric(macro_string);
-
-                    if error.is_none() {
-                        match tok_type {
-                            TokenType::IntegerLiteral | TokenType::IntegerDotLiteral => {
-                                // We do not care for the DotIntegerLiteral version here
-                                // as format may not be in this context
-                                self.emit_token(
-                                    TokenChannel::DEFAULT,
-                                    TokenType::IntegerLiteral,
-                                    payload,
-                                );
-                            }
-                            TokenType::FloatLiteral if macro_eval_flags.float_mode() => {
+                    ) {
+                        Some(NumericParserResult {
+                            token: (tok_type, payload),
+                            length,
+                            error,
+                        }) => {
+                            if error.is_none() && length.get() == macro_string.len() - 1 {
                                 self.emit_token(TokenChannel::DEFAULT, tok_type, payload);
-                            }
-                            TokenType::FloatLiteral => {
+                            } else {
                                 // Emit as macro string
                                 self.emit_token(
                                     TokenChannel::DEFAULT,
@@ -1098,8 +1076,28 @@ impl<'src> Lexer<'src> {
                                     Payload::None,
                                 );
                             }
-                            _ => {
-                                // Not a number, emit as macro string
+                        }
+                        None => {
+                            // Emit as macro string
+                            self.emit_token(
+                                TokenChannel::DEFAULT,
+                                TokenType::MacroString,
+                                Payload::None,
+                            );
+                        }
+                    };
+                } else {
+                    // Try integer/float depending on the flag
+                    match try_parse_decimal(macro_string, true, macro_eval_flags.float_mode()) {
+                        Some(NumericParserResult {
+                            token: (tok_type, payload),
+                            length,
+                            error,
+                        }) => {
+                            if error.is_none() && length.get() == macro_string.len() {
+                                self.emit_token(TokenChannel::DEFAULT, tok_type, payload);
+                            } else {
+                                // Emit as macro string
                                 self.emit_token(
                                     TokenChannel::DEFAULT,
                                     TokenType::MacroString,
@@ -1107,13 +1105,14 @@ impl<'src> Lexer<'src> {
                                 );
                             }
                         }
-                    } else {
-                        // Emit as macro string
-                        self.emit_token(
-                            TokenChannel::DEFAULT,
-                            TokenType::MacroString,
-                            Payload::None,
-                        );
+                        None => {
+                            // Emit as macro string
+                            self.emit_token(
+                                TokenChannel::DEFAULT,
+                                TokenType::MacroString,
+                                Payload::None,
+                            );
+                        }
                     };
                 }
             } else {
@@ -3166,214 +3165,126 @@ impl<'src> Lexer<'src> {
         true
     }
 
+    #[allow(clippy::cast_possible_truncation)]
     fn lex_numeric_literal(&mut self, seen_dot: bool) {
-        debug_assert!(self.cursor.peek().map_or(false, |c| c.is_ascii_digit()));
+        debug_assert!(self
+            .cursor
+            .peek()
+            .map_or(false, |c| c.is_ascii_digit() || c == '.'));
         // First, SAS supports 3 notations for numeric literals:
         // 1. Standard decimal notation (base 10)
         // 2. Hexadecimal notation (base 16)
-        // 3. Scientific notation
+        // 3. Scientific notation (base 10)
 
-        // For HEX notation, the number must start with a number
+        // For HEX notation, the string must start with a number (0-9)
         // and can have up-to 16 total HEX digits (including the starting one)
         // due to 8 bytes of storage for a number in SAS. It must be
         // followed by an `x` or `X` character
 
-        // consume the first digit
-        self.cursor.advance();
+        let source_view = self.cursor.as_str();
 
-        // Now we need to disambiguate between the notations
-        let mut expect_hex = !seen_dot;
-        let mut expect_dot = !seen_dot;
-        let mut expect_exp = true;
-        let mut seen_num_after_exp = false;
+        // Now we need to try parsing viable notations and
+        // later disambiguate between them
 
-        loop {
-            match self.cursor.peek() {
-                Some('0'..='9') => {
-                    // can be any notation
-                    self.cursor.advance();
+        let hex_result = if seen_dot {
+            // We have seen a dot, so this can't be a HEX notation
+            None
+        } else {
+            try_parse_hex_integer(source_view)
+        };
 
-                    // If we have seen the E, also mark that we have seen a number after it
-                    if !expect_exp {
-                        seen_num_after_exp = true;
-                    }
-                }
-                Some('a'..='d' | 'A'..='D' | 'f' | 'F') if expect_hex => {
-                    // must be HEX notation
-                    self.lex_numeric_hex_literal();
-                    return;
-                }
-                Some('x' | 'X') if expect_hex => {
-                    // complete literal in HEX notation
-                    // do not advance, such that the `x` is consumed by the HEX parser
-                    self.lex_numeric_hex_literal();
-                    return;
-                }
-                Some('e' | 'E') => {
-                    if !expect_hex {
-                        // If we already seen the dot and now got E => Scientific notation
-                        // consume as lex_numeric_exp_literal() assumes it is working past the E
-                        self.cursor.advance();
-                        self.lex_numeric_exp_literal(seen_num_after_exp);
-                        return;
-                    }
+        let decimal_result = try_parse_decimal(source_view, !seen_dot, true);
 
-                    if !expect_exp {
-                        // If we already seen the E => HEX notation
-                        self.lex_numeric_hex_literal();
-                        return;
-                    }
+        let mut check_trailing_hex_terminator = false;
 
-                    self.cursor.advance();
-                    // now we know it can't be standard notation and we can't have second
-                    // E for exponent. This flag helps with both
-                    expect_exp = false;
-                    // and we can't have a dot after E in neither HEX nor scientific notation
-                    expect_dot = false;
-                }
-                Some('.') => {
-                    if expect_dot {
-                        // Can be standard decimal or scientific notation
-                        // but not HEX now
-                        self.cursor.advance();
-                        expect_hex = false;
-                        expect_dot = false;
-                        continue;
-                    }
-
-                    // Second dot, or dot after E - means we looking past the literal
-                    if expect_exp {
-                        self.lex_decimal_literal();
+        let result = match (decimal_result, hex_result) {
+            (Some(decimal_result), Some(hex_result)) => {
+                // If both are present, we need to compare the lengths
+                // to see which one is longer. And if tied, also check for trailing x/X
+                if decimal_result.length > hex_result.length {
+                    // Clearly decimal as it is longer (x/X can't even be part of the decimal)
+                    decimal_result
+                } else if hex_result.length > decimal_result.length {
+                    // Clearly hex as it is longer
+                    check_trailing_hex_terminator = true;
+                    hex_result
+                } else {
+                    // Tied lengths, we need to check for trailing x/X
+                    if [b'x', b'X'].contains(
+                        source_view
+                            .as_bytes()
+                            .get(hex_result.length.get())
+                            .unwrap_or(&b'_'),
+                    ) {
+                        // We actually checked for trailing x/X here,
+                        // but to keep the code simpler and re-use shared
+                        // logic, we set a flag to re-check and consume it later
+                        check_trailing_hex_terminator = true;
+                        hex_result
                     } else {
-                        // This can happen only in the case of `NNNe.` which can be considered
-                        // either a HEX missing X (user intended `NNNex`), or scientific notation
-                        // with missing exponent. For simplicity sake we call the scientific parser
-                        // function which will report error and recover.
-                        self.lex_numeric_exp_literal(seen_num_after_exp);
+                        decimal_result
                     }
-
-                    return;
-                }
-                _ => {
-                    if expect_exp {
-                        // Must be a standard decimal notation, since we
-                        // haven't seen the E yet and definitely any other HEX digits
-                        // as they would immediately trigger the HEX notation
-                        self.lex_decimal_literal();
-                    } else {
-                        // e.g. `NNNeNNN `
-                        self.lex_numeric_exp_literal(seen_num_after_exp);
-                    }
-
-                    return;
                 }
             }
+            (Some(decimal_result), None) => decimal_result,
+            (None, Some(hex_result)) => {
+                // We need to check for trailing x/X
+                check_trailing_hex_terminator = true;
+                hex_result
+            }
+            (None, None) => {
+                // This may happen if the source has invalid numeric that `lexical`
+                // parser catches and we do not. Thus we emmitate a result by
+                // assuming that all numbers are eaten
+                let len = source_view
+                    .as_bytes()
+                    .iter()
+                    .position(|c| !c.is_ascii_digit())
+                    .unwrap_or(source_view.len());
+
+                NonZeroUsize::new(len).map_or_else(
+                    // SAFETY: len can't be 0, as we have at least one digit
+                    || unreachable!(),
+                    |length| NumericParserResult {
+                        token: (TokenType::FloatLiteral, Payload::Float(0.0)),
+                        length,
+                        error: Some(ErrorType::InvalidNumericLiteral),
+                    },
+                )
+            }
+        };
+
+        // First advance by the length of the parsed number
+        // SAFETY: we can't have length > u32::MAX
+        self.cursor.advance_by(result.length.get() as u32);
+
+        let mut missing_trailing_x = false;
+
+        // If this is a possible HEX literal, we need to check for the trailing x/X
+        if check_trailing_hex_terminator {
+            if self.cursor.peek().map_or(false, |c| matches!(c, 'x' | 'X')) {
+                // Ok, as expected, we have a trailing x/X. Consume it
+                self.cursor.advance();
+            } else {
+                // We expected a trailing x/X, but it is not there
+                missing_trailing_x = true;
+            }
         }
-    }
 
-    #[allow(clippy::cast_precision_loss)]
-    #[allow(clippy::cast_possible_truncation)]
-    fn lex_decimal_literal(&mut self) {
-        // The way calling logic is done, for regular decimals
-        // we must have consumed the entire literal
-        debug_assert!(!self.cursor.peek().map_or(false, |c| c.is_ascii_digit()));
-
-        let ((tok_type, payload), error) = parse_numeric(self.pending_token_text());
+        // Now emit token
+        let (tok_type, payload) = result.token;
 
         self.emit_token(TokenChannel::DEFAULT, tok_type, payload);
 
-        if let Some(error) = error {
+        // If there was a parsing error, emit it
+        if let Some(error) = result.error {
             self.emit_error(error);
         }
-    }
 
-    /// Consumes the remaining tail of a HEX literal and emits the token
-    fn lex_numeric_hex_literal(&mut self) {
-        #[cfg(debug_assertions)]
-        debug_assert!(self.cursor.prev_char().is_ascii_hexdigit());
-
-        // Eat until the end of the literal (x or X) or identify a missing x/X
-        loop {
-            match self.cursor.peek() {
-                Some('0'..='9' | 'a'..='f' | 'A'..='F') => {
-                    self.cursor.advance();
-                }
-                Some('x' | 'X') => {
-                    // First parse the text, and only then advance - the radix parser
-                    // won't like the trailing x/X
-                    let ((tok_type, payload), error) =
-                        parse_numeric_hex_str(self.pending_token_text());
-
-                    self.cursor.advance();
-
-                    self.emit_token(TokenChannel::DEFAULT, tok_type, payload);
-
-                    if let Some(error) = error {
-                        self.emit_error(error);
-                    }
-
-                    return;
-                }
-                _ => {
-                    // This is an error, incomplete HEX literal
-                    // First parse the number, then emit error(s)
-                    let ((tok_type, payload), error) =
-                        parse_numeric_hex_str(self.pending_token_text());
-
-                    self.emit_token(TokenChannel::DEFAULT, tok_type, payload);
-
-                    if let Some(error) = error {
-                        self.emit_error(error);
-                    }
-
-                    self.emit_error(ErrorType::UnterminatedHexNumericLiteral);
-                    return;
-                }
-            }
+        // And if there was a missing trailing x/X, emit the error
+        if missing_trailing_x {
+            self.emit_error(ErrorType::UnterminatedHexNumericLiteral);
         }
-    }
-
-    fn lex_numeric_exp_literal(&mut self, mut seen_exp_sign_or_num: bool) {
-        #[cfg(debug_assertions)]
-        debug_assert!(matches!(self.cursor.prev_char(), '0'..='9' | 'e' | 'E'));
-
-        loop {
-            match self.cursor.peek() {
-                Some('0'..='9') => {
-                    self.cursor.advance();
-                    seen_exp_sign_or_num = true;
-                }
-                Some('-' | '+') if !seen_exp_sign_or_num => {
-                    self.cursor.advance();
-                    seen_exp_sign_or_num = true;
-                }
-                _ => {
-                    break;
-                }
-            }
-        }
-
-        // Now try to parse the number
-        let number = self.pending_token_text();
-
-        match f64::from_str(number) {
-            Ok(value) => {
-                self.emit_token(
-                    TokenChannel::DEFAULT,
-                    TokenType::FloatLiteral,
-                    Payload::Float(value),
-                );
-            }
-            Err(_) => {
-                self.emit_token(
-                    TokenChannel::DEFAULT,
-                    TokenType::FloatLiteral,
-                    Payload::Float(0.0),
-                );
-
-                self.emit_error(ErrorType::InvalidNumericLiteral);
-            }
-        };
     }
 
     fn lex_predicted_comment(&mut self) -> bool {
@@ -3655,13 +3566,13 @@ impl<'src> Lexer<'src> {
                 }
             }
             '.' => {
-                self.cursor.advance();
-                match self.cursor.peek() {
-                    Some('0'..='9') => {
+                match self.cursor.peek_next() {
+                    '0'..='9' => {
                         // `.N`
                         self.lex_numeric_literal(true);
                     }
                     _ => {
+                        self.cursor.advance();
                         self.emit_token(TokenChannel::DEFAULT, TokenType::DOT, Payload::None);
                     }
                 }
