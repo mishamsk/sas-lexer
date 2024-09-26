@@ -3381,8 +3381,19 @@ impl<'src> Lexer<'src> {
                                 Payload::None,
                             );
 
-                            // Emit the error
-                            self.emit_error(ErrorType::InvalidOrOutOfOrderStatement);
+                            // Emit the error. We are using the `Maybe` variation, since
+                            // there is no guarantee that this is an actual error.
+                            // E.g. the following code is valid:
+                            // ```sas
+                            // data _NULL_;
+                            // a = 1
+                            // %if 1 %then %do;
+                            // * 2
+                            // %let v=works;
+                            // %end;
+                            // ;
+                            // ```
+                            self.emit_error(ErrorType::MaybeInvalidOrOutOfOrderStatement);
 
                             // Report that we lexed a token
                             return true;
