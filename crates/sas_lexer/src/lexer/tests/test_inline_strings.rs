@@ -3468,7 +3468,7 @@ vec![
         (";", TokenType::SEMI),
     ],
     vec![
-        (ErrorType::InvalidOrOutOfOrderStatement, 10)
+        (ErrorType::MaybeInvalidOrOutOfOrderStatement, 10)
     ]
 )]
 fn test_comment_prediction(

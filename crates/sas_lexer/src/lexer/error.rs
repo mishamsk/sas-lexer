@@ -40,6 +40,10 @@ pub enum ErrorType {
     CharExpressionInEvalContext,
     #[strum(message = "ERROR 180-322: Statement is not valid or it is used out of proper order.")]
     InvalidOrOutOfOrderStatement,
+    #[strum(
+        message = "Possible ERROR 180-322: Statement is not valid or it is used out of proper order."
+    )]
+    MaybeInvalidOrOutOfOrderStatement,
     #[strum(message = "ERROR: Expecting a variable name after %LET.")]
     InvalidMacroLetVarName,
     #[strum(message = "ERROR: The macro variable name is either all blank or missing.")]
