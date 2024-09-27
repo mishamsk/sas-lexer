@@ -1291,6 +1291,159 @@ fn test_macro_call(#[case] contents: &str, #[case] expected_token: Vec<impl Toke
     assert_lexing(contents, expected_token, NO_ERRORS);
 }
 
+/// Test multiple cases where what looks like a possible macro call argument name
+/// is actually a macro call argument value. As well as valid cases of dynamic/composite
+/// macro call argument names
+#[rstest]
+// First the cases that look like arg name, but they are not.
+// Special care given to WS that should be lexed as macro string!
+#[case::not_arg_name_not_ident(vec![
+    ("1a =c", TokenType::MacroString),
+])]
+#[case::not_arg_name_ident_ws_in_between(vec![
+    ("a b =c", TokenType::MacroString),
+])]
+#[case::not_arg_name_ident_comment_in_between(vec![
+    ("a", TokenType::MacroString),
+    ("/*c*/", TokenType::CStyleComment),
+    (" b =c", TokenType::MacroString),
+])]
+#[case::not_arg_name_ident_symbol(vec![
+    ("a() =c", TokenType::MacroString),
+])]
+#[case::not_arg_name_ident_start_assign(vec![
+    ("= c", TokenType::MacroString),
+])]
+#[case::not_arg_name_ident_plus_lit(vec![
+    ("a", TokenType::MacroString),
+    ("'s'", TokenType::StringLiteral),
+    (" =c", TokenType::MacroString),
+])]
+#[case::not_arg_name_ident_plus_mvar(vec![
+    ("a ", TokenType::MacroString),
+    ("&m", TokenType::MacroVarExpr),
+    (" =c", TokenType::MacroString),
+])]
+#[case::not_arg_name_mcall_start_pos_no_ws(vec![
+    ("%a", TokenType::MacroIdentifier),
+    (" ", TokenType::WS),
+    ("/*c*/", TokenType::CStyleComment),
+    ("(", TokenType::LPAREN),
+    ("inner_arg", TokenType::MacroString),
+    (")", TokenType::RPAREN),
+    ("rg=c", TokenType::MacroString),
+])]
+#[case::not_arg_name_mcall_start_pos_ws(vec![
+    ("%a", TokenType::MacroIdentifier),
+    (" ", TokenType::WS),
+    ("/*c*/", TokenType::CStyleComment),
+    ("(", TokenType::LPAREN),
+    ("inner_arg", TokenType::MacroString),
+    (")", TokenType::RPAREN),
+    (" rg=c", TokenType::MacroString),
+])]
+#[case::not_arg_name_mcall_mid_pos_no_ws(vec![
+    ("a", TokenType::MacroString),
+    ("%r", TokenType::MacroIdentifier),
+    (" ", TokenType::WS),
+    ("/*c*/", TokenType::CStyleComment),
+    ("(", TokenType::LPAREN),
+    ("inner_arg", TokenType::MacroString),
+    (")", TokenType::RPAREN),
+    ("g=c", TokenType::MacroString),    
+])]
+// Now the cases with valid dynamic macro call argument names.
+// Here trailing WS is not significant and = must be lexed as assign
+#[case::ident_followed_by_comment_ws(vec![
+    ("&mv", TokenType::MacroVarExpr),
+    ("/*c*/", TokenType::CStyleComment),
+    (" ", TokenType::WS),
+    ("=", TokenType::ASSIGN),
+    (" ", TokenType::WS),
+    ("/*c*/", TokenType::CStyleComment),
+    (" ", TokenType::WS),
+    ("c", TokenType::MacroString),
+])]
+#[case::arg_name_single_mvar(vec![
+    ("&mv", TokenType::MacroVarExpr),
+    (" ", TokenType::WS),
+    ("/*c*/", TokenType::CStyleComment),
+    (" ", TokenType::WS),
+    ("=", TokenType::ASSIGN),
+    (" ", TokenType::WS),
+    ("/*c*/", TokenType::CStyleComment),
+    (" ", TokenType::WS),
+    ("c", TokenType::MacroString),
+])]
+#[case::arg_name_single_mcall(vec![
+    ("%r", TokenType::MacroIdentifier),
+    (" ", TokenType::WS),
+    ("/*c*/", TokenType::CStyleComment),
+    ("(", TokenType::LPAREN),
+    ("inner_arg", TokenType::MacroString),
+    (")", TokenType::RPAREN),
+    (" ", TokenType::WS),
+    ("/*c*/", TokenType::CStyleComment),
+    (" ", TokenType::WS),
+    ("=", TokenType::ASSIGN),
+    (" ", TokenType::WS),
+    ("/*c*/", TokenType::CStyleComment),
+    (" ", TokenType::WS),
+    ("c", TokenType::MacroString),
+])]
+#[case::arg_name_mvars_idents_and_trailing_mcall(vec![
+    ("&mv.", TokenType::MacroVarExpr),
+    ("1mid", TokenType::MacroString),
+    ("&mv2.", TokenType::MacroVarExpr),
+    ("&mv3", TokenType::MacroVarExpr),
+    ("%r", TokenType::MacroIdentifier),
+    (" ", TokenType::WS),
+    ("/*c*/", TokenType::CStyleComment),
+    ("(", TokenType::LPAREN),
+    ("inner_arg", TokenType::MacroString),
+    (")", TokenType::RPAREN),
+    (" ", TokenType::WS),
+    ("/*c*/", TokenType::CStyleComment),
+    (" ", TokenType::WS),
+    ("=", TokenType::ASSIGN),
+    (" ", TokenType::WS),
+    ("/*c*/", TokenType::CStyleComment),
+    (" ", TokenType::WS),
+    ("c", TokenType::MacroString),
+])]
+fn test_macro_call_arg_disambiguation(#[case] expected_tokens: Vec<(&str, TokenType)>) {
+    let pre_ws = vec![
+        (" ", TokenType::WS),
+        ("/*c*/", TokenType::CStyleComment),
+        (" ", TokenType::WS),
+    ];
+
+    let mut all_expected_tokens =
+        vec![("%m", TokenType::MacroIdentifier), ("(", TokenType::LPAREN)];
+
+    all_expected_tokens.extend(pre_ws.clone());
+
+    // Test arg disambiguation both in first, middle and last position
+    all_expected_tokens.extend(expected_tokens.clone());
+    all_expected_tokens.push((",", TokenType::COMMA));
+    all_expected_tokens.extend(pre_ws.clone());
+    all_expected_tokens.extend(expected_tokens.clone());
+    all_expected_tokens.push((",", TokenType::COMMA));
+    all_expected_tokens.extend(pre_ws.clone());
+    all_expected_tokens.extend(expected_tokens);
+    all_expected_tokens.push((")", TokenType::RPAREN));
+
+    assert_lexing(
+        all_expected_tokens
+            .iter()
+            .map(|(snip, _)| *snip)
+            .collect::<String>()
+            .as_str(),
+        all_expected_tokens,
+        NO_ERRORS,
+    );
+}
+
 #[rstest]
 #[case::basic_call("%sTr( );",
     vec![
@@ -2953,8 +3106,7 @@ fn test_macro_do(#[case] contents: &str, #[case] expected_token: Vec<impl TokenT
         ("m", TokenType::Identifier, Payload::None),
         ("(", TokenType::LPAREN, Payload::None),
         ("&err", TokenType::MacroVarExpr, Payload::None),
-        // lexed as macro call arg => ws not recognized
-        (" ", TokenType::MacroString, Payload::None),
+        (" ", TokenType::WS, Payload::None),
         ("=", TokenType::ASSIGN, Payload::None),
         (" ", TokenType::WS, Payload::None),
         ("val", TokenType::MacroString, Payload::None),
