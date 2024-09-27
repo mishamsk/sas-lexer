@@ -164,6 +164,11 @@ pub(crate) enum LexerMode {
     /// `bool` flag indicates if statement is allowed and should be lexed,
     /// which is a thing in open code, but not in macro expressions
     StringExpr { allow_stat: bool },
+    /// Special that will save a checkpoint at the current position and pop.
+    /// For robustness - it will NOT check if checkpoint is empty before trying
+    /// to set one, which in turn means that the pusher should ensure that
+    /// the checkpoint is empty by the time lexer arrives at this mode.
+    MakeCheckpoint,
     /// Insignificant WS/comment space. E.g. between macro name and parens in a call
     /// this is the mode where we want to lex all consecutive whitespace and comments
     /// and then return to the previous mode
@@ -177,24 +182,33 @@ pub(crate) enum LexerMode {
     ExpectSemiOrEOF,
     /// A special mode that goes after non-statement macro identifiers
     /// and any trailing whitespace or cstyle comments. It is a mode
-    /// that checks if the first NON-ws or cstyle follower is (.
+    /// that checks if the first NON-ws or cstyle follower is `(`.
     /// If found, adds necessary mode stack to parse the macro call args.
-    /// If not, performs roll back, so that ws/cstyle comments can be
+    /// If not, performs rollback, so that ws/cstyle comments can be
     /// relexed in different mode.
     ///
     /// Note - it should alwys be preceded by the `WsOrCStyleCommentOnly` mode
     /// and a checkpoint created!
     MaybeMacroCallArgs,
+    /// A special mode that goes after possible macro call arg name
+    /// and any trailing whitespace or cstyle comments. It is a mode
+    /// that checks if the first NON-ws or cstyle follower is `=`.
+    /// If not found, performs rollback, so that ws/cstyle comments can be
+    /// relexed as macro string in arg value.
+    ///
+    /// Then always adds necessary mode stack to parse the macro call arg value.
+    ///
+    /// Note - it should alwys be preceded by the `WsOrCStyleCommentOnly` mode
+    /// and a checkpoint created!
+    MaybeMacroCallArgAssign {
+        /// The packed flags for macro argument name or value. See `MacroArgNameValueFlags`
+        flags: MacroArgNameValueFlags,
+    },
     /// Macro call argument or value mode. I.e. inside the parens of a macro call,
     /// before `=`.
     MacroCallArgOrValue {
         /// The packed flags for macro argument name or value. See `MacroArgNameValueFlags`
         flags: MacroArgNameValueFlags,
-        /// The current parenthesis nesting level.
-        /// Macro arguments allow balanced parenthesis nesting and
-        /// inside these parenthesis, `,` and `=` are not treated as
-        /// terminators.
-        pnl: u32,
     },
     /// A special mode that goes after `%macro name` and any trailing
     /// whitespace or cstyle comments.

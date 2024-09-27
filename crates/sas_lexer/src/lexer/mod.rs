@@ -118,7 +118,7 @@ impl<'src> Lexer<'src> {
     /// and hence assumes that modes will not be popped beyond that point before
     /// rollback.
     ///
-    /// Make sure to always clear the checkpoint, even if not rolling back
+    /// Make sure to always clear the checkpoint via `clear_checkpoint` if not rolling back
     fn checkpoint(&mut self) {
         // We should always make sure to clear any checkpoints
         debug_assert!(self.checkpoint.is_none());
@@ -132,10 +132,13 @@ impl<'src> Lexer<'src> {
             last_token_idx: self.buffer.last_token(),
         });
     }
+
+    /// Clear the checkpoint, without rolling back
     fn clear_checkpoint(&mut self) {
         self.checkpoint = None;
     }
 
+    /// Rollback the lexer to the last checkpoint, clearing it in the process.
     fn rollback(&mut self) {
         if let Some(checkpoint) = self.checkpoint.take() {
             self.cursor = checkpoint.cursor;
@@ -377,9 +380,12 @@ impl<'src> Lexer<'src> {
                     self.emit_token(TokenChannel::DEFAULT, TokenType::SEMI, Payload::None);
                 }
                 LexerMode::Default
+                | LexerMode::MakeCheckpoint
                 | LexerMode::WsOrCStyleCommentOnly
                 | LexerMode::MacroLocalGlobal { .. }
                 | LexerMode::MaybeMacroCallArgs
+                | LexerMode::MaybeMacroCallArgAssign { .. }
+                | LexerMode::MacroCallArgOrValue { .. }
                 | LexerMode::MaybeMacroDefArgs
                 | LexerMode::MacroDefArg
                 | LexerMode::MacroDefNextArgOrDefaultValue
@@ -389,7 +395,6 @@ impl<'src> Lexer<'src> {
                     // so we can safely pop them
                 }
                 LexerMode::MacroStrQuotedExpr { pnl, .. }
-                | LexerMode::MacroCallArgOrValue { pnl, .. }
                 | LexerMode::MacroCallValue { pnl, .. }
                 | LexerMode::MacroEval { pnl, .. } => {
                     // If the parens nesting level is > 0, we should emit the missing number of
@@ -457,6 +462,12 @@ impl<'src> Lexer<'src> {
                     self.pop_mode();
                 }
             },
+            LexerMode::MakeCheckpoint => {
+                // used as a marker for the lexer to create a checkpoint.
+                // Pop the mode, checkpoint without it and continue
+                self.pop_mode();
+                self.checkpoint();
+            }
             LexerMode::Default => self.dispatch_mode_default(next_char),
             LexerMode::ExpectSymbol(tok_type, tok_channel) => {
                 self.start_token();
@@ -494,11 +505,14 @@ impl<'src> Lexer<'src> {
             LexerMode::MaybeMacroCallArgs => {
                 self.lex_maybe_macro_call_args(next_char);
             }
-            LexerMode::MacroCallArgOrValue { flags, pnl } => {
-                self.dispatch_macro_call_arg_or_value(next_char, flags, pnl, true);
+            LexerMode::MaybeMacroCallArgAssign { flags } => {
+                self.lex_maybe_macro_call_arg_assign(next_char, flags);
+            }
+            LexerMode::MacroCallArgOrValue { flags } => {
+                self.dispatch_macro_call_arg_or_value(next_char, flags);
             }
             LexerMode::MacroCallValue { flags, pnl } => {
-                self.dispatch_macro_call_arg_or_value(next_char, flags, pnl, false);
+                self.dispatch_macro_call_arg_value(next_char, flags, pnl);
             }
             LexerMode::MaybeMacroDefArgs => {
                 self.lex_maybe_macro_def_args(next_char);
@@ -1599,7 +1613,6 @@ impl<'src> Lexer<'src> {
             // The handler fo arguments will push the mode for the comma, etc.
             self.push_mode(LexerMode::MacroCallArgOrValue {
                 flags: MacroArgNameValueFlags::new(MacroArgContext::MacroCall, true),
-                pnl: 0,
             });
             // Leading insiginificant WS before the first argument
             self.push_mode(LexerMode::WsOrCStyleCommentOnly);
@@ -1613,18 +1626,270 @@ impl<'src> Lexer<'src> {
         }
     }
 
+    /// Checks next char for `=` and either emits the ASSIGN token with
+    /// the necessary following modes or rolls back to the checkpoint
+    /// and still emits the macro arg value modes.
+    #[inline]
+    fn lex_maybe_macro_call_arg_assign(&mut self, next_char: char, flags: MacroArgNameValueFlags) {
+        debug_assert!(matches!(
+            self.mode(),
+            LexerMode::MaybeMacroCallArgAssign { flags: f } if f == flags
+        ));
+
+        // Pop this mode no matter what
+        self.pop_mode();
+
+        if next_char == '=' {
+            // Add the token
+            self.start_token();
+            self.cursor.advance();
+
+            self.emit_token(TokenChannel::DEFAULT, TokenType::ASSIGN, Payload::None);
+
+            // Clear the checkpoint
+            self.clear_checkpoint();
+
+            self.push_mode(LexerMode::MacroCallValue { flags, pnl: 0 });
+            // Leading insiginificant WS before the argument
+            self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+        } else {
+            // Not a macro call with arguments, rollback (which will implicitly pop the mode)
+            debug_assert!(self.checkpoint.is_some());
+
+            // Rollback to the checkpoint, which should be before any WS and comments
+            // and right after macro identifier
+            self.rollback();
+
+            // In this case any WS before the value is significant
+            self.push_mode(LexerMode::MacroCallValue { flags, pnl: 0 });
+        }
+    }
+
+    fn dispatch_macro_call_arg_or_value(&mut self, next_char: char, flags: MacroArgNameValueFlags) {
+        debug_assert!(matches!(
+            self.mode(),
+            LexerMode::MacroCallArgOrValue { flags: f } if f == flags
+        ));
+
+        // We may set checkpoints in this mode, but when popping the mode
+        // we should always ensure that the checkpoint is cleared.
+        #[allow(clippy::items_after_statements)]
+        fn safe_pop_mode(lexer: &mut Lexer) {
+            // Ensure no checkpoint remains
+            lexer.clear_checkpoint();
+
+            // Pop the mode and switch to the value mode
+            lexer.pop_mode();
+        }
+
+        self.start_token();
+
+        // Helper to bail out of this mode and switch to the value mode instead
+        let switch_to_value_mode = |lexer: &mut Lexer| {
+            // If checkpoint was set, we rollback to it so that macro string
+            // could be re-lexed with whatever symbol that triggered this call
+            if lexer.checkpoint.is_some() {
+                lexer.rollback();
+            } else {
+                // Otherwise, just pop the mode
+                lexer.pop_mode();
+            }
+
+            // and switch to the value mode
+            lexer.push_mode(LexerMode::MacroCallValue { flags, pnl: 0 });
+        };
+
+        // If we hit what is possible the "end" of the macro arg name,
+        // we checkpoint, emit a mode stack that will check if after optional
+        // comments/WS we see a `=`. This would mean, yes, it was a macro arg name.
+        // Otherwise it will rollback to the checkpoint and re-lex the string as a value.
+        // Checkpoint may or may not be set by now, depending on the path taken to get here.
+        //
+        // Two cases possible:
+        // - For macro strings we set checkpoint before starting to lex it, which
+        // allows extending it with following WS in case of rollback. => checkpoint
+        // will already be set.
+        // - For macro var expressions and macro calls checkpoint can be set
+        // after they are lexed, so when they call this closure, it will not be set yet.
+        let push_check_assign = |lexer: &mut Lexer| {
+            if lexer.checkpoint.is_none() {
+                lexer.checkpoint();
+            }
+
+            lexer.push_mode(LexerMode::MaybeMacroCallArgAssign { flags });
+            lexer.push_mode(LexerMode::WsOrCStyleCommentOnly);
+        };
+
+        // Dispatch the "big" categories
+        match next_char {
+            // All symbols, including string literal starts is handled below, since
+            // they all share the same logic here - not an arg name.
+            '/' => {
+                if self.cursor.peek_next() == '*' {
+                    // Ok, time to check if this is a macro arg name
+                    push_check_assign(self);
+                } else {
+                    // Symbol - can't be a macro arg name
+                    switch_to_value_mode(self);
+                }
+            }
+            '&' => {
+                if self.lex_macro_var_expr() {
+                    // Clear checkpoint if we had. E.g. in case of `arg&mv`,
+                    // `arg` on the previous iteration would have set the checkpoint
+                    // but now we know that no WS follows `arg` so we won't need
+                    // to rollback so far back.
+                    self.clear_checkpoint();
+                } else {
+                    // Symbol - can't be a macro arg name
+                    switch_to_value_mode(self);
+                }
+            }
+            '%' => {
+                // We need to clear the checkpoint, for two reasons.
+                // One, macro call uses checkpoint for MaybeMacroCallArgs mode,
+                // and thus we need to clear before trying the macro call lexing.
+                self.clear_checkpoint();
+
+                // Macro call is only viable in arg name in the last
+                // position => when we see the first one,
+                // we can move to check for assignment. But only after
+                // the macro call is fully lexed - meaning after MaybeMacroCallArgs
+                // mode which uses the checkpoint! And we only allowed one at a time.
+                // Hence the following trick...we pre-populate following modes,
+                // but if the % turned out to be NOT a macro call, we will pop them back
+                self.push_mode(LexerMode::MaybeMacroCallArgAssign { flags });
+                self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+                // This last piece will ensure that checkpoint related to this logic
+                // is set only after the macro call is fully lexed.
+                self.push_mode(LexerMode::MakeCheckpoint);
+
+                match self.lex_macro_call(true, false) {
+                    MacroKwType::MacroStat => {
+                        // Hit a following macro statement => pop mode and exit.
+                        // Error has already been emitted by the `lex_macro_call`
+
+                        // Pop here means the 3 modes we pushed above + the normal one pop.
+                        // No need to call safe pop, since we cleared the checkpoint alread.
+                        self.pop_mode();
+                        self.pop_mode();
+                        self.pop_mode();
+                        self.pop_mode();
+                    }
+                    MacroKwType::None => {
+                        // Symbol - can't be a macro arg name
+
+                        // Pop the 3 modes we pushed above
+                        self.pop_mode();
+                        self.pop_mode();
+                        self.pop_mode();
+
+                        switch_to_value_mode(self);
+                    }
+                    MacroKwType::MacroCallOrLabel => {
+                        // tail call. everything has already been set up
+                    }
+                }
+            }
+            ',' => {
+                // Found the terminator, pop the mode and push new modes
+                // to expect stuff then return
+                safe_pop_mode(self);
+
+                if flags.populate_next_arg_stack() {
+                    // Lex the `,` right away
+                    self.start_token();
+                    self.cursor.advance();
+                    self.emit_token(TokenChannel::DEFAULT, TokenType::COMMA, Payload::None);
+
+                    let new_mode = match flags.context() {
+                        MacroArgContext::MacroCall => LexerMode::MacroCallArgOrValue { flags },
+                        MacroArgContext::BuiltInMacro => {
+                            LexerMode::MacroCallValue { flags, pnl: 0 }
+                        }
+                        MacroArgContext::MacroDef => LexerMode::MacroDefArg,
+                    };
+
+                    self.push_mode(new_mode);
+                    // Leading insiginificant WS before the argument
+                    self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+                }
+            }
+            ')' => {
+                // Found the terminator of the entire macro call arguments,
+                // just pop the mode and return
+                safe_pop_mode(self);
+            }
+            c if c.is_whitespace() => {
+                // WS means we are done with the arg name
+                // and should check for assignment
+                push_check_assign(self);
+            }
+            c => {
+                // We need to figure out if this is the first token in arg name or not.
+                // Non-first char can only follow a macro var expression, a macro call
+                // or a macro string in this mode => the list of possible first tokens types used.
+                let first_token = !self.buffer.last_token_info().is_some_and(|ti| {
+                    [
+                        TokenType::MacroVarExpr,
+                        TokenType::MacroIdentifier,
+                        TokenType::MacroString,
+                        TokenType::RPAREN,
+                    ]
+                    .contains(&ti.token_type)
+                });
+
+                if is_valid_sas_name_start(c) || (!first_token && is_xid_continue(c)) {
+                    // A macro string in place of macro identifier
+                    // First checkpoint BEFORE consuming! See above why.
+                    // If we do not have a bug, it may not be set yet, so this call
+                    // is safe.
+                    self.checkpoint();
+
+                    // Consume as identifier, no reserved words here,
+                    // so we do not need the full lex_identifier logic
+                    self.cursor.eat_while(is_xid_continue);
+
+                    // Add token, but do not pop the mode, as we may have a full macro text expression
+                    // that generates an identifier
+                    self.emit_token(
+                        TokenChannel::DEFAULT,
+                        // True identifier is only possible if this is the first (and only) token.
+                        TokenType::MacroString,
+                        Payload::None,
+                    );
+                } else if c == '=' && !first_token {
+                    // Add the token
+                    self.start_token();
+                    self.cursor.advance();
+
+                    self.emit_token(TokenChannel::DEFAULT, TokenType::ASSIGN, Payload::None);
+
+                    // Found the terminator, pop the mode and push new modes
+                    // to expect stuff then return
+                    safe_pop_mode(self);
+
+                    self.push_mode(LexerMode::MacroCallValue { flags, pnl: 0 });
+                    // Leading insiginificant WS before the argument
+                    self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+                } else {
+                    // Not an arg name, switch to value mode
+                    switch_to_value_mode(self);
+                }
+            }
+        }
+    }
+
     #[allow(clippy::too_many_lines)]
-    fn dispatch_macro_call_arg_or_value(
+    fn dispatch_macro_call_arg_value(
         &mut self,
         next_char: char,
         flags: MacroArgNameValueFlags,
         parens_nesting_level: u32,
-        terminate_on_assign: bool,
     ) {
         debug_assert!(matches!(
             self.mode(),
-            LexerMode::MacroCallArgOrValue { flags: f, pnl: l }
-                | LexerMode::MacroCallValue { flags: f, pnl: l }
+            LexerMode::MacroCallValue { flags: f, pnl: l }
                 if l == parens_nesting_level && f == flags
         ));
 
@@ -1644,11 +1909,7 @@ impl<'src> Lexer<'src> {
                     // string lexing handle it, but this way we
                     // we avoid one extra check
                     self.cursor.advance();
-                    self.lex_macro_string_in_macro_call(
-                        flags,
-                        parens_nesting_level,
-                        terminate_on_assign,
-                    );
+                    self.lex_macro_string_in_macro_call_arg_value(flags, parens_nesting_level);
                 }
             }
             '&' => {
@@ -1656,11 +1917,7 @@ impl<'src> Lexer<'src> {
                     // Not a macro var, just a sequence of ampersands
                     // consume the sequence and continue lexing the string
                     self.cursor.eat_while(|c| c == '&');
-                    self.lex_macro_string_in_macro_call(
-                        flags,
-                        parens_nesting_level,
-                        terminate_on_assign,
-                    );
+                    self.lex_macro_string_in_macro_call_arg_value(flags, parens_nesting_level);
                 }
             }
             '%' => {
@@ -1676,11 +1933,7 @@ impl<'src> Lexer<'src> {
                         // string lexing handle it, but this way we
                         // we avoid one extra check
                         self.cursor.advance();
-                        self.lex_macro_string_in_macro_call(
-                            flags,
-                            parens_nesting_level,
-                            terminate_on_assign,
-                        );
+                        self.lex_macro_string_in_macro_call_arg_value(flags, parens_nesting_level);
                     }
                     MacroKwType::MacroCallOrLabel => {}
                 }
@@ -1692,11 +1945,7 @@ impl<'src> Lexer<'src> {
                 // we avoid one extra check
                 self.cursor.advance();
                 self.add_line();
-                self.lex_macro_string_in_macro_call(
-                    flags,
-                    parens_nesting_level,
-                    terminate_on_assign,
-                );
+                self.lex_macro_string_in_macro_call_arg_value(flags, parens_nesting_level);
             }
             ',' if parens_nesting_level == 0 => {
                 // Found the terminator, pop the mode and push new modes
@@ -1709,20 +1958,11 @@ impl<'src> Lexer<'src> {
                     self.cursor.advance();
                     self.emit_token(TokenChannel::DEFAULT, TokenType::COMMA, Payload::None);
 
-                    let new_flags = MacroArgNameValueFlags::new(
-                        flags.context(),
-                        flags.populate_next_arg_stack(),
-                    );
-
                     let new_mode = match flags.context() {
-                        MacroArgContext::MacroCall => LexerMode::MacroCallArgOrValue {
-                            flags: new_flags,
-                            pnl: 0,
-                        },
-                        MacroArgContext::BuiltInMacro => LexerMode::MacroCallValue {
-                            flags: new_flags,
-                            pnl: 0,
-                        },
+                        MacroArgContext::MacroCall => LexerMode::MacroCallArgOrValue { flags },
+                        MacroArgContext::BuiltInMacro => {
+                            LexerMode::MacroCallValue { flags, pnl: 0 }
+                        }
                         MacroArgContext::MacroDef => LexerMode::MacroDefArg,
                     };
 
@@ -1736,52 +1976,23 @@ impl<'src> Lexer<'src> {
                 // just pop the mode and return
                 self.pop_mode();
             }
-            '=' if terminate_on_assign && parens_nesting_level == 0 => {
-                // Found the terminator between argument name and value,
-                // pop the mode and push new modes to expect stuff then return
-                self.pop_mode();
-
-                // Lex the `=` right away
-                self.start_token();
-                self.cursor.advance();
-                self.emit_token(TokenChannel::DEFAULT, TokenType::ASSIGN, Payload::None);
-
-                self.push_mode(LexerMode::MacroCallValue {
-                    flags: MacroArgNameValueFlags::new(
-                        flags.context(),
-                        flags.populate_next_arg_stack(),
-                    ),
-                    pnl: 0,
-                });
-                // Leading insiginificant WS before the argument
-                self.push_mode(LexerMode::WsOrCStyleCommentOnly);
-            }
             _ => {
                 // Not a terminator, just a regular character in the string
                 // Do NOT consume - macro string tracks parens, and this
                 // maybe a paren. Continue lexing the string
-                self.lex_macro_string_in_macro_call(
-                    flags,
-                    parens_nesting_level,
-                    terminate_on_assign,
-                );
+                self.lex_macro_string_in_macro_call_arg_value(flags, parens_nesting_level);
             }
         }
     }
 
-    #[allow(clippy::too_many_lines)]
-    fn lex_macro_string_in_macro_call(
+    fn lex_macro_string_in_macro_call_arg_value(
         &mut self,
         flags: MacroArgNameValueFlags,
         parens_nesting_level: u32,
-        terminate_on_assign: bool,
     ) {
-        debug_assert!(
-            matches!(
-                self.mode(), LexerMode::MacroCallValue{ flags: f, .. } if f == flags
-            ) && !terminate_on_assign
-                || matches!(self.mode(), LexerMode::MacroCallArgOrValue { flags: f, .. }  if f == flags)
-        );
+        debug_assert!(matches!(
+            self.mode(), LexerMode::MacroCallValue{ flags: f, .. } if f == flags
+        ));
 
         // Helper function to emit the token and update the mode if needed
         let emit_token_update_nesting = |lexer: &mut Lexer, local_parens_nesting: i32| {
@@ -1799,8 +2010,7 @@ impl<'src> Lexer<'src> {
 
                 if let Some(m) = lexer.mode_stack.last_mut() {
                     match m {
-                        LexerMode::MacroCallArgOrValue { pnl, .. }
-                        | LexerMode::MacroCallValue { pnl, .. } => {
+                        LexerMode::MacroCallValue { pnl, .. } => {
                             *pnl = pnl.wrapping_add_signed(local_parens_nesting);
                         }
                         _ => unreachable!(),
@@ -1886,20 +2096,11 @@ impl<'src> Lexer<'src> {
                         self.cursor.advance();
                         self.emit_token(TokenChannel::DEFAULT, TokenType::COMMA, Payload::None);
 
-                        let new_flags = MacroArgNameValueFlags::new(
-                            flags.context(),
-                            flags.populate_next_arg_stack(),
-                        );
-
                         let new_mode = match flags.context() {
-                            MacroArgContext::MacroCall => LexerMode::MacroCallArgOrValue {
-                                flags: new_flags,
-                                pnl: 0,
-                            },
-                            MacroArgContext::BuiltInMacro => LexerMode::MacroCallValue {
-                                flags: new_flags,
-                                pnl: 0,
-                            },
+                            MacroArgContext::MacroCall => LexerMode::MacroCallArgOrValue { flags },
+                            MacroArgContext::BuiltInMacro => {
+                                LexerMode::MacroCallValue { flags, pnl: 0 }
+                            }
                             MacroArgContext::MacroDef => LexerMode::MacroDefArg,
                         };
 
@@ -1907,31 +2108,6 @@ impl<'src> Lexer<'src> {
                         // Leading insiginificant WS before the argument
                         self.push_mode(LexerMode::WsOrCStyleCommentOnly);
                     }
-                    return;
-                }
-                '=' if terminate_on_assign
-                    && (parens_nesting_level.wrapping_add_signed(local_parens_nesting) == 0) =>
-                {
-                    // Found the terminator between argument name and value,
-                    // pop the mode and push new modes to expect stuff then return
-                    self.emit_token(TokenChannel::DEFAULT, TokenType::MacroString, Payload::None);
-                    // Pop the arg/value mode and push the value mode
-                    self.pop_mode();
-
-                    // Lex the `=` right away
-                    self.start_token();
-                    self.cursor.advance();
-                    self.emit_token(TokenChannel::DEFAULT, TokenType::ASSIGN, Payload::None);
-
-                    self.push_mode(LexerMode::MacroCallValue {
-                        flags: MacroArgNameValueFlags::new(
-                            flags.context(),
-                            flags.populate_next_arg_stack(),
-                        ),
-                        pnl: 0,
-                    });
-                    // Leading insiginificant WS before the argument
-                    self.push_mode(LexerMode::WsOrCStyleCommentOnly);
                     return;
                 }
                 _ => {
@@ -1997,7 +2173,6 @@ impl<'src> Lexer<'src> {
             self.pop_mode();
             self.push_mode(LexerMode::MacroCallArgOrValue {
                 flags: MacroArgNameValueFlags::new(MacroArgContext::MacroDef, true),
-                pnl: 0,
             });
             return;
         }
@@ -4335,7 +4510,6 @@ impl<'src> Lexer<'src> {
         // The handler fo arguments will push the mode for the comma, etc.
         self.push_mode(LexerMode::MacroCallArgOrValue {
             flags: MacroArgNameValueFlags::new(MacroArgContext::MacroCall, true),
-            pnl: 0,
         });
         // Leading insiginificant WS before the first argument
         self.push_mode(LexerMode::WsOrCStyleCommentOnly);
