@@ -1665,6 +1665,7 @@ impl<'src> Lexer<'src> {
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     fn dispatch_macro_call_arg_or_value(&mut self, next_char: char, flags: MacroArgNameValueFlags) {
         debug_assert!(matches!(
             self.mode(),

@@ -12,8 +12,7 @@ use crate::{
     print::{get_string_literal, get_token_raw_text},
 };
 
-#[allow(dead_code)]
-fn print_schema(df_name: &str, df: &mut LazyFrame) {
+fn _print_schema(df_name: &str, df: &mut LazyFrame) {
     println!("{} DataFrame schema:", df_name);
     for col in df.collect_schema().unwrap().iter_fields() {
         println!("{:?}", col);
