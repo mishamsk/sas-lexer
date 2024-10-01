@@ -1,11 +1,11 @@
 use super::buffer::TokenIdx;
 use std::fmt::Display;
-use strum::EnumMessage;
 #[cfg(test)]
-use strum::{EnumIter, IntoStaticStr};
+use strum::IntoStaticStr;
+use strum::{EnumIter, EnumMessage};
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy, EnumMessage)]
-#[cfg_attr(test, derive(EnumIter, IntoStaticStr))]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, EnumIter, EnumMessage)]
+#[cfg_attr(test, derive(IntoStaticStr))]
 #[repr(u8)]
 pub enum ErrorType {
     // Source code errors
