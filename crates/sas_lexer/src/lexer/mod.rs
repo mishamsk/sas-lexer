@@ -1765,7 +1765,7 @@ impl<'src> Lexer<'src> {
                 // is set only after the macro call is fully lexed.
                 self.push_mode(LexerMode::MakeCheckpoint);
 
-                match self.lex_macro_call(true, false) {
+                match self.lex_macro_call(true, true) {
                     MacroKwType::MacroStat => {
                         // Hit a following macro statement => pop mode and exit.
                         // Error has already been emitted by the `lex_macro_call`
@@ -1899,7 +1899,7 @@ impl<'src> Lexer<'src> {
         // Dispatch the "big" categories
         match next_char {
             '\'' => self.lex_single_quoted_str(),
-            '"' => self.lex_string_expression_start(false),
+            '"' => self.lex_string_expression_start(true),
             '/' => {
                 if self.cursor.peek_next() == '*' {
                     self.lex_cstyle_comment();
@@ -1922,7 +1922,7 @@ impl<'src> Lexer<'src> {
                 }
             }
             '%' => {
-                match self.lex_macro_call(true, false) {
+                match self.lex_macro_call(true, true) {
                     MacroKwType::MacroStat => {
                         // Hit a following macro statement => pop mode and exit.
                         // Error has already been emitted by the `lex_macro_call`
@@ -2251,7 +2251,7 @@ impl<'src> Lexer<'src> {
         // Dispatch the "big" categories
         match next_char {
             '\'' => self.lex_single_quoted_str(),
-            '"' => self.lex_string_expression_start(false),
+            '"' => self.lex_string_expression_start(true),
             '/' => {
                 if self.cursor.peek_next() == '*' {
                     self.lex_cstyle_comment();

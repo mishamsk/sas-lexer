@@ -1,10 +1,15 @@
+use std::ffi::OsStr;
 use std::fs::metadata;
 
 use std::{fs, path::PathBuf};
 
 use indicatif::{ProgressBar, ProgressStyle};
 use polars::prelude::*;
-use sas_lexer::{Payload, ResolvedTokenInfo};
+use sas_lexer::{
+    error::{ErrorInfo, ErrorType},
+    Payload, ResolvedTokenInfo,
+};
+use strum::IntoEnumIterator;
 use walkdir::WalkDir;
 
 use crate::{
@@ -17,6 +22,67 @@ fn _print_schema(df_name: &str, df: &mut LazyFrame) {
     for col in df.collect_schema().unwrap().iter_fields() {
         println!("{:?}", col);
     }
+}
+
+fn write_to_disk(df: &LazyFrame, path: &PathBuf) -> PolarsResult<()> {
+    let file = fs::File::create(path)?;
+    let file_name = path.file_name().map(OsStr::to_string_lossy).unwrap();
+    let mut df = df.clone().collect()?;
+    ParquetWriter::new(file)
+        .finish(&mut df)
+        .map(|bytes| println!("Wrote {file_name}: {bytes} bytes"))
+}
+
+fn create_error_dict_df() -> PolarsResult<LazyFrame> {
+    Ok(DataFrame::new(vec![
+        Series::new(
+            "error_type".into(),
+            ErrorType::iter().map(|e| e as u32).collect::<Vec<_>>(),
+        ),
+        Series::new(
+            "is_code_error".into(),
+            ErrorType::iter()
+                .map(|e| e.is_code_error())
+                .collect::<Vec<_>>(),
+        ),
+        Series::new(
+            "error_message".into(),
+            ErrorType::iter().map(|e| e.to_string()).collect::<Vec<_>>(),
+        ),
+    ])?
+    .lazy())
+}
+
+fn create_error_df(file_id: u32, errors: &Vec<ErrorInfo>) -> PolarsResult<LazyFrame> {
+    let mut error_type = Vec::with_capacity(errors.len());
+    let mut at_byte_offset = Vec::with_capacity(errors.len());
+    let mut at_char_offset = Vec::with_capacity(errors.len());
+    let mut on_line = Vec::with_capacity(errors.len());
+    let mut at_column = Vec::with_capacity(errors.len());
+    let mut last_token = Vec::with_capacity(errors.len());
+
+    for error in errors {
+        error_type.push(error.error_type() as u32);
+        at_byte_offset.push(error.at_byte_offset());
+        at_char_offset.push(error.at_char_offset());
+        on_line.push(error.on_line());
+        at_column.push(error.at_column());
+
+        last_token.push(error.last_token().map(|idx| idx.get()));
+    }
+
+    let df = DataFrame::new(vec![
+        Series::new("error_type".into(), error_type),
+        Series::new("at_byte_offset".into(), at_byte_offset),
+        Series::new("at_char_offset".into(), at_char_offset),
+        Series::new("on_line".into(), on_line),
+        Series::new("at_column".into(), at_column),
+        Series::new("last_token".into(), last_token),
+    ])?;
+
+    Ok(df
+        .lazy()
+        .with_columns([lit(file_id).cast(DataType::UInt32).alias("file_id")]))
 }
 
 fn create_token_df(
@@ -97,7 +163,6 @@ fn create_token_df(
     ])?;
 
     Ok(df
-        .clone()
         .lazy()
         .with_columns([lit(file_id).cast(DataType::UInt32).alias("file_id")]))
 }
@@ -111,6 +176,7 @@ fn gen_stats_inner(output: &Option<PathBuf>, samples: &PathBuf) -> Result<(), Po
         .collect::<Vec<_>>();
 
     let total_files = all_files.len();
+    let mut files_with_errors = 0usize;
 
     let mut file_ids = Vec::with_capacity(total_files);
     let mut file_names = Vec::with_capacity(total_files);
@@ -119,6 +185,7 @@ fn gen_stats_inner(output: &Option<PathBuf>, samples: &PathBuf) -> Result<(), Po
     let mut file_lexed = Vec::with_capacity(total_files);
     let mut file_str_buf_len = Vec::with_capacity(total_files);
     let mut token_dfs = Vec::with_capacity(total_files);
+    let mut error_dfs = Vec::with_capacity(total_files);
 
     let pb = ProgressBar::new(total_files as u64);
     pb.set_style(
@@ -162,6 +229,11 @@ fn gen_stats_inner(output: &Option<PathBuf>, samples: &PathBuf) -> Result<(), Po
                             string_literals_buffer,
                             &contents,
                         )?);
+
+                        if !errors.is_empty() {
+                            files_with_errors += 1;
+                            error_dfs.push(create_error_df(file_id, &errors)?);
+                        }
                     }
                     None => {
                         lexed = false;
@@ -188,6 +260,8 @@ fn gen_stats_inner(output: &Option<PathBuf>, samples: &PathBuf) -> Result<(), Po
     println!("Combining all DataFrame's...");
 
     let all_tokens_df = concat(token_dfs, UnionArgs::default())?;
+    let all_errors_df = concat(error_dfs, UnionArgs::default())?;
+    let error_dict_df = create_error_dict_df()?;
 
     println!("Generating sources DataFrame...");
 
@@ -203,7 +277,13 @@ fn gen_stats_inner(output: &Option<PathBuf>, samples: &PathBuf) -> Result<(), Po
     .lazy();
 
     if let Some(output_path) = output {
-        //TODO
+        // Write to parquet
+        println!("Writing to parquet...");
+
+        write_to_disk(&sources_df, &output_path.join("sources.parquet"))?;
+        write_to_disk(&all_tokens_df, &output_path.join("tokens.parquet"))?;
+        write_to_disk(&all_errors_df, &output_path.join("errors.parquet"))?;
+        write_to_disk(&error_dict_df, &output_path.join("error_dict.parquet"))?;
     }
 
     println!("Calculating token statistics...");
@@ -337,6 +417,29 @@ fn gen_stats_inner(output: &Option<PathBuf>, samples: &PathBuf) -> Result<(), Po
     for col in tok_report.get_columns() {
         println!("{:?}: {:?}", col.name(), col.get(0)?);
     }
+
+    // Error statistics
+    let error_aggregates = all_errors_df
+        .clone()
+        .join(
+            error_dict_df,
+            [col("error_type")],
+            [col("error_type")],
+            JoinArgs::new(JoinType::Inner),
+        )
+        .group_by([col("is_code_error"), col("error_message")])
+        .agg([
+            len().cast(DataType::UInt32).alias("errors_count"),
+            col("file_id").n_unique().alias("files_count"),
+        ]);
+
+    let error_rate = files_with_errors as f64 / total_files as f64 * 100.0;
+    println!("Error statistics:");
+    println!("Files with errors: {files_with_errors}/{total_files} ({error_rate:.2}%)");
+
+    let error_report = error_aggregates.collect()?;
+
+    println!("{error_report}");
 
     Ok(())
 }
