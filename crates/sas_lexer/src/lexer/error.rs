@@ -6,102 +6,103 @@ use strum::{EnumIter, EnumMessage};
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, EnumIter, EnumMessage)]
 #[cfg_attr(test, derive(IntoStaticStr))]
-#[repr(u8)]
+#[repr(u32)]
 pub enum ErrorType {
-    // Source code errors
+    // Source code errors. Codes 1001-1999. Make sure to preserve
+    // the existing codes & the range. The latter is used in classification impl
     #[strum(message = "Unterminated string literal")]
-    UnterminatedStringLiteral = 1,
+    UnterminatedStringLiteral = 1001,
     #[strum(message = "Unterminated comment")]
-    UnterminatedComment,
+    UnterminatedComment = 1002,
     #[strum(message = "Unterminated datalines")]
-    UnterminatedDatalines,
+    UnterminatedDatalines = 1003,
     #[strum(message = "Invalid numeric literal")]
-    InvalidNumericLiteral,
+    InvalidNumericLiteral = 1004,
     #[strum(message = "Missing `x` at the end of a hex numeric literal")]
-    UnterminatedHexNumericLiteral,
+    UnterminatedHexNumericLiteral = 1005,
     #[strum(message = "Unexpected character")]
-    UnexpectedCharacter,
+    UnexpectedCharacter = 1006,
     #[strum(message = "Missing expected character: ')'")]
-    MissingExpectedRParen,
+    MissingExpectedRParen = 1007,
     #[strum(message = "Missing expected character: '='")]
-    MissingExpectedAssign,
+    MissingExpectedAssign = 1008,
     #[strum(message = "Missing expected character: '('")]
-    MissingExpectedLParen,
+    MissingExpectedLParen = 1009,
     #[strum(message = "Missing expected character: ','")]
-    MissingExpectedComma,
+    MissingExpectedComma = 1010,
     #[strum(message = "Missing expected character: '/'")]
-    MissingExpectedFSlash,
+    MissingExpectedFSlash = 1011,
     #[strum(message = "Missing expected character: ';' or end of file")]
-    MissingExpectedSemiOrEOF,
+    MissingExpectedSemiOrEOF = 1012,
     #[strum(
         message = "ERROR: A character operand was found in the %EVAL function or %IF \
                             condition where a numeric operand is required."
     )]
-    CharExpressionInEvalContext,
+    CharExpressionInEvalContext = 1013,
     #[strum(message = "ERROR 180-322: Statement is not valid or it is used out of proper order.")]
-    InvalidOrOutOfOrderStatement,
+    InvalidOrOutOfOrderStatement = 1014,
     #[strum(
         message = "Possible ERROR 180-322: Statement is not valid or it is used out of proper order."
     )]
-    MaybeInvalidOrOutOfOrderStatement,
+    MaybeInvalidOrOutOfOrderStatement = 1015,
     #[strum(message = "ERROR: Expecting a variable name after %LET.")]
-    InvalidMacroLetVarName,
+    InvalidMacroLetVarName = 1016,
     #[strum(message = "ERROR: The macro variable name is either all blank or missing.")]
-    InvalidMacroLocalGlobalReadonlyVarName,
+    InvalidMacroLocalGlobalReadonlyVarName = 1017,
     #[strum(message = "ERROR: Unrecognized keyword on %LOCAL statement.")]
-    MissingMacroLocalReadonlyKw,
+    MissingMacroLocalReadonlyKw = 1018,
     #[strum(message = "ERROR: Unrecognized keyword on %GLOBAL statement.")]
-    MissingMacroGlobalReadonlyKw,
+    MissingMacroGlobalReadonlyKw = 1019,
     #[strum(message = "ERROR: Invalid macro name.  \
                         It should be a valid SAS identifier no longer than 32 characters.\
                         \nERROR: A dummy macro will be compiled.")]
-    InvalidMacroDefName,
+    InvalidMacroDefName = 1020,
     #[strum(message = "ERROR: Invalid macro parameter name. \
                         It should be a valid SAS identifier no longer than 32 characters.\
                         \nERROR: A dummy macro will be compiled.")]
-    InvalidMacroDefArgName,
+    InvalidMacroDefArgName = 1021,
     #[strum(
         message = "ERROR: An unexpected semicolon occurred in the %DO statement.\n\
                         ERROR: A dummy macro will be compiled."
     )]
-    UnexpectedSemiInDoLoop,
+    UnexpectedSemiInDoLoop = 1022,
     #[strum(message = "ERROR: Open code statement recursion detected.")]
-    OpenCodeRecursionError,
-    // Token buffer errors. Add all new ones below the first existing one!
-    // The first one is used as the ending point for the code error range.
+    OpenCodeRecursionError = 1023,
+    // Token buffer errors. Codes 2001-2999. Make sure to preserve
+    // the existing codes & the range. The latter is used in classification impl
     #[strum(message = "Requested token index out of bounds")]
-    TokenIdxOutOfBounds,
+    TokenIdxOutOfBounds = 2001,
     #[strum(message = "String literal range out of bounds")]
-    StringLiteralOutOfBounds,
-    // Internal errors. Add all new ones below the first existing one!
-    // The first one is used as the starting point for the internal error range.
+    StringLiteralOutOfBounds = 2002,
+    // Internal errors. Codes 3001-3999. Make sure to preserve
+    // the existing codes & the range. The latter is used in classification impl
     #[strum(message = "No checkpoint to rollback")]
-    InternalErrorMissingCheckpoint,
+    InternalErrorMissingCheckpoint = 3001,
     #[strum(message = "No token text")]
-    InternalErrorNoTokenText,
+    InternalErrorNoTokenText = 3002,
     #[strum(message = "Internal out of bounds request")]
-    InternalErrorOutOfBounds,
+    InternalErrorOutOfBounds = 3003,
     #[strum(message = "Empty mode stack")]
-    InternalErrorEmptyModeStack,
+    InternalErrorEmptyModeStack = 3004,
     #[strum(message = "No token to replace")]
-    InternalErrorNoTokenToReplace,
+    InternalErrorNoTokenToReplace = 3005,
     #[strum(message = "Unexpected token type")]
-    InternalErrorUnexpectedTokenType,
+    InternalErrorUnexpectedTokenType = 3006,
     #[strum(message = "Unexpected mode stack")]
-    InternalErrorUnexpectedModeStack,
+    InternalErrorUnexpectedModeStack = 3007,
     #[strum(message = "Missing EOF token in buffer")]
-    InternalErrorMissingEOFToken,
+    InternalErrorMissingEOFToken = 3008,
 }
 
 impl ErrorType {
     #[must_use]
     pub fn is_internal(&self) -> bool {
-        (*self as u8) >= ErrorType::InternalErrorMissingCheckpoint as u8
+        (*self as u32) > 3000u32
     }
 
     #[must_use]
     pub fn is_code_error(&self) -> bool {
-        (*self as u8) < ErrorType::TokenIdxOutOfBounds as u8
+        (*self as u32) < 2000u32
     }
 }
 

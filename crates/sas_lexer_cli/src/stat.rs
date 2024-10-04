@@ -183,6 +183,7 @@ fn gen_stats_inner(output: &Option<PathBuf>, samples: &PathBuf) -> Result<(), Po
     let mut file_bytes = Vec::with_capacity(total_files);
     let mut file_readable = Vec::with_capacity(total_files);
     let mut file_lexed = Vec::with_capacity(total_files);
+    let mut file_ws_only_or_empty = Vec::with_capacity(total_files);
     let mut file_str_buf_len = Vec::with_capacity(total_files);
     let mut token_dfs = Vec::with_capacity(total_files);
     let mut error_dfs = Vec::with_capacity(total_files);
@@ -209,12 +210,13 @@ fn gen_stats_inner(output: &Option<PathBuf>, samples: &PathBuf) -> Result<(), Po
 
         let mut readable = true;
         let mut lexed = true;
+        let mut ws_only = false;
         let mut string_buffer_length = None;
 
         if let Ok(contents) = fs::read_to_string(entry_path) {
             // Skip whitespace only files, including empty files
             if contents.trim().is_empty() {
-                readable = false;
+                ws_only = true;
                 lexed = false;
             } else {
                 match safe_lex(&contents, false, false) {
@@ -247,6 +249,7 @@ fn gen_stats_inner(output: &Option<PathBuf>, samples: &PathBuf) -> Result<(), Po
 
         file_readable.push(readable);
         file_lexed.push(lexed);
+        file_ws_only_or_empty.push(ws_only);
         file_str_buf_len.push(string_buffer_length);
     }
 
@@ -427,7 +430,11 @@ fn gen_stats_inner(output: &Option<PathBuf>, samples: &PathBuf) -> Result<(), Po
             [col("error_type")],
             JoinArgs::new(JoinType::Inner),
         )
-        .group_by([col("is_code_error"), col("error_message")])
+        .group_by([
+            col("is_code_error"),
+            col("error_type"),
+            col("error_message"),
+        ])
         .agg([
             len().cast(DataType::UInt32).alias("errors_count"),
             col("file_id").n_unique().alias("files_count"),

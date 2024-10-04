@@ -11,7 +11,9 @@ mod tests;
 mod text;
 pub(crate) mod token_type;
 
-use buffer::{LineIdx, Payload, TokenIdx, TokenInfo, TokenizedBuffer, WorkTokenizedBuffer};
+use buffer::{
+    LineIdx, Payload, TokenInfo, TokenizedBuffer, WorkBufferCheckpoint, WorkTokenizedBuffer,
+};
 use channel::TokenChannel;
 use cursor::Cursor;
 #[cfg(debug_assertions)]
@@ -47,7 +49,7 @@ struct LexerCheckpoint<'src> {
     cur_token_start: CharOffset,
     cur_token_line: LineIdx,
     mode_stack_len: usize,
-    last_token_idx: Option<TokenIdx>,
+    buffer_checkpoint: WorkBufferCheckpoint,
 }
 
 #[derive(Debug)]
@@ -112,6 +114,20 @@ impl<'src> Lexer<'src> {
         })
     }
 
+    #[cfg(debug_assertions)]
+    fn dump_lexer_state_to_console(&self) {
+        println!("Infinite loop detected! Lexer data:");
+
+        println!(
+            "- cur_token_byte_offset: {}",
+            self.cur_token_byte_offset.get()
+        );
+        println!("- cur_token_start: {}", self.cur_token_start.get());
+        println!("- cur_token_line: {:?}", self.cur_token_line);
+        println!("- mode stack: {:?}", self.mode_stack);
+        println!("- checkpoint is set: {}", self.checkpoint.is_some());
+    }
+
     /// Create a checkpoint for the lexer.
     ///
     /// Checkpoint only stores the mode stack length at the moment of the call,
@@ -129,7 +145,7 @@ impl<'src> Lexer<'src> {
             cur_token_start: self.cur_token_start,
             cur_token_line: self.cur_token_line,
             mode_stack_len: self.mode_stack.len(),
-            last_token_idx: self.buffer.last_token(),
+            buffer_checkpoint: self.buffer.checkpoint(),
         });
     }
 
@@ -146,12 +162,12 @@ impl<'src> Lexer<'src> {
             self.cur_token_start = checkpoint.cur_token_start;
             self.cur_token_line = checkpoint.cur_token_line;
             self.mode_stack.truncate(checkpoint.mode_stack_len);
-
-            if let Err(err_type) = self.buffer.rollback(checkpoint.last_token_idx) {
-                // This is an internal error, we should always be able to correctly rollback
-                self.emit_error(err_type);
-            }
+            self.buffer.rollback(checkpoint.buffer_checkpoint);
         } else {
+            #[cfg(debug_assertions)]
+            {
+                self.dump_lexer_state_to_console();
+            }
             // Emit an error, we should not be here
             self.emit_error(ErrorType::InternalErrorMissingCheckpoint);
         }
@@ -347,7 +363,13 @@ impl<'src> Lexer<'src> {
             #[cfg(debug_assertions)]
             {
                 let new_state = (self.cursor.remaining_len(), self.mode_stack.clone());
-                debug_assert!(self.last_state != new_state, "Infinite loop detected");
+                if self.last_state == new_state {
+                    println!("Infinite loop detected!");
+
+                    self.dump_lexer_state_to_console();
+
+                    return (self.buffer, self.errors);
+                };
                 self.last_state = new_state;
             }
         }
@@ -1710,7 +1732,7 @@ impl<'src> Lexer<'src> {
         // - For macro strings we set checkpoint before starting to lex it, which
         // allows extending it with following WS in case of rollback. => checkpoint
         // will already be set.
-        // - For macro var expressions and macro calls checkpoint can be set
+        // - For macro var expressions and macro calls checkpoint must be set
         // after they are lexed, so when they call this closure, it will not be set yet.
         let push_check_assign = |lexer: &mut Lexer| {
             if lexer.checkpoint.is_none() {
@@ -1747,48 +1769,65 @@ impl<'src> Lexer<'src> {
                 }
             }
             '%' => {
-                // We need to clear the checkpoint, for two reasons.
-                // One, macro call uses checkpoint for MaybeMacroCallArgs mode,
-                // and thus we need to clear before trying the macro call lexing.
-                self.clear_checkpoint();
-
-                // Macro call is only viable in arg name in the last
-                // position => when we see the first one,
-                // we can move to check for assignment. But only after
-                // the macro call is fully lexed - meaning after MaybeMacroCallArgs
-                // mode which uses the checkpoint! And we only allowed one at a time.
-                // Hence the following trick...we pre-populate following modes,
-                // but if the % turned out to be NOT a macro call, we will pop them back
-                self.push_mode(LexerMode::MaybeMacroCallArgAssign { flags });
-                self.push_mode(LexerMode::WsOrCStyleCommentOnly);
-                // This last piece will ensure that checkpoint related to this logic
-                // is set only after the macro call is fully lexed.
-                self.push_mode(LexerMode::MakeCheckpoint);
-
-                match self.lex_macro_call(true, true) {
-                    MacroKwType::MacroStat => {
-                        // Hit a following macro statement => pop mode and exit.
-                        // Error has already been emitted by the `lex_macro_call`
-
-                        // Pop here means the 3 modes we pushed above + the normal one pop.
-                        // No need to call safe pop, since we cleared the checkpoint alread.
-                        self.pop_mode();
-                        self.pop_mode();
-                        self.pop_mode();
-                        self.pop_mode();
+                match self.cursor.peek_next() {
+                    '*' => {
+                        self.start_token();
+                        self.lex_macro_comment();
                     }
-                    MacroKwType::None => {
-                        // Symbol - can't be a macro arg name
+                    c if is_valid_sas_name_start(c) => {
+                        // Either a nested macro stat or macro call
 
-                        // Pop the 3 modes we pushed above
-                        self.pop_mode();
-                        self.pop_mode();
-                        self.pop_mode();
+                        // We need to clear the checkpoint, for two reasons.
+                        // One, macro call lexing uses checkpoint for MaybeMacroCallArgs mode,
+                        // we allow only one checkpoint at a time, hence we need to clear
+                        // possible previous checkpoint from this mode before trying the macro call lexing.
+                        // Second, there is no point to revert back to before the macro,
+                        // whether this is arg name or value - the macro will be lexed anyway
+                        self.clear_checkpoint();
 
+                        // Macro call is only viable in arg name in the last
+                        // position => when we see the first one,
+                        // we can move to check for assignment. But only after
+                        // the macro call is fully lexed - meaning after MaybeMacroCallArgs
+                        // mode which uses the checkpoint! And we only allowed one at a time.
+                        // Hence the following trick...we pre-populate following modes,
+                        // but if the % turned out to be NOT a macro call, we will pop them back
+                        self.push_mode(LexerMode::MaybeMacroCallArgAssign { flags });
+                        self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+                        // This last piece will ensure that checkpoint related to this logic
+                        // is set only after the macro call is fully lexed.
+                        self.push_mode(LexerMode::MakeCheckpoint);
+
+                        self.start_token();
+                        self.lex_macro_identifier();
+
+                        // Now check whether it was a statement or a macro call
+                        if self
+                            .buffer
+                            .last_token_info()
+                            .is_some_and(|ti| is_macro_stat_tok_type(ti.token_type))
+                        {
+                            // Hit a following macro statement. This is allowed in SAS,
+                            // and we can't really "see through", so we kinda pretend
+                            // that nothing happend. The macro stat will parse based on
+                            // it's logic and as soon as mandatory stat parts are done,
+                            // it will go back to the current state...
+                            // Theoritically this should work correct in valid code, like:
+                            //
+                            // `%m(1 %if %mi(=a) %then %do; ,arg=value %end;)`
+
+                            // Pop the 3 modes we pre-pushed above since it is not a macro call
+                            // No need to call safe pop, since we cleared the checkpoint alread.
+                            self.pop_mode();
+                            self.pop_mode();
+                            self.pop_mode();
+                        } else {
+                            // tail call. everything has already been set up
+                        }
+                    }
+                    _ => {
+                        // Not a macro, just a percent. switch to value mode
                         switch_to_value_mode(self);
-                    }
-                    MacroKwType::MacroCallOrLabel => {
-                        // tail call. everything has already been set up
                     }
                 }
             }
@@ -1922,21 +1961,21 @@ impl<'src> Lexer<'src> {
                 }
             }
             '%' => {
-                match self.lex_macro_call(true, true) {
-                    MacroKwType::MacroStat => {
-                        // Hit a following macro statement => pop mode and exit.
-                        // Error has already been emitted by the `lex_macro_call`
-                        self.pop_mode();
+                match self.cursor.peek_next() {
+                    '*' => {
+                        self.start_token();
+                        self.lex_macro_comment();
                     }
-                    MacroKwType::None => {
-                        // Just a percent, consume and continue lexing the string
-                        // We could have not consumed it and let the
-                        // string lexing handle it, but this way we
-                        // we avoid one extra check
+                    c if is_valid_sas_name_start(c) => {
+                        // We allow both macro call & stats inside macro call args, so...
+                        self.start_token();
+                        self.lex_macro_identifier();
+                    }
+                    _ => {
+                        // Not a macro, just a percent
                         self.cursor.advance();
                         self.lex_macro_string_in_macro_call_arg_value(flags, parens_nesting_level);
                     }
-                    MacroKwType::MacroCallOrLabel => {}
                 }
             }
             '\n' => {
