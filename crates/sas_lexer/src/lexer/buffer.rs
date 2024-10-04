@@ -252,7 +252,16 @@ impl WorkTokenizedBuffer {
             line,
             payload,
         });
-        TokenIdx::new(self.token_count() - 1)
+
+        // theoretically number of tokens may be larger than text size,
+        // even though it is checked to be no more than u32 bytes.
+        // This is possible because tokens may have no text. But in practice
+        // it is ok to just panic here.
+        if let Ok(idx) = u32::try_from(self.token_infos.len() - 1) {
+            TokenIdx::new(idx)
+        } else {
+            unreachable!("Token index overflow");
+        }
     }
 
     /// Adds an unescaped string to the buffer.
@@ -291,48 +300,34 @@ impl WorkTokenizedBuffer {
         })
     }
 
-    /// Rolls back the buffer to the last token.
-    ///
-    /// This will correctly remove not just the tokens, but also the lines
-    /// after the last token, thus allowing re-lexing from the last token.
-    pub(super) fn rollback(&mut self, last_token: Option<TokenIdx>) -> Result<(), ErrorType> {
-        if let Some(last_token_idx) = last_token {
-            // Get info of the last token to be retained
-            let last_token_info = self
-                .token_infos
-                .get(last_token_idx.0 as usize)
-                .ok_or(ErrorType::InternalErrorOutOfBounds)?;
-
-            // Get the index of the token end line
-            let last_token_end_line =
-                self.get_token_end_line_idx(last_token_idx.0 as usize, last_token_info)?;
-
-            // Remove all tokens after the last token
-            self.truncate(last_token_idx);
-
-            // Remove all lines after the last token end line
-            self.line_infos.truncate(last_token_end_line.0 as usize + 1);
-
-            // We do not bother to remove potentially unused string literals
-            Ok(())
-        } else {
-            Ok(())
+    /// Returns a checkpoint of the buffer.
+    /// Use it to rollback to the last token.
+    #[allow(clippy::cast_possible_truncation)]
+    pub(super) fn checkpoint(&self) -> WorkBufferCheckpoint {
+        WorkBufferCheckpoint {
+            line_count: self.line_infos.len(),
+            token_count: self.token_infos.len(),
+            // SAFETY: we check for source size to be u32, so this is safe
+            string_literals_len: self.string_literals_buffer.len(),
         }
     }
 
-    /// Truncates the buffer to the last token. Use it to "extend" the last
-    /// token to the current cursor position instaed of adding a new token.
+    /// Rolls back the buffer to the last token.
     ///
-    /// Unlike rollback, this does not remove the lines after the last token.
-    #[inline]
-    pub(super) fn truncate(&mut self, last_token: TokenIdx) {
+    /// This will correctly remove not just the tokens, but also the lines
+    /// after the last token and truncate string literals buffer,
+    /// thus allowing re-lexing from the last token.
+    pub(super) fn rollback(&mut self, checkpoint: WorkBufferCheckpoint) {
         // Remove all tokens after the last token
-        self.token_infos.truncate(last_token.0 as usize + 1);
-    }
+        self.token_infos.truncate(checkpoint.token_count);
 
-    // pub(super) fn iter_line_infos(&self) -> std::slice::Iter<'_, LineInfo> {
-    //     self.line_infos.iter()
-    // }
+        // Remove all lines after the last token end line
+        self.line_infos.truncate(checkpoint.line_count);
+
+        // Truncate the string literals buffer
+        self.string_literals_buffer
+            .truncate(checkpoint.string_literals_len);
+    }
 
     pub(super) fn last_line(&self) -> Option<LineIdx> {
         match self.line_count() {
@@ -344,10 +339,6 @@ impl WorkTokenizedBuffer {
     pub(super) fn last_line_info(&self) -> Option<&LineInfo> {
         self.line_infos.last()
     }
-
-    // pub(super) fn iter_token_infos(&self) -> std::slice::Iter<'_, TokenInfo> {
-    //     self.token_infos.iter()
-    // }
 
     pub(super) fn last_token(&self) -> Option<TokenIdx> {
         match self.token_count() {
@@ -367,30 +358,11 @@ impl WorkTokenizedBuffer {
             .find(|tok_info| tok_info.channel == TokenChannel::DEFAULT)
     }
 
-    // pub(super) fn last_token_info_if<F>(&self, mut predicate: F) -> Option<(&TokenInfo, TokenIdx)>
-    // where
-    //     F: FnMut(&TokenInfo) -> bool,
-    // {
-    //     let len = self.token_count();
-    //     self.token_infos
-    //         .iter()
-    //         .rev()
-    //         .enumerate()
-    //         .find_map(|(i, info)| {
-    //             if predicate(info) {
-    //                 // See `token_count` for explanation why truncation is kinda safe
-    //                 #[allow(clippy::cast_possible_truncation)]
-    //                 Some((info, TokenIdx::new(len - 1 - i as u32)))
-    //             } else {
-    //                 None
-    //             }
-    //         })
-    // }
-
     #[inline]
     #[must_use]
     #[allow(clippy::cast_possible_truncation)]
     pub(super) fn line_count(&self) -> u32 {
+        // SAFETY: we check for source size to be u32, so this is safe
         self.line_infos.len() as u32
     }
 
@@ -398,51 +370,18 @@ impl WorkTokenizedBuffer {
     #[must_use]
     #[allow(clippy::cast_possible_truncation)]
     pub(super) fn token_count(&self) -> u32 {
-        // theoretically number of tokens may be larger than text size,
-        // even though it is checked to be no more than u32 bytes.
-        // This is possible because tokens may have no text. But in practice
-        // it is ok to just panic here.
+        // SAFETY: the only way to add tokens is via `add_token` fn,
+        // which checks for overflow, so this is safe
         self.token_infos.len() as u32
     }
+}
 
-    /// Returns index of line info of the token end.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the token index is out of bounds.
-    fn get_token_end_line_idx(
-        &self,
-        tidx: usize,
-        token_info: &TokenInfo,
-    ) -> Result<LineIdx, ErrorType> {
-        // This is more elaborate than the start line, as we need to get the
-        // the start line of the next token and compare the offsets
-        if tidx == self.token_infos.len() - 1 {
-            // Must be EOF token => same as start line of EOF token
-            return Ok(token_info.line);
-        }
-
-        let next_tok_inf = self
-            .token_infos
-            .get(tidx + 1)
-            .ok_or(ErrorType::TokenIdxOutOfBounds)?;
-
-        let (next_token_line_idx, next_token_line_info) = self
-            .line_infos
-            .get(next_tok_inf.line.0 as usize)
-            .map(|li| (next_tok_inf.line, li))
-            .ok_or(ErrorType::TokenIdxOutOfBounds)?;
-
-        Ok(LineIdx::new(
-            next_token_line_idx.0
-            // If the next token starts at the start of the next line,
-            // means this token ends on the previous line, =>
-            // we must subtract 1 from the next token start line index
-            // Otherwise this tokens ends on the same line as the next token starts
-            // SAFETY: it is logicaly imporssible to overflow here
-            - u32::from(next_tok_inf.byte_offset == next_token_line_info.byte_offset),
-        ))
-    }
+/// A checkpoint of the buffer.
+#[derive(Debug)]
+pub(super) struct WorkBufferCheckpoint {
+    line_count: usize,
+    token_count: usize,
+    string_literals_len: usize,
 }
 
 /// A struct with all token information usable without the `TokenizedBuffer`
