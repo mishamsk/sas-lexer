@@ -24,7 +24,6 @@ lexical = { version = "7.0.2", default-features = false, features = [
     "parse-integers",
     "format",
 ] }
-tinyvec = { version = "1.8.0", features = ["alloc"] }
 
 [dev-dependencies]
 criterion = { workspace = true, features = ["html_reports"] }
