@@ -1291,6 +1291,22 @@ fn test_macro_let_error_recovery(
         (";", TokenType::SEMI),
     ]
 )]
+// This also implicitly tests multi-line rollback
+#[case::no_args_call("%t \n\n%*c;",
+    vec![
+        ("%t", TokenType::MacroIdentifier),
+        (" \n\n", TokenType::WS),
+        ("%*c;", TokenType::MacroComment),
+    ]
+)]
+#[case::multi_line_arg_value("%t(s \n\ne)",
+    vec![
+        ("%t", TokenType::MacroIdentifier),
+        ("(", TokenType::LPAREN),
+        ("s \n\ne", TokenType::MacroString),        
+        (")", TokenType::RPAREN),
+    ]
+)]
 fn test_macro_call(#[case] contents: &str, #[case] expected_token: Vec<impl TokenTestCase>) {
     assert_lexing(contents, expected_token, NO_ERRORS);
 }
@@ -1417,9 +1433,9 @@ fn test_macro_call(#[case] contents: &str, #[case] expected_token: Vec<impl Toke
 ])]
 fn test_macro_call_arg_disambiguation(#[case] expected_tokens: Vec<(&str, TokenType)>) {
     let pre_ws = vec![
-        (" ", TokenType::WS),
+        (" \n", TokenType::WS),
         ("/*c*/", TokenType::CStyleComment),
-        (" ", TokenType::WS),
+        ("\n ", TokenType::WS),
     ];
 
     let mut all_expected_tokens =
@@ -3571,11 +3587,12 @@ vec![
     NO_ERRORS,
 )]
 // Three following stats that we "allow" for * to be recognized as math op
-#[case::do_end_not_comment("%do; * /*c*/ 2 %end;",
+// This one also test multi-line rollback
+#[case::do_end_not_comment("%do;\n\t* /*c*/ 2 %end;",
     vec![
         ("%do", TokenType::KwmDo, Payload::None),
         (";", TokenType::SEMI, Payload::None),
-        (" ", TokenType::WS, Payload::None),
+        ("\n\t", TokenType::WS, Payload::None),
         ("*", TokenType::STAR, Payload::None),
         (" ", TokenType::WS, Payload::None),
         ("/*c*/", TokenType::CStyleComment, Payload::None),
