@@ -1,5 +1,7 @@
-use super::util::{error_to_string, token_to_string};
-use crate::lex;
+use super::{
+    super::{lex, LexResult},
+    util::{error_to_string, token_to_string},
+};
 use insta::assert_yaml_snapshot;
 use rstest::rstest;
 use std::{fs, path::PathBuf};
@@ -27,7 +29,11 @@ fn test_snapshots(#[files("src/lexer/tests/samples/**/*.sas")] path: PathBuf) {
     set_snapshot_suffix!("{}", snap_name_str);
 
     let contents = fs::read_to_string(&path).unwrap();
-    let (tok_buffer, errors) = lex(&contents).unwrap();
+    let LexResult {
+        buffer: tok_buffer,
+        errors,
+        ..
+    } = lex(&contents).unwrap();
     let tokens: Vec<String> = tok_buffer
         .into_iter()
         .map(|tidx| token_to_string(tidx, &tok_buffer, &contents))
@@ -56,7 +62,9 @@ fn test_snapshots(#[files("src/lexer/tests/samples/**/*.sas")] path: PathBuf) {
 fn test_full_coverage(#[files("src/lexer/tests/samples/**/*.sas")] path: PathBuf) {
     let contents = fs::read_to_string(&path).unwrap();
 
-    let (tok_buffer, _) = lex(&contents).unwrap();
+    let LexResult {
+        buffer: tok_buffer, ..
+    } = lex(&contents).unwrap();
 
     let mut end = 0;
 

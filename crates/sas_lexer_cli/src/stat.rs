@@ -6,7 +6,7 @@ use std::{fs, path::PathBuf};
 use indicatif::{ProgressBar, ProgressStyle};
 use polars::prelude::*;
 use sas_lexer::{
-    error::{ErrorInfo, ErrorType},
+    error::{ErrorInfo, ErrorKind},
     Payload, ResolvedTokenInfo,
 };
 use strum::IntoEnumIterator;
@@ -36,25 +36,25 @@ fn write_to_disk(df: &LazyFrame, path: &PathBuf) -> PolarsResult<()> {
 fn create_error_dict_df() -> PolarsResult<LazyFrame> {
     Ok(DataFrame::new(vec![
         Series::new(
-            "error_type".into(),
-            ErrorType::iter().map(|e| e as u32).collect::<Vec<_>>(),
+            "error_kind".into(),
+            ErrorKind::iter().map(|e| e as u32).collect::<Vec<_>>(),
         ),
         Series::new(
             "is_code_error".into(),
-            ErrorType::iter()
+            ErrorKind::iter()
                 .map(|e| e.is_code_error())
                 .collect::<Vec<_>>(),
         ),
         Series::new(
             "error_message".into(),
-            ErrorType::iter().map(|e| e.to_string()).collect::<Vec<_>>(),
+            ErrorKind::iter().map(|e| e.to_string()).collect::<Vec<_>>(),
         ),
     ])?
     .lazy())
 }
 
 fn create_error_df(file_id: u32, errors: &Vec<ErrorInfo>) -> PolarsResult<LazyFrame> {
-    let mut error_type = Vec::with_capacity(errors.len());
+    let mut error_kind = Vec::with_capacity(errors.len());
     let mut at_byte_offset = Vec::with_capacity(errors.len());
     let mut at_char_offset = Vec::with_capacity(errors.len());
     let mut on_line = Vec::with_capacity(errors.len());
@@ -62,7 +62,7 @@ fn create_error_df(file_id: u32, errors: &Vec<ErrorInfo>) -> PolarsResult<LazyFr
     let mut last_token = Vec::with_capacity(errors.len());
 
     for error in errors {
-        error_type.push(error.error_type() as u32);
+        error_kind.push(error.error_kind() as u32);
         at_byte_offset.push(error.at_byte_offset());
         at_char_offset.push(error.at_char_offset());
         on_line.push(error.on_line());
@@ -72,7 +72,7 @@ fn create_error_df(file_id: u32, errors: &Vec<ErrorInfo>) -> PolarsResult<LazyFr
     }
 
     let df = DataFrame::new(vec![
-        Series::new("error_type".into(), error_type),
+        Series::new("error_kind".into(), error_kind),
         Series::new("at_byte_offset".into(), at_byte_offset),
         Series::new("at_char_offset".into(), at_char_offset),
         Series::new("on_line".into(), on_line),
@@ -185,6 +185,8 @@ fn gen_stats_inner(output: &Option<PathBuf>, samples: &PathBuf) -> Result<(), Po
     let mut file_lexed = Vec::with_capacity(total_files);
     let mut file_ws_only_or_empty = Vec::with_capacity(total_files);
     let mut file_str_buf_len = Vec::with_capacity(total_files);
+    let mut file_lex_duration = Vec::with_capacity(total_files);
+    let mut file_max_mode_stack_depth = Vec::with_capacity(total_files);
     let mut token_dfs = Vec::with_capacity(total_files);
     let mut error_dfs = Vec::with_capacity(total_files);
 
@@ -212,6 +214,8 @@ fn gen_stats_inner(output: &Option<PathBuf>, samples: &PathBuf) -> Result<(), Po
         let mut lexed = true;
         let mut ws_only = false;
         let mut string_buffer_length = None;
+        let mut duration = None;
+        let mut max_mode_stack_depth = None;
 
         if let Ok(contents) = fs::read_to_string(entry_path) {
             // Skip whitespace only files, including empty files
@@ -220,7 +224,7 @@ fn gen_stats_inner(output: &Option<PathBuf>, samples: &PathBuf) -> Result<(), Po
                 lexed = false;
             } else {
                 match safe_lex(&contents, false, false) {
-                    Some((tok_buffer, errors, _)) => {
+                    Some((tok_buffer, errors, dur, stack_depth)) => {
                         let tokens = tok_buffer.into_resolved_token_vec();
                         let string_literals_buffer = tok_buffer.string_literals_buffer();
                         string_buffer_length = Some(string_literals_buffer.len() as u32);
@@ -236,6 +240,9 @@ fn gen_stats_inner(output: &Option<PathBuf>, samples: &PathBuf) -> Result<(), Po
                             files_with_errors += 1;
                             error_dfs.push(create_error_df(file_id, &errors)?);
                         }
+
+                        duration = Some(dur);
+                        max_mode_stack_depth = stack_depth.map(|d| d as u64);
                     }
                     None => {
                         lexed = false;
@@ -251,13 +258,30 @@ fn gen_stats_inner(output: &Option<PathBuf>, samples: &PathBuf) -> Result<(), Po
         file_lexed.push(lexed);
         file_ws_only_or_empty.push(ws_only);
         file_str_buf_len.push(string_buffer_length);
+        file_lex_duration.push(duration);
+        file_max_mode_stack_depth.push(max_mode_stack_depth);
     }
 
     let total_readable = file_readable.clone().iter().filter(|&&b| b).count();
+    let total_readable_pct = total_readable as f64 / total_files as f64 * 100.0;
+
+    let total_non_empty =
+        total_readable - file_ws_only_or_empty.clone().iter().filter(|&&b| b).count();
+    let total_non_empty_pct = total_non_empty as f64 / total_files as f64 * 100.0;
+
     let total_lexed = file_lexed.clone().iter().filter(|&&b| b).count();
+    let total_lexed_pct = total_lexed as f64 / total_files as f64 * 100.0;
+
+    let max_mode_stack_depth_str = file_max_mode_stack_depth
+        .iter()
+        .filter_map(|d| *d)
+        .max()
+        .map_or("Unknown in release build".to_string(), |d| format!("{d}"));
 
     pb.finish_with_message(format!(
-        "Done. Readable: {total_readable}/{total_files}, Lexed: {total_lexed}/{total_files}",
+        "Done. Total files: {total_files}.\nReadable: {total_readable_pct:.2}%.\n\
+        Non-empty: {total_non_empty_pct:.2}%.\nLexed: {total_lexed_pct:.2}%.\n\
+        Max mode stack depth: {max_mode_stack_depth_str}.",
     ));
 
     println!("Combining all DataFrame's...");
@@ -268,13 +292,23 @@ fn gen_stats_inner(output: &Option<PathBuf>, samples: &PathBuf) -> Result<(), Po
 
     println!("Generating sources DataFrame...");
 
+    let lex_duration = file_lex_duration
+        .iter()
+        .map(|d| d.map(|d| d.as_millis() as f64))
+        .collect::<Float64Chunked>()
+        .into_series()
+        .cast(&DataType::Duration(TimeUnit::Milliseconds))?;
+
     let sources_df = df!(
         "file_id" => file_ids,
         "name" => file_names,
         "size" => file_bytes,
         "readable" => file_readable,
         "lexed" => file_lexed,
+        "ws_only_or_empty" => file_ws_only_or_empty,
         "string_buffer_length" => file_str_buf_len,
+        "lex_duration" => lex_duration,
+        "max_mode_stack_depth" => file_max_mode_stack_depth,
     )?
     .clone()
     .lazy();
@@ -426,13 +460,13 @@ fn gen_stats_inner(output: &Option<PathBuf>, samples: &PathBuf) -> Result<(), Po
         .clone()
         .join(
             error_dict_df,
-            [col("error_type")],
-            [col("error_type")],
+            [col("error_kind")],
+            [col("error_kind")],
             JoinArgs::new(JoinType::Inner),
         )
         .group_by([
             col("is_code_error"),
-            col("error_type"),
+            col("error_kind"),
             col("error_message"),
         ])
         .agg([

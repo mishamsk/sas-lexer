@@ -18,7 +18,7 @@ use channel::TokenChannel;
 use cursor::Cursor;
 #[cfg(debug_assertions)]
 use cursor::EOF_CHAR;
-use error::{ErrorInfo, ErrorType};
+use error::{ErrorInfo, ErrorKind};
 use lexer_mode::{
     LexerMode, MacroArgContext, MacroArgNameValueFlags, MacroEvalExprFlags,
     MacroEvalNextArgumentMode, MacroEvalNumericMode,
@@ -78,10 +78,20 @@ struct Lexer<'src> {
     last_state: (u32, Vec<LexerMode>),
 }
 
+/// Result of lexing
+#[derive(Debug)]
+pub struct LexResult {
+    pub buffer: TokenizedBuffer,
+    pub errors: Vec<ErrorInfo>,
+
+    #[cfg(feature = "opti_stats")]
+    pub max_mode_stack_depth: usize,
+}
+
 impl<'src> Lexer<'src> {
-    fn new(source: &str, init_mode: Option<LexerMode>) -> Result<Lexer, &'static str> {
+    fn new(source: &str, init_mode: Option<LexerMode>) -> Result<Lexer, ErrorKind> {
         let Ok(source_len) = u32::try_from(source.len()) else {
-            return Err("Lexing of files larger than 4GB is not supported");
+            return Err(ErrorKind::FileTooLarge);
         };
 
         let mut cursor = cursor::Cursor::new(source);
@@ -169,7 +179,7 @@ impl<'src> Lexer<'src> {
                 self.dump_lexer_state_to_console();
             }
             // Emit an error, we should not be here
-            self.emit_error(ErrorType::InternalErrorMissingCheckpoint);
+            self.emit_error(ErrorKind::InternalErrorMissingCheckpoint);
         }
     }
 
@@ -189,7 +199,7 @@ impl<'src> Lexer<'src> {
             .get(self.cur_token_byte_offset.into()..self.cur_byte_offset().into())
             .unwrap_or_else(|| {
                 // This is an internal error, we should always have a token text
-                self.emit_error(ErrorType::InternalErrorNoTokenText);
+                self.emit_error(ErrorKind::InternalErrorNoTokenText);
                 ""
             })
     }
@@ -208,7 +218,7 @@ impl<'src> Lexer<'src> {
             .get(start_byte_offset.into()..end_byte_offset.into())
             .unwrap_or_else(|| {
                 // This is an internal error, this should at least be an empty string
-                self.emit_error(ErrorType::InternalErrorOutOfBounds);
+                self.emit_error(ErrorKind::InternalErrorOutOfBounds);
                 ""
             });
 
@@ -222,7 +232,7 @@ impl<'src> Lexer<'src> {
 
     fn pop_mode(&mut self) {
         if self.mode_stack.pop().is_none() {
-            self.emit_error(ErrorType::InternalErrorEmptyModeStack);
+            self.emit_error(ErrorKind::InternalErrorEmptyModeStack);
             self.push_mode(LexerMode::default());
         };
     }
@@ -231,7 +241,7 @@ impl<'src> Lexer<'src> {
         match self.mode_stack.last() {
             Some(mode) => mode.clone(),
             None => {
-                self.emit_error(ErrorType::InternalErrorEmptyModeStack);
+                self.emit_error(ErrorKind::InternalErrorEmptyModeStack);
                 self.push_mode(LexerMode::default());
                 LexerMode::default()
             }
@@ -312,7 +322,7 @@ impl<'src> Lexer<'src> {
     ) {
         if !self.buffer.update_last_token(channel, token_type, payload) {
             // This is an internal error, we should always have a token to replace
-            self.emit_error(ErrorType::InternalErrorNoTokenToReplace);
+            self.emit_error(ErrorKind::InternalErrorNoTokenToReplace);
 
             self.buffer.add_token(
                 channel,
@@ -325,7 +335,7 @@ impl<'src> Lexer<'src> {
         }
     }
 
-    fn prep_error_info_at_cur_offset(&self, error: ErrorType) -> ErrorInfo {
+    fn prep_error_info_at_cur_offset(&self, error: ErrorKind) -> ErrorInfo {
         let last_line_char_offset = if let Some(line_info) = self.buffer.last_line_info() {
             line_info.start().get()
         } else {
@@ -345,7 +355,7 @@ impl<'src> Lexer<'src> {
     }
 
     #[inline]
-    fn emit_error(&mut self, error: ErrorType) {
+    fn emit_error(&mut self, error: ErrorKind) {
         self.errors.push(self.prep_error_info_at_cur_offset(error));
     }
 
@@ -356,9 +366,17 @@ impl<'src> Lexer<'src> {
 
     /// Main lexing loop, responsible for driving the lexing forwards
     /// as well as finalizing it with a mandatroy EOF roken.
-    fn lex(mut self) -> (WorkTokenizedBuffer, Vec<ErrorInfo>) {
+    fn lex(mut self) -> Result<LexResult, ErrorKind> {
+        #[cfg(feature = "opti_stats")]
+        let mut max_mode_stack_depth = 0usize;
+
         while let Some(next_char) = self.cursor.peek() {
             self.lex_token(next_char);
+
+            #[cfg(feature = "opti_stats")]
+            {
+                max_mode_stack_depth = max_mode_stack_depth.max(self.mode_stack.len());
+            }
 
             #[cfg(debug_assertions)]
             {
@@ -368,7 +386,13 @@ impl<'src> Lexer<'src> {
 
                     self.dump_lexer_state_to_console();
 
-                    return (self.buffer, self.errors);
+                    self.emit_error(ErrorKind::InternalErrorInfiniteLoop);
+
+                    return Ok(LexResult {
+                        buffer: self.buffer.into_detached(self.source),
+                        errors: self.errors,
+                        max_mode_stack_depth,
+                    });
                 };
                 self.last_state = new_state;
             }
@@ -376,7 +400,22 @@ impl<'src> Lexer<'src> {
 
         self.finalize_lexing();
 
-        (self.buffer, self.errors)
+        #[cfg(feature = "opti_stats")]
+        {
+            Ok(LexResult {
+                buffer: self.buffer.into_detached(self.source),
+                errors: self.errors,
+                max_mode_stack_depth,
+            })
+        }
+
+        #[cfg(not(feature = "opti_stats"))]
+        {
+            Ok(LexResult {
+                buffer: self.buffer.into_detached(self.source),
+                errors: self.errors,
+            })
+        }
     }
 
     /// This function gracefully unwinds the stack, emitting any ephemeral
@@ -423,7 +462,7 @@ impl<'src> Lexer<'src> {
                     // closing parens to balance it out
 
                     if pnl > 0 {
-                        self.emit_error(ErrorType::MissingExpectedRParen);
+                        self.emit_error(ErrorKind::MissingExpectedRParen);
 
                         for _ in 0..pnl {
                             self.emit_token(
@@ -447,7 +486,7 @@ impl<'src> Lexer<'src> {
                 LexerMode::MacroDefName => {
                     // This would trigger an error in SAS. For simplicity we use the same
                     // error text for macro name and args, as it is close enough approximation
-                    self.emit_error(ErrorType::InvalidMacroDefName);
+                    self.emit_error(ErrorKind::InvalidMacroDefName);
                 }
             }
         }
@@ -506,7 +545,7 @@ impl<'src> Lexer<'src> {
                     // Not a EOF and not a ';' => expected token not found.
                     // Emit an error which will point at previous token.
                     // The token itself is emitted below
-                    self.emit_error(ErrorType::MissingExpectedSemiOrEOF);
+                    self.emit_error(ErrorKind::MissingExpectedSemiOrEOF);
                 }
 
                 self.emit_token(TokenChannel::DEFAULT, TokenType::SEMI, Payload::None);
@@ -602,15 +641,15 @@ impl<'src> Lexer<'src> {
                 | TokenType::FSLASH
         ));
 
-        let (expected_char, error_type) = match tok_type {
-            TokenType::RPAREN => (')', ErrorType::MissingExpectedRParen),
-            TokenType::ASSIGN => ('=', ErrorType::MissingExpectedAssign),
-            TokenType::LPAREN => ('(', ErrorType::MissingExpectedLParen),
-            TokenType::COMMA => (',', ErrorType::MissingExpectedComma),
-            TokenType::FSLASH => ('/', ErrorType::MissingExpectedFSlash),
+        let (expected_char, error_kind) = match tok_type {
+            TokenType::RPAREN => (')', ErrorKind::MissingExpectedRParen),
+            TokenType::ASSIGN => ('=', ErrorKind::MissingExpectedAssign),
+            TokenType::LPAREN => ('(', ErrorKind::MissingExpectedLParen),
+            TokenType::COMMA => (',', ErrorKind::MissingExpectedComma),
+            TokenType::FSLASH => ('/', ErrorKind::MissingExpectedFSlash),
             _ => {
                 // This is an internal error, we should not have this token type here
-                self.emit_error(ErrorType::InternalErrorUnexpectedTokenType);
+                self.emit_error(ErrorKind::InternalErrorUnexpectedTokenType);
                 self.pop_mode();
                 return;
             }
@@ -619,7 +658,7 @@ impl<'src> Lexer<'src> {
         if next_char.map_or(true, |c| c != expected_char) {
             // Expected token not found. Emit an error which will point at previous token
             // The token itself is emitted below
-            self.emit_error(error_type);
+            self.emit_error(error_kind);
         } else {
             // Consume the expected content
             self.cursor.advance();
@@ -1081,7 +1120,7 @@ impl<'src> Lexer<'src> {
             )
             .unwrap_or_else(|| {
                 // This is an internal error, we should always have a token text
-                self.emit_error(ErrorType::InternalErrorNoTokenText);
+                self.emit_error(ErrorKind::InternalErrorNoTokenText);
                 ""
             });
 
@@ -1224,7 +1263,7 @@ impl<'src> Lexer<'src> {
                     // It doesn't allow bare empty condition.
 
                     if expr_end {
-                        self.emit_error(ErrorType::CharExpressionInEvalContext);
+                        self.emit_error(ErrorKind::CharExpressionInEvalContext);
                     }
 
                     self.emit_empty_macro_string_token();
@@ -1237,7 +1276,7 @@ impl<'src> Lexer<'src> {
         &mut self,
         next_char: char,
         first_token: bool,
-        err: Option<ErrorType>,
+        err: Option<ErrorKind>,
     ) {
         debug_assert!(
             matches!(self.mode(), LexerMode::MacroVarNameExpr(f, e) if f != first_token && e == err)
@@ -1268,7 +1307,7 @@ impl<'src> Lexer<'src> {
             {
                 *found_name = true;
             } else {
-                lexer.emit_error(ErrorType::InternalErrorUnexpectedModeStack);
+                lexer.emit_error(ErrorKind::InternalErrorUnexpectedModeStack);
             };
         };
 
@@ -2590,7 +2629,7 @@ impl<'src> Lexer<'src> {
             TokenType::CStyleComment,
             Payload::None,
         );
-        self.emit_error(ErrorType::UnterminatedComment);
+        self.emit_error(ErrorKind::UnterminatedComment);
     }
 
     #[inline]
@@ -2674,7 +2713,7 @@ impl<'src> Lexer<'src> {
 
                 self.emit_token(TokenChannel::DEFAULT, TokenType::StringLiteral, payload);
 
-                self.emit_error(ErrorType::UnterminatedStringLiteral);
+                self.emit_error(ErrorKind::UnterminatedStringLiteral);
                 return;
             }
         }
@@ -2854,7 +2893,7 @@ impl<'src> Lexer<'src> {
                             // We have to first save the error info at the last byte offset,
                             // and only then lex the macro identifier to report at the correct position
                             let err_info = self
-                                .prep_error_info_at_cur_offset(ErrorType::OpenCodeRecursionError);
+                                .prep_error_info_at_cur_offset(ErrorKind::OpenCodeRecursionError);
 
                             self.lex_macro_identifier();
 
@@ -3022,7 +3061,7 @@ impl<'src> Lexer<'src> {
         } else {
             self.emit_token(TokenChannel::DEFAULT, TokenType::StringExprEnd, payload);
         }
-        self.emit_error(ErrorType::UnterminatedStringLiteral);
+        self.emit_error(ErrorKind::UnterminatedStringLiteral);
         self.pop_mode();
     }
 
@@ -3246,9 +3285,9 @@ impl<'src> Lexer<'src> {
             // This would trigger an error in SAS. For simplicity we use the same
             // error text for macro name and args, as it is close enough approximation
             if is_argument {
-                self.emit_error(ErrorType::InvalidMacroDefArgName);
+                self.emit_error(ErrorKind::InvalidMacroDefArgName);
             } else {
-                self.emit_error(ErrorType::InvalidMacroDefName);
+                self.emit_error(ErrorKind::InvalidMacroDefName);
             };
 
             // Report that we did not lex a token
@@ -3343,7 +3382,7 @@ impl<'src> Lexer<'src> {
                     if rem_text.len() < ending_len {
                         // Not enough characters left to match the ending
                         // Emit error, but assume that we found the ending
-                        self.emit_error(ErrorType::UnterminatedDatalines);
+                        self.emit_error(ErrorKind::UnterminatedDatalines);
                         break;
                     }
 
@@ -3463,7 +3502,7 @@ impl<'src> Lexer<'src> {
                     |length| NumericParserResult {
                         token: (TokenType::FloatLiteral, Payload::Float(0.0)),
                         length,
-                        error: Some(ErrorType::InvalidNumericLiteral),
+                        error: Some(ErrorKind::InvalidNumericLiteral),
                     },
                 )
             }
@@ -3498,7 +3537,7 @@ impl<'src> Lexer<'src> {
 
         // And if there was a missing trailing x/X, emit the error
         if missing_trailing_x {
-            self.emit_error(ErrorType::UnterminatedHexNumericLiteral);
+            self.emit_error(ErrorKind::UnterminatedHexNumericLiteral);
         }
     }
 
@@ -3608,7 +3647,7 @@ impl<'src> Lexer<'src> {
                             // %end;
                             // ;
                             // ```
-                            self.emit_error(ErrorType::MaybeInvalidOrOutOfOrderStatement);
+                            self.emit_error(ErrorKind::MaybeInvalidOrOutOfOrderStatement);
 
                             // Report that we lexed a token
                             return true;
@@ -3851,7 +3890,7 @@ impl<'src> Lexer<'src> {
                 // Unknown something, consume the character, emit an unknown token, push error
                 self.cursor.advance();
                 self.emit_token(TokenChannel::HIDDEN, TokenType::UNKNOWN, Payload::None);
-                self.emit_error(ErrorType::UnexpectedCharacter);
+                self.emit_error(ErrorKind::UnexpectedCharacter);
             }
         }
     }
@@ -3967,7 +4006,7 @@ impl<'src> Lexer<'src> {
             // ERROR: Open code statement recursion detected.
             // so we emit an error here in addition to missing )
             // that will emit during mode stack pop
-            self.emit_error(ErrorType::OpenCodeRecursionError);
+            self.emit_error(ErrorKind::OpenCodeRecursionError);
         }
 
         MacroKwType::MacroStat
@@ -3999,7 +4038,7 @@ impl<'src> Lexer<'src> {
                     TokenType::MacroComment,
                     Payload::None,
                 );
-                self.emit_error(ErrorType::UnterminatedComment);
+                self.emit_error(ErrorKind::UnterminatedComment);
                 return;
             }
         }
@@ -4106,7 +4145,7 @@ impl<'src> Lexer<'src> {
                 self.push_mode(LexerMode::WsOrCStyleCommentOnly);
                 self.push_mode(LexerMode::MacroVarNameExpr(
                     false,
-                    Some(ErrorType::UnexpectedSemiInDoLoop),
+                    Some(ErrorKind::UnexpectedSemiInDoLoop),
                 ));
             }
         }
@@ -4144,14 +4183,14 @@ impl<'src> Lexer<'src> {
                 // get to the correct behavior in static lexing.
 
                 // States are pushed in reverse order
-                self.expect_macro_let_stat(ErrorType::InvalidMacroLocalGlobalReadonlyVarName);
+                self.expect_macro_let_stat(ErrorKind::InvalidMacroLocalGlobalReadonlyVarName);
 
                 self.push_mode(LexerMode::MacroVarNameExpr(
                     false,
                     Some(if is_local {
-                        ErrorType::MissingMacroLocalReadonlyKw
+                        ErrorKind::MissingMacroLocalReadonlyKw
                     } else {
-                        ErrorType::MissingMacroGlobalReadonlyKw
+                        ErrorKind::MissingMacroGlobalReadonlyKw
                     }),
                 ));
                 self.push_mode(LexerMode::WsOrCStyleCommentOnly);
@@ -4333,7 +4372,7 @@ impl<'src> Lexer<'src> {
                 self.expect_macro_until_while_stat_args();
             }
             TokenTypeMacroCallOrStat::KwmLet => {
-                self.expect_macro_let_stat(ErrorType::InvalidMacroLetVarName);
+                self.expect_macro_let_stat(ErrorKind::InvalidMacroLetVarName);
             }
             TokenTypeMacroCallOrStat::KwmLocal | TokenTypeMacroCallOrStat::KwmGlobal => {
                 // First skip WS and comments, then put lexer into dispatch mode
@@ -4600,7 +4639,7 @@ impl<'src> Lexer<'src> {
     /// We do not handle the trailing WS for the initializer, instead defer it to the
     /// parser, to avoid excessive lookahead
     #[inline]
-    fn expect_macro_let_stat(&mut self, err_type: ErrorType) {
+    fn expect_macro_let_stat(&mut self, err_type: ErrorKind) {
         self.push_mode(LexerMode::ExpectSemiOrEOF);
         self.push_mode(LexerMode::MacroSemiTerminatedTextExpr);
         self.push_mode(LexerMode::WsOrCStyleCommentOnly);
@@ -4629,7 +4668,7 @@ impl<'src> Lexer<'src> {
         self.push_mode(LexerMode::WsOrCStyleCommentOnly);
         self.push_mode(LexerMode::MacroVarNameExpr(
             false,
-            Some(ErrorType::InvalidOrOutOfOrderStatement),
+            Some(ErrorKind::InvalidOrOutOfOrderStatement),
         ));
         self.push_mode(LexerMode::WsOrCStyleCommentOnly);
     }
@@ -4665,11 +4704,7 @@ impl<'src> Lexer<'src> {
 /// let result = lex(&source);
 /// assert!(result.is_ok());
 /// ```
-pub fn lex<S: AsRef<str>>(source: &S) -> Result<(TokenizedBuffer, Vec<ErrorInfo>), String> {
+pub fn lex<S: AsRef<str>>(source: &S) -> Result<LexResult, ErrorKind> {
     let lexer = Lexer::new(source.as_ref(), None)?;
-    let (buffer, errors) = lexer.lex();
-    match buffer.into_detached() {
-        Ok(buffer) => Ok((buffer, errors)),
-        Err(err) => Err(err.to_string()),
-    }
+    lexer.lex()
 }

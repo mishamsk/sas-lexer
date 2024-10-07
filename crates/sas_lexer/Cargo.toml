@@ -17,7 +17,14 @@ serde = { workspace = true, features = ["derive"], optional = true }
 serde_repr = { version = "0.1.19", optional = true }
 strum = { workspace = true }
 unicode-ident = "1.0.12"
-lexical = { version = "7.0.2", default-features = false, features = ["std", "power-of-two", "parse-floats", "parse-integers", "format"] }
+lexical = { version = "7.0.2", default-features = false, features = [
+    "std",
+    "power-of-two",
+    "parse-floats",
+    "parse-integers",
+    "format",
+] }
+tinyvec = { version = "1.8.0", features = ["alloc"] }
 
 [dev-dependencies]
 criterion = { workspace = true, features = ["html_reports"] }
@@ -28,6 +35,7 @@ walkdir = { workspace = true }
 pprof = { workspace = true, features = ["flamegraph", "criterion"] }
 
 [features]
+opti_stats = []
 serde = ["dep:serde", "dep:rmp-serde", "dep:serde_repr"]
 
 [lints]

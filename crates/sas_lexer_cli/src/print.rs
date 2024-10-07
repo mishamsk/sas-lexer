@@ -81,7 +81,7 @@ pub(crate) fn error_to_string(
     string_literals_buffer: &str,
     source: &str,
 ) -> String {
-    let error_type = error.error_type();
+    let error_kind = error.error_kind();
     let at_byte_offset = error.at_byte_offset();
     let at_char_offset = error.at_char_offset();
     let on_line = error.on_line();
@@ -99,7 +99,7 @@ pub(crate) fn error_to_string(
     };
 
     format!(
-        "{error_type:?} at byte offset {at_byte_offset}, char offset {at_char_offset}, \
+        "{error_kind:?} at byte offset {at_byte_offset}, char offset {at_char_offset}, \
         L{on_line}:C{at_column}. Last token: {last_token_str}"
     )
 }

@@ -6,8 +6,8 @@ use strum::{EnumIter, EnumMessage};
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, EnumIter, EnumMessage)]
 #[cfg_attr(test, derive(IntoStaticStr))]
-#[repr(u32)]
-pub enum ErrorType {
+#[repr(u16)]
+pub enum ErrorKind {
     // Source code errors. Codes 1001-1999. Make sure to preserve
     // the existing codes & the range. The latter is used in classification impl
     #[strum(message = "Unterminated string literal")]
@@ -68,45 +68,51 @@ pub enum ErrorType {
     UnexpectedSemiInDoLoop = 1022,
     #[strum(message = "ERROR: Open code statement recursion detected.")]
     OpenCodeRecursionError = 1023,
-    // Token buffer errors. Codes 2001-2999. Make sure to preserve
+    // Token buffer API call user initiated errors.
+    // Codes 2001-2999. Make sure to preserve
     // the existing codes & the range. The latter is used in classification impl
     #[strum(message = "Requested token index out of bounds")]
     TokenIdxOutOfBounds = 2001,
     #[strum(message = "String literal range out of bounds")]
     StringLiteralOutOfBounds = 2002,
-    // Internal errors. Codes 3001-3999. Make sure to preserve
+    // Lexer API call user initiated errors.
+    // Codes 3001-3999. Make sure to preserve
+    // the existing codes & the range. The latter is used in classification impl
+    #[strum(message = "Lexing of files larger than 4GB is not supported")]
+    FileTooLarge = 3001,
+    // Internal errors. Codes 9001-9999. Make sure to preserve
     // the existing codes & the range. The latter is used in classification impl
     #[strum(message = "No checkpoint to rollback")]
-    InternalErrorMissingCheckpoint = 3001,
+    InternalErrorMissingCheckpoint = 9001,
     #[strum(message = "No token text")]
-    InternalErrorNoTokenText = 3002,
+    InternalErrorNoTokenText = 9002,
     #[strum(message = "Internal out of bounds request")]
-    InternalErrorOutOfBounds = 3003,
+    InternalErrorOutOfBounds = 9009,
     #[strum(message = "Empty mode stack")]
-    InternalErrorEmptyModeStack = 3004,
+    InternalErrorEmptyModeStack = 9004,
     #[strum(message = "No token to replace")]
-    InternalErrorNoTokenToReplace = 3005,
+    InternalErrorNoTokenToReplace = 9005,
     #[strum(message = "Unexpected token type")]
-    InternalErrorUnexpectedTokenType = 3006,
+    InternalErrorUnexpectedTokenType = 9006,
     #[strum(message = "Unexpected mode stack")]
-    InternalErrorUnexpectedModeStack = 3007,
-    #[strum(message = "Missing EOF token in buffer")]
-    InternalErrorMissingEOFToken = 3008,
+    InternalErrorUnexpectedModeStack = 9007,
+    #[strum(message = "Infinite loop detected")]
+    InternalErrorInfiniteLoop = 9008,
 }
 
-impl ErrorType {
+impl ErrorKind {
     #[must_use]
     pub fn is_internal(&self) -> bool {
-        (*self as u32) > 3000u32
+        (*self as u16) > 9000u16 && (*self as u16) < 10000u16
     }
 
     #[must_use]
     pub fn is_code_error(&self) -> bool {
-        (*self as u32) < 2000u32
+        (*self as u16) > 1000u16 && (*self as u16) < 2000u16
     }
 }
 
-impl Display for ErrorType {
+impl Display for ErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.get_message().unwrap_or("Unknown error"))
     }
@@ -114,7 +120,7 @@ impl Display for ErrorType {
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct ErrorInfo {
-    error_type: ErrorType,
+    error_kind: ErrorKind,
     at_byte_offset: u32,
     at_char_offset: u32,
     on_line: u32,
@@ -125,7 +131,7 @@ pub struct ErrorInfo {
 impl ErrorInfo {
     #[must_use]
     pub fn new(
-        error_type: ErrorType,
+        error_kind: ErrorKind,
         at_byte_offset: u32,
         at_char_offset: u32,
         on_line: u32,
@@ -133,7 +139,7 @@ impl ErrorInfo {
         last_token: Option<TokenIdx>,
     ) -> Self {
         Self {
-            error_type,
+            error_kind,
             at_byte_offset,
             at_char_offset,
             on_line,
@@ -143,8 +149,8 @@ impl ErrorInfo {
     }
 
     #[must_use]
-    pub fn error_type(&self) -> ErrorType {
-        self.error_type
+    pub fn error_kind(&self) -> ErrorKind {
+        self.error_kind
     }
 
     #[must_use]
@@ -179,30 +185,30 @@ mod tests {
     use strum::IntoEnumIterator;
 
     #[test]
-    fn test_all_error_types_has_messages() {
-        for error in ErrorType::iter() {
+    fn test_all_error_kinds_has_messages() {
+        for error in ErrorKind::iter() {
             assert!(
                 error.get_message().is_some(),
-                "ErrorType {:?} has no message",
+                "ErrorKind {:?} has no message",
                 error
             );
         }
     }
 
     #[test]
-    fn test_error_type_is_internal() {
-        for error in ErrorType::iter() {
+    fn test_error_kind_is_internal() {
+        for error in ErrorKind::iter() {
             let variant_as_str: &'static str = error.into();
             if error.is_internal() {
                 assert!(
                     variant_as_str.starts_with("InternalError"),
-                    "ErrorType {:?} marked as internal but has no InternalError prefix",
+                    "ErrorKind {:?} marked as internal but has no InternalError prefix",
                     error
                 );
             } else {
                 assert!(
                     !variant_as_str.starts_with("InternalError"),
-                    "ErrorType {:?} marked as non internal but has InternalError prefix",
+                    "ErrorKind {:?} marked as non internal but has InternalError prefix",
                     error
                 );
             }

@@ -1,13 +1,13 @@
 use crate::{
-    error::{ErrorInfo, ErrorType},
-    lex, Payload, TokenChannel, TokenIdx, TokenType, TokenizedBuffer,
+    error::{ErrorInfo, ErrorKind},
+    lex, LexResult, Payload, TokenChannel, TokenIdx, TokenType, TokenizedBuffer,
 };
 
 fn token_to_string_inner<S: AsRef<str>>(
     token: TokenIdx,
     buffer: &TokenizedBuffer,
     source: &S,
-) -> Result<String, ErrorType> {
+) -> Result<String, ErrorKind> {
     let start_line = buffer.get_token_start_line(token)?;
     let end_line = buffer.get_token_end_line(token)?;
     let start_column = buffer.get_token_start_column(token)?;
@@ -58,7 +58,7 @@ pub(super) fn error_to_string<S: AsRef<str>>(
     buffer: &TokenizedBuffer,
     source: &S,
 ) -> String {
-    let error_type = error.error_type();
+    let error_kind = error.error_kind();
     let at_byte_offset = error.at_byte_offset();
     let at_char_offset = error.at_char_offset();
     let on_line = error.on_line();
@@ -70,7 +70,7 @@ pub(super) fn error_to_string<S: AsRef<str>>(
     };
 
     format!(
-        "{error_type:?} at byte offset {at_byte_offset}, char offset {at_char_offset}, \
+        "{error_kind:?} at byte offset {at_byte_offset}, char offset {at_char_offset}, \
         L{on_line}:C{at_column}. Last token: {last_token_str}"
     )
 }
@@ -578,13 +578,13 @@ pub(super) fn check_token<S: AsRef<str>>(
 }
 
 pub(super) trait ErrorTestCase {
-    fn error_type(&self) -> ErrorType;
+    fn error_kind(&self) -> ErrorKind;
     fn at_char_offset(&self, source: &str) -> u32;
     fn last_token_idx(&self, buffer: &TokenizedBuffer) -> Option<TokenIdx>;
 }
 
-impl ErrorTestCase for ErrorType {
-    fn error_type(&self) -> ErrorType {
+impl ErrorTestCase for ErrorKind {
+    fn error_kind(&self) -> ErrorKind {
         *self
     }
 
@@ -600,8 +600,8 @@ impl ErrorTestCase for ErrorType {
     }
 }
 
-impl ErrorTestCase for (ErrorType, usize) {
-    fn error_type(&self) -> ErrorType {
+impl ErrorTestCase for (ErrorKind, usize) {
+    fn error_kind(&self) -> ErrorKind {
         self.0
     }
 
@@ -639,7 +639,7 @@ pub(super) fn check_error(
     source: &str,
     buffer: &TokenizedBuffer,
     error: &ErrorInfo,
-    error_type: ErrorType,
+    error_kind: ErrorKind,
     at_byte_offset: u32,
     at_char_offset: u32,
     on_line: u32,
@@ -647,11 +647,11 @@ pub(super) fn check_error(
     last_token_idx: Option<TokenIdx>,
 ) {
     assert_eq!(
-        error.error_type(),
-        error_type,
-        "Expected error type {:?}, got {:?}: {}",
-        error_type,
-        error.error_type(),
+        error.error_kind(),
+        error_kind,
+        "Expected error kind {:?}, got {:?}: {}",
+        error_kind,
+        error.error_kind(),
         error_to_string(error, buffer, &source)
     );
 
@@ -717,7 +717,7 @@ pub(super) fn assert_lexing<TT: TokenTestCase, ET: ErrorTestCase>(
     expected_tokens: Vec<TT>,
     expected_errors: Vec<ET>,
 ) {
-    let (buffer, errors) = lex(&source).unwrap();
+    let LexResult { buffer, errors, .. } = lex(&source).unwrap();
 
     // Check tokens
     let tokens: Vec<TokenIdx> = buffer.into_iter().collect();
@@ -856,7 +856,7 @@ pub(super) fn assert_lexing<TT: TokenTestCase, ET: ErrorTestCase>(
             source,
             &buffer,
             lexed_err,
-            expected_err.error_type(),
+            expected_err.error_kind(),
             at_byte_offset,
             expected_err.at_char_offset(source),
             expected_line as u32,

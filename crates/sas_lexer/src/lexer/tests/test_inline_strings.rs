@@ -2,14 +2,18 @@ use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::vec;
 
-use crate::Payload;
-use crate::{error::ErrorType, lex, TokenChannel, TokenType};
 use rstest::{fixture, rstest};
 
-use super::super::token_type::{KEYWORDS, MKEYWORDS};
+use super::super::{
+    buffer::Payload,
+    error::ErrorKind,
+    lex,
+    token_type::{KEYWORDS, MKEYWORDS},
+    LexResult, TokenChannel, TokenType,
+};
 use super::util::{assert_lexing, mangle_case, ErrorTestCase, TokenTestCase};
 
-const NO_ERRORS: Vec<ErrorType> = vec![];
+const NO_ERRORS: Vec<ErrorKind> = vec![];
 
 impl Hash for TokenType {
     fn hash<H: Hasher>(&self, state: &mut H) {
@@ -25,7 +29,7 @@ fn kwm_to_str_map() -> HashMap<TokenType, String> {
 #[test]
 fn test_unicode_char_offset() {
     let source = "'🔥'";
-    let (buffer, errors) = lex(&source).unwrap();
+    let LexResult { buffer, errors, .. } = lex(&source).unwrap();
 
     assert_eq!(errors.len(), 0, "Expected no errors, got {}", errors.len());
 
@@ -55,7 +59,7 @@ fn test_unicode_char_offset() {
     // Now test the ubiquotous Hoe many characters is 🤦🏼‍♂️ case.
     // We want python compatibility here. So 5 characters.
     let source = "'🤦🏼‍♂️'";
-    let (buffer, errors) = lex(&source).unwrap();
+    let LexResult { buffer, errors, .. } = lex(&source).unwrap();
 
     assert_eq!(errors.len(), 0, "Expected no errors, got {}", errors.len());
 
@@ -73,7 +77,7 @@ fn test_unicode_char_offset() {
 fn test_column_count_with_bom() {
     let source = "\u{FEFF}/* this is comment */";
 
-    let (buffer, errors) = lex(&source).unwrap();
+    let LexResult { buffer, errors, .. } = lex(&source).unwrap();
 
     assert_eq!(errors.len(), 0, "Expected no errors, got {}", errors.len());
 
@@ -104,7 +108,7 @@ fn test_end_line_with_empty_tok() {
 
     assert_lexing(source, expected_tokens, NO_ERRORS);
 
-    let (buffer, _) = lex(&source).unwrap();
+    let LexResult { buffer, .. } = lex(&source).unwrap();
 
     // Get the empty token MacroStringEmpty and check the end line
     let token = buffer.into_iter().nth(3).unwrap();
@@ -165,7 +169,7 @@ fn test_unterminated_cstyle_comment() {
     assert_lexing(
         source,
         vec![(TokenType::CStyleComment, TokenChannel::COMMENT)],
-        vec![ErrorType::UnterminatedComment],
+        vec![ErrorKind::UnterminatedComment],
     );
 }
 
@@ -244,7 +248,7 @@ fn test_unterminated_string_literal(
     assert_lexing(
         source,
         vec![(TokenType::StringLiteral, TokenChannel::DEFAULT)],
-        vec![ErrorType::UnterminatedStringLiteral],
+        vec![ErrorKind::UnterminatedStringLiteral],
     );
 }
 
@@ -362,7 +366,7 @@ fn test_complex_string_expr(
         (";", TokenType::SEMI),        
         ],
     vec![
-        (ErrorType::OpenCodeRecursionError, 6),
+        (ErrorKind::OpenCodeRecursionError, 6),
         ]
 )]
 fn test_string_expr_error_recovery(
@@ -439,7 +443,7 @@ fn test_datalines(#[values("", ";", ";\n\t/*comment*/  ")] prefix: &str, #[case]
         (["dAtALiNeS", "lInEs", "cArDs", "cArDs  ", "cArDs\n"], ";")
     };
 
-    let (buffer, _) = lex(&prefix).unwrap();
+    let LexResult { buffer, .. } = lex(&prefix).unwrap();
 
     let prefix_expected_tokens = if prefix.is_empty() {
         vec![]
@@ -579,7 +583,7 @@ fn test_keywords_followed_by_unicode(
             (keyword, keyword_tok, TokenChannel::DEFAULT),
             ("🔥", TokenType::UNKNOWN, TokenChannel::HIDDEN),
         ],
-        vec![ErrorType::UnexpectedCharacter],
+        vec![ErrorKind::UnexpectedCharacter],
     );
 }
 
@@ -593,7 +597,7 @@ fn test_keywords_followed_by_unicode(
         ("_myvar", TokenType::Identifier, TokenChannel::DEFAULT),
         ("©", TokenType::UNKNOWN, TokenChannel::HIDDEN)
         ],
-    vec![ErrorType::UnexpectedCharacter]
+    vec![ErrorKind::UnexpectedCharacter]
 )]
 #[case::num_start("9_9myvar",
     vec![
@@ -718,14 +722,14 @@ fn test_scientific_numeric_literal_with_suffix(
 }
 
 #[rstest]
-#[case(".1e", (TokenType::FloatLiteral, 0.0), ErrorType::InvalidNumericLiteral)]
-#[case(".1E", (TokenType::FloatLiteral, 0.0), ErrorType::InvalidNumericLiteral)]
-#[case("02A", (TokenType::IntegerLiteral, 42), ErrorType::UnterminatedHexNumericLiteral)]
-#[case("9ffFFffFFffFFffF123AFx", (TokenType::FloatLiteral, 1.2089258196146292e25), ErrorType::InvalidNumericLiteral)]
+#[case(".1e", (TokenType::FloatLiteral, 0.0), ErrorKind::InvalidNumericLiteral)]
+#[case(".1E", (TokenType::FloatLiteral, 0.0), ErrorKind::InvalidNumericLiteral)]
+#[case("02A", (TokenType::IntegerLiteral, 42), ErrorKind::UnterminatedHexNumericLiteral)]
+#[case("9ffFFffFFffFFffF123AFx", (TokenType::FloatLiteral, 1.2089258196146292e25), ErrorKind::InvalidNumericLiteral)]
 fn test_numeric_literal_error_recovery(
     #[case] contents: &str,
     #[case] expected_token: impl TokenTestCase,
-    #[case] expected_error: ErrorType,
+    #[case] expected_error: ErrorKind,
 ) {
     assert_lexing(contents, vec![expected_token], vec![expected_error]);
 }
@@ -1030,7 +1034,7 @@ fn test_macro_let(#[case] contents: &str, #[case] expected_token: Vec<impl Token
         ],
     // Real SAS error will be: 
     // /* ERROR: Symbolic variable name a[resolved %m call].b must contain only letters, digits, and underscores. */
-    vec![(ErrorType::MissingExpectedAssign, 8)]
+    vec![(ErrorKind::MissingExpectedAssign, 8)]
 )]
 #[case::miss_assign("%let a b=1;",
     vec![
@@ -1043,7 +1047,7 @@ fn test_macro_let(#[case] contents: &str, #[case] expected_token: Vec<impl Token
         ("b=1", TokenType::MacroString),
         (";", TokenType::SEMI),
         ],
-    vec![(ErrorType::MissingExpectedAssign, 7)]
+    vec![(ErrorKind::MissingExpectedAssign, 7)]
 )]
 #[case::miss_assign_2("%let a &mv=1;",
 vec![
@@ -1057,7 +1061,7 @@ vec![
     ("=1", TokenType::MacroString),
     (";", TokenType::SEMI),
     ],
-    vec![(ErrorType::MissingExpectedAssign, 7)]
+    vec![(ErrorKind::MissingExpectedAssign, 7)]
 )]
 #[case::miss_name_str_literal("%let 'v'=v;",
     vec![
@@ -1070,8 +1074,8 @@ vec![
         (";", TokenType::SEMI),
         ],
     vec![
-        (ErrorType::InvalidMacroLetVarName, 5),
-        (ErrorType::MissingExpectedAssign, 5)
+        (ErrorKind::InvalidMacroLetVarName, 5),
+        (ErrorKind::MissingExpectedAssign, 5)
         ]
 )]
 #[case::miss_name_at_end("%let",
@@ -1084,8 +1088,8 @@ vec![
         ("", TokenType::SEMI),        
         ],
     vec![
-        (ErrorType::InvalidMacroLetVarName, 4),
-        (ErrorType::MissingExpectedAssign, 4)
+        (ErrorKind::InvalidMacroLetVarName, 4),
+        (ErrorKind::MissingExpectedAssign, 4)
         ]
 )]
 #[case::miss_name_wrong_ident_start("%let 9v=1;",
@@ -1098,8 +1102,8 @@ vec![
         (";", TokenType::SEMI),
         ],
     vec![
-        (ErrorType::InvalidMacroLetVarName, 5),
-        (ErrorType::MissingExpectedAssign, 5)
+        (ErrorKind::InvalidMacroLetVarName, 5),
+        (ErrorKind::MissingExpectedAssign, 5)
         ]
 )]
 // For the following tests, the real SAS error is something like:
@@ -1120,7 +1124,7 @@ vec![
     ("=2", TokenType::MacroString, TokenChannel::DEFAULT),
     (";", TokenType::SEMI, TokenChannel::DEFAULT),
     ],
-    vec![(ErrorType::MissingExpectedAssign, 6)]
+    vec![(ErrorKind::MissingExpectedAssign, 6)]
 )]
 #[case::quote_call_in_name_2("%let a%quote(a)=2;",
 vec![
@@ -1136,7 +1140,7 @@ vec![
     ("=2", TokenType::MacroString),
     (";", TokenType::SEMI)
     ],
-    vec![(ErrorType::MissingExpectedAssign, 6)]
+    vec![(ErrorKind::MissingExpectedAssign, 6)]
 )]
 #[case::quote_call_in_name_3("%let a%str(%inner())=2;",
 vec![
@@ -1154,7 +1158,7 @@ vec![
     ("=2", TokenType::MacroString, TokenChannel::DEFAULT),
     (";", TokenType::SEMI, TokenChannel::DEFAULT)
     ],
-    vec![(ErrorType::MissingExpectedAssign, 6)]
+    vec![(ErrorKind::MissingExpectedAssign, 6)]
 )]
 fn test_macro_let_error_recovery(
     #[case] contents: &str,
@@ -1649,8 +1653,8 @@ fn test_macro_str_call(#[case] contents: &str, #[case] expected_token: Vec<impl 
         (";", TokenType::SEMI, TokenChannel::DEFAULT),
         ],
     vec![
-        (ErrorType::OpenCodeRecursionError, 6),
-        (ErrorType::MissingExpectedRParen, 6)
+        (ErrorKind::OpenCodeRecursionError, 6),
+        (ErrorKind::MissingExpectedRParen, 6)
         ]
 )]
 fn test_macro_str_call_error_recovery(
@@ -1847,7 +1851,7 @@ fn test_macro_nrstr_call(#[case] contents: &str, #[case] expected_token: Vec<imp
         (")", TokenType::RPAREN, TokenChannel::HIDDEN),
         ],
     vec![
-        (ErrorType::MissingExpectedLParen, 8)
+        (ErrorKind::MissingExpectedLParen, 8)
         ]
 )]
 #[case::missing_closing_paren("%nrstr(%%%)",
@@ -1859,7 +1863,7 @@ fn test_macro_nrstr_call(#[case] contents: &str, #[case] expected_token: Vec<imp
         ("", TokenType::RPAREN, TokenChannel::HIDDEN, Payload::None, ""),
         ],
     vec![
-        (ErrorType::MissingExpectedRParen, 11)
+        (ErrorKind::MissingExpectedRParen, 11)
         ]
 )]
 fn test_macro_nrstr_call_error_recovery(
@@ -1926,7 +1930,7 @@ fn test_macro_simple_stats(
             ("", TokenType::SEMI),
             ("+", TokenType::PLUS),
         ],
-        vec![(ErrorType::MissingExpectedSemiOrEOF, tok_str.len())],
+        vec![(ErrorKind::MissingExpectedSemiOrEOF, tok_str.len())],
     );
 }
 
@@ -2003,8 +2007,8 @@ fn test_macro_stats_with_semi_term_tail(
             v
         },
         vec![
-            (ErrorType::OpenCodeRecursionError, test_str.len()),
-            (ErrorType::MissingExpectedSemiOrEOF, test_str.len()),
+            (ErrorKind::OpenCodeRecursionError, test_str.len()),
+            (ErrorKind::MissingExpectedSemiOrEOF, test_str.len()),
         ],
     );
 }
@@ -2106,8 +2110,8 @@ fn test_macro_stats_with_stat_opts_tail(
             v
         },
         vec![
-            (ErrorType::OpenCodeRecursionError, test_str.len()),
-            (ErrorType::MissingExpectedSemiOrEOF, test_str.len()),
+            (ErrorKind::OpenCodeRecursionError, test_str.len()),
+            (ErrorKind::MissingExpectedSemiOrEOF, test_str.len()),
         ],
     );
 }
@@ -3118,7 +3122,7 @@ fn test_macro_do(#[case] contents: &str, #[case] expected_token: Vec<impl TokenT
         (";", TokenType::SEMI, Payload::None),
     ],
     vec![(
-        ErrorType::InvalidMacroDefArgName, 9
+        ErrorKind::InvalidMacroDefArgName, 9
     )]
 )]
 #[case::macro_name_error_recovery("%macro &err (arg = val);",
@@ -3135,7 +3139,7 @@ fn test_macro_do(#[case] contents: &str, #[case] expected_token: Vec<impl TokenT
         (";", TokenType::SEMI, Payload::None),
     ],
     vec![(
-        ErrorType::InvalidMacroDefName, 7
+        ErrorKind::InvalidMacroDefName, 7
     )]
 )]
 fn test_macro_def(
@@ -3620,7 +3624,7 @@ vec![
         (";", TokenType::SEMI),
     ],
     vec![
-        (ErrorType::MaybeInvalidOrOutOfOrderStatement, 10)
+        (ErrorKind::MaybeInvalidOrOutOfOrderStatement, 10)
     ]
 )]
 fn test_comment_prediction(
