@@ -74,8 +74,10 @@ struct Lexer<'src> {
     /// Stores the last state for debug assertions to check
     /// against infinite loops. It is the remaining input length
     /// and the mode stack.
+    last_state: (u32, u32),
+
     #[cfg(debug_assertions)]
-    last_state: (u32, Vec<LexerMode>),
+    seen_modes: Vec<LexerMode>,
 }
 
 /// Result of lexing
@@ -84,7 +86,7 @@ pub struct LexResult {
     pub buffer: TokenizedBuffer,
     pub errors: Vec<ErrorInfo>,
 
-    #[cfg(feature = "opti_stats")]
+    #[cfg(any(feature = "opti_stats", test))]
     pub max_mode_stack_depth: usize,
 }
 
@@ -104,9 +106,15 @@ impl<'src> Lexer<'src> {
         // Add the first line
         let cur_token_line = buffer.add_line(cur_token_byte_offset, cur_token_start);
 
+        // Get init mode
+        let init_mode = init_mode.unwrap_or_default();
+
+        // Initialize lasat state used for inifinite loop tracking
+        let last_state = (source_len, init_mode.as_discriminator_bit_mask());
+
         // Allocate stack vector with initial mode
         let mut mode_stack = Vec::with_capacity(MAX_EXPECTED_STACK_DEPTH);
-        mode_stack.push(init_mode.unwrap_or_default());
+        mode_stack.push(init_mode);
 
         Ok(Lexer {
             source,
@@ -116,8 +124,9 @@ impl<'src> Lexer<'src> {
             cur_token_byte_offset,
             cur_token_start,
             cur_token_line,
+            last_state,
             #[cfg(debug_assertions)]
-            last_state: (source_len, mode_stack.clone()),
+            seen_modes: mode_stack.clone(),
             mode_stack,
             errors: Vec::new(),
             checkpoint: None,
@@ -135,6 +144,9 @@ impl<'src> Lexer<'src> {
         println!("- cur_token_start: {}", self.cur_token_start.get());
         println!("- cur_token_line: {:?}", self.cur_token_line);
         println!("- mode stack: {:?}", self.mode_stack);
+        println!("- last remaining source length: {}", self.last_state.0);
+        println!("- modes seen (bit mask): {}", self.last_state.1);
+        println!("- modes seen: {:?}", self.seen_modes);
         println!("- checkpoint is set: {}", self.checkpoint.is_some());
     }
 
@@ -367,24 +379,29 @@ impl<'src> Lexer<'src> {
     /// Main lexing loop, responsible for driving the lexing forwards
     /// as well as finalizing it with a mandatroy EOF roken.
     fn lex(mut self) -> Result<LexResult, ErrorKind> {
-        #[cfg(feature = "opti_stats")]
+        #[cfg(any(feature = "opti_stats", test))]
         let mut max_mode_stack_depth = 0usize;
 
         while let Some(next_char) = self.cursor.peek() {
             self.lex_token(next_char);
 
-            #[cfg(feature = "opti_stats")]
-            {
-                max_mode_stack_depth = max_mode_stack_depth.max(self.mode_stack.len());
-            }
+            let new_rem_len = self.cursor.remaining_len();
+            let cur_mode_mask = self.mode().as_discriminator_bit_mask();
 
-            #[cfg(debug_assertions)]
-            {
-                let new_state = (self.cursor.remaining_len(), self.mode_stack.clone());
-                if self.last_state == new_state {
-                    println!("Infinite loop detected!");
+            if new_rem_len == self.last_state.0 {
+                // Didn't move past the last character. Check that we have
+                // a net new, yet unseen mode
+                if (self.last_state.1 & cur_mode_mask) > 0 {
+                    // We've seen this mode already and we haven't moved past the char.
+                    // Theoretically we may have had an algo that depends on the whole stack
+                    // but as of now, we need look "past" the current top of the stack
+                    // so this would always mean a bug causing an infinite loop
+                    #[cfg(debug_assertions)]
+                    {
+                        println!("Infinite loop detected!");
 
-                    self.dump_lexer_state_to_console();
+                        self.dump_lexer_state_to_console();
+                    }
 
                     self.emit_error(ErrorKind::InternalErrorInfiniteLoop);
 
@@ -393,14 +410,34 @@ impl<'src> Lexer<'src> {
                         errors: self.errors,
                         max_mode_stack_depth,
                     });
-                };
-                self.last_state = new_state;
+                }
+
+                self.last_state = (new_rem_len, self.last_state.1 ^ cur_mode_mask);
+
+                #[cfg(debug_assertions)]
+                {
+                    let cur_mode = self.mode();
+                    self.seen_modes.push(cur_mode);
+                }
+            } else {
+                // Moved past the last character, start the seen modes mask all over
+                self.last_state = (new_rem_len, cur_mode_mask);
+
+                #[cfg(debug_assertions)]
+                {
+                    self.seen_modes = vec![self.mode()];
+                }
+            }
+
+            #[cfg(any(feature = "opti_stats", test))]
+            {
+                max_mode_stack_depth = max_mode_stack_depth.max(self.mode_stack.len());
             }
         }
 
         self.finalize_lexing();
 
-        #[cfg(feature = "opti_stats")]
+        #[cfg(any(feature = "opti_stats", test))]
         {
             Ok(LexResult {
                 buffer: self.buffer.into_detached(self.source),
@@ -409,7 +446,7 @@ impl<'src> Lexer<'src> {
             })
         }
 
-        #[cfg(not(feature = "opti_stats"))]
+        #[cfg(not(any(feature = "opti_stats", test)))]
         {
             Ok(LexResult {
                 buffer: self.buffer.into_detached(self.source),

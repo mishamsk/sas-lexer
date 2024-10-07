@@ -156,6 +156,7 @@ impl MacroArgNameValueFlags {
 
 /// The lexer mode
 #[derive(Debug, Clone, PartialEq, Eq, Default, EnumIs)]
+#[repr(u8)]
 pub(crate) enum LexerMode {
     /// Default mode aka open code (non macro)
     #[default]
@@ -296,6 +297,19 @@ pub(crate) enum LexerMode {
     MacroStatOptionsTextExpr,
 }
 
+impl LexerMode {
+    fn discriminant(&self) -> u8 {
+        #[allow(unsafe_code)]
+        unsafe {
+            *(self as *const Self as *const u8)
+        }
+    }
+
+    pub(super) fn as_discriminator_bit_mask(&self) -> u32 {
+        1 << self.discriminant()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -354,5 +368,48 @@ mod tests {
     #[test]
     fn test_lexer_mode_default() {
         assert_eq!(LexerMode::default(), LexerMode::Default);
+    }
+
+    #[test]
+    fn test_lexer_mode_discriminant_size() {
+        for m in [
+            LexerMode::Default,
+            LexerMode::StringExpr { allow_stat: true },
+            LexerMode::MakeCheckpoint,
+            LexerMode::WsOrCStyleCommentOnly,
+            LexerMode::ExpectSymbol(TokenType::WS, TokenChannel::default()),
+            LexerMode::ExpectSemiOrEOF,
+            LexerMode::MaybeMacroCallArgs,
+            LexerMode::MaybeMacroCallArgAssign {
+                flags: MacroArgNameValueFlags(0),
+            },
+            LexerMode::MacroCallArgOrValue {
+                flags: MacroArgNameValueFlags(0),
+            },
+            LexerMode::MaybeMacroDefArgs,
+            LexerMode::MacroDefArg,
+            LexerMode::MacroDefNextArgOrDefaultValue,
+            LexerMode::MacroDefName,
+            LexerMode::MacroCallValue {
+                flags: MacroArgNameValueFlags(0),
+                pnl: 0,
+            },
+            LexerMode::MacroStrQuotedExpr {
+                mask_macro: true,
+                pnl: 0,
+            },
+            LexerMode::MacroEval {
+                macro_eval_flags: MacroEvalExprFlags(0),
+                pnl: 0,
+            },
+            LexerMode::MacroDo,
+            LexerMode::MacroLocalGlobal { is_local: true },
+            LexerMode::MacroVarNameExpr(true, None),
+            LexerMode::MacroSemiTerminatedTextExpr,
+            LexerMode::MacroStatOptionsTextExpr,
+        ] {
+            assert!(m.discriminant() < 32);
+            assert!(m.as_discriminator_bit_mask() < u32::MAX)
+        }
     }
 }
