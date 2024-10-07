@@ -1303,7 +1303,111 @@ fn test_macro_let_error_recovery(
     vec![
         ("%t", TokenType::MacroIdentifier),
         ("(", TokenType::LPAREN),
-        ("s \n\ne", TokenType::MacroString),        
+        ("s \n\ne", TokenType::MacroString),
+        (")", TokenType::RPAREN),
+    ]
+)]
+// Inline macro comments/statements in macro calls
+#[case::str_expr_with_let("%m(\n\"%let v=1;\"\n&v)",
+    vec![
+        ("%m", TokenType::MacroIdentifier),
+        ("(", TokenType::LPAREN),
+        ("\n", TokenType::WS),
+        ("\"", TokenType::StringExprStart),
+        ("%let", TokenType::KwmLet),
+        (" ", TokenType::WS),
+        ("v", TokenType::MacroString),
+        ("=", TokenType::ASSIGN),
+        ("1", TokenType::MacroString),
+        (";", TokenType::SEMI),
+        ("\"", TokenType::StringExprEnd),
+        ("\n", TokenType::MacroString),
+        ("&v", TokenType::MacroVarExpr),
+        (")", TokenType::RPAREN),
+    ]
+)]
+#[case::if_do_comment("%m(\n%if 1 %then %do;\n%* comment;\n&v\n%end;)",
+    vec![
+        ("%m", TokenType::MacroIdentifier, Payload::None),
+        ("(", TokenType::LPAREN, Payload::None),
+        ("\n", TokenType::WS, Payload::None),
+        ("%if", TokenType::KwmIf, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("1", TokenType::IntegerLiteral, Payload::Integer(1)),
+        (" ", TokenType::WS, Payload::None),
+        ("%then", TokenType::KwmThen, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("%do", TokenType::KwmDo, Payload::None),
+        (";", TokenType::SEMI, Payload::None),
+        ("\n", TokenType::WS, Payload::None),
+        ("%* comment;", TokenType::MacroComment, Payload::None),
+        ("\n", TokenType::MacroString, Payload::None),
+        ("&v", TokenType::MacroVarExpr, Payload::None),
+        ("\n", TokenType::MacroString, Payload::None),
+        ("%end", TokenType::KwmEnd, Payload::None),
+        (";", TokenType::SEMI, Payload::None),
+        (")", TokenType::RPAREN, Payload::None),
+    ]
+)]
+#[case::if_do_let("%m(\n%if 1 %then %do;\n%let v=1;\n&v\n%end;)",
+    vec![
+        ("%m", TokenType::MacroIdentifier, Payload::None),
+        ("(", TokenType::LPAREN, Payload::None),
+        ("\n", TokenType::WS, Payload::None),
+        ("%if", TokenType::KwmIf, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("1", TokenType::IntegerLiteral, Payload::Integer(1)),
+        (" ", TokenType::WS, Payload::None),
+        ("%then", TokenType::KwmThen, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("%do", TokenType::KwmDo, Payload::None),
+        (";", TokenType::SEMI, Payload::None),
+        ("\n", TokenType::WS, Payload::None),
+        ("%let", TokenType::KwmLet, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("v", TokenType::MacroString, Payload::None),
+        ("=", TokenType::ASSIGN, Payload::None),
+        ("1", TokenType::MacroString, Payload::None),
+        (";", TokenType::SEMI, Payload::None),
+        ("\n", TokenType::MacroString, Payload::None),
+        ("&v", TokenType::MacroVarExpr, Payload::None),
+        ("\n", TokenType::MacroString, Payload::None),
+        ("%end", TokenType::KwmEnd, Payload::None),
+        (";", TokenType::SEMI, Payload::None),
+        (")", TokenType::RPAREN, Payload::None),
+    ]
+)]
+// "INCORRECT" case. We do not handle this "right", because
+// we do not support seeing "through" the macro statement,
+// hence `a %do; =b` becomes two macro strings with WS, rather
+// then named arg with value. This can be theoretically handled
+// but seemed too complicated and unnecessary. Even if such code
+// exists in the wild, and we would lex it "correctly", doubt
+// any parser would be able to handle it in a static environment
+#[case::if_do_named_arg("%m(a %do; =b,=c%end;,%do; =b,a=c%end;)",
+    vec![
+        ("%m", TokenType::MacroIdentifier),
+        ("(", TokenType::LPAREN),
+        ("a ", TokenType::MacroString),
+        ("%do", TokenType::KwmDo),
+        (";", TokenType::SEMI),
+        (" ", TokenType::WS),
+        ("=b", TokenType::MacroString),
+        (",", TokenType::COMMA),
+        ("=c", TokenType::MacroString),
+        ("%end", TokenType::KwmEnd),
+        (";", TokenType::SEMI),
+        (",", TokenType::COMMA),
+        ("%do", TokenType::KwmDo),
+        (";", TokenType::SEMI),
+        (" ", TokenType::WS),
+        ("=b", TokenType::MacroString),
+        (",", TokenType::COMMA),
+        ("a", TokenType::MacroString),
+        ("=", TokenType::ASSIGN),
+        ("c", TokenType::MacroString),
+        ("%end", TokenType::KwmEnd),
+        (";", TokenType::SEMI),
         (")", TokenType::RPAREN),
     ]
 )]

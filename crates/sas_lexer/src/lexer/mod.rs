@@ -1761,7 +1761,7 @@ impl<'src> Lexer<'src> {
             lexer.push_mode(LexerMode::MacroCallValue { flags, pnl: 0 });
         };
 
-        // If we hit what is possible the "end" of the macro arg name,
+        // If we hit what is possibly the "end" of the macro arg name,
         // we checkpoint, emit a mode stack that will check if after optional
         // comments/WS we see a `=`. This would mean, yes, it was a macro arg name.
         // Otherwise it will rollback to the checkpoint and re-lex the string as a value.
@@ -1824,18 +1824,10 @@ impl<'src> Lexer<'src> {
                         // whether this is arg name or value - the macro will be lexed anyway
                         self.clear_checkpoint();
 
-                        // Macro call is only viable in arg name in the last
-                        // position => when we see the first one,
-                        // we can move to check for assignment. But only after
-                        // the macro call is fully lexed - meaning after MaybeMacroCallArgs
-                        // mode which uses the checkpoint! And we only allowed one at a time.
-                        // Hence the following trick...we pre-populate following modes,
-                        // but if the % turned out to be NOT a macro call, we will pop them back
-                        self.push_mode(LexerMode::MaybeMacroCallArgAssign { flags });
-                        self.push_mode(LexerMode::WsOrCStyleCommentOnly);
-                        // This last piece will ensure that checkpoint related to this logic
-                        // is set only after the macro call is fully lexed.
-                        self.push_mode(LexerMode::MakeCheckpoint);
+                        // Save position of the current mode in the stack,
+                        // before macro lexing kicks in, which may add new modes.
+                        // The the "else" branch below for why this is necessary
+                        let mode_stack_len = self.mode_stack.len();
 
                         self.start_token();
                         self.lex_macro_identifier();
@@ -1847,21 +1839,38 @@ impl<'src> Lexer<'src> {
                             .is_some_and(|ti| is_macro_stat_tok_type(ti.token_type))
                         {
                             // Hit a following macro statement. This is allowed in SAS,
-                            // and we can't really "see through", so we kinda pretend
-                            // that nothing happend. The macro stat will parse based on
+                            // and we can't really "see through" - i.e. we may not know
+                            // if the code inside the following macro is part of arg value,
+                            // or maybe even terminates the current argument and starts a new one.
+                            // So we kinda pretend as if nothing happend in terms of argument lexing
+                            // states. The macro stat will parse based on
                             // it's logic and as soon as mandatory stat parts are done,
                             // it will go back to the current state...
-                            // Theoritically this should work correct in valid code, like:
+                            // Theoritically this should work correctly in valid code, like:
                             //
                             // `%m(1 %if %mi(=a) %then %do; ,arg=value %end;)`
-
-                            // Pop the 3 modes we pre-pushed above since it is not a macro call
-                            // No need to call safe pop, since we cleared the checkpoint alread.
-                            self.pop_mode();
-                            self.pop_mode();
-                            self.pop_mode();
                         } else {
-                            // tail call. everything has already been set up
+                            // Macro call is only viable in arg name in the last
+                            // position => when we see the first one,
+                            // we can move to check for assignment to disambiguate arg name vs value.
+                            // But only after the macro call is fully lexed - meaning after MaybeMacroCallArgs
+                            // mode which uses the checkpoint! And we only allowed one at a time.
+                            // Hence the following trick...we push the following modes,
+                            // "after" (meaning with index below the stack top) the newly
+                            // populated modes by the macro call lexing.
+                            // Unlike pushing, this goes in the sasme order we expect them
+                            // to be handled, not reverse
+
+                            // This piece will ensure that checkpoint related to this logic
+                            // is set only after the macro call is fully lexed.
+                            self.mode_stack
+                                .insert(mode_stack_len, LexerMode::MakeCheckpoint);
+                            self.mode_stack
+                                .insert(mode_stack_len, LexerMode::WsOrCStyleCommentOnly);
+                            self.mode_stack.insert(
+                                mode_stack_len,
+                                LexerMode::MaybeMacroCallArgAssign { flags },
+                            );
                         }
                     }
                     _ => {
@@ -4093,6 +4102,9 @@ impl<'src> Lexer<'src> {
                 self.start_token();
                 self.cursor.advance();
                 self.emit_token(TokenChannel::DEFAULT, TokenType::SEMI, Payload::None);
+
+                // We know that the following WS may not be significant
+                self.push_mode(LexerMode::WsOrCStyleCommentOnly);
             }
             '%' if is_valid_sas_name_start(self.cursor.peek_next()) => {
                 self.start_token();
@@ -4319,6 +4331,13 @@ impl<'src> Lexer<'src> {
                 // Although they all kinda expect a semi after some arbitrary
                 // stuff, but enforcing this here is an overkill. Parser will
                 // handle it just fine.
+                // One thing we do add though - is lexing of WS. Significant WS
+                // (macro string) may not follow any of these, but since they
+                // may legitimately pop inside non-default context (at least
+                // %then-%else may be inside macro call args in real-life code),
+                // hence this way we ensure that at least leading WS/comments
+                // are lexed on hidden channel
+                self.push_mode(LexerMode::WsOrCStyleCommentOnly);
             }
             TokenTypeMacroCallOrStat::KwmEnd
             | TokenTypeMacroCallOrStat::KwmReturn
