@@ -84,7 +84,7 @@ pub struct LexResult {
     pub buffer: TokenizedBuffer,
     pub errors: Vec<ErrorInfo>,
 
-    #[cfg(feature = "opti_stats")]
+    #[cfg(any(feature = "opti_stats", test))]
     pub max_mode_stack_depth: usize,
 }
 
@@ -367,7 +367,7 @@ impl<'src> Lexer<'src> {
     /// Main lexing loop, responsible for driving the lexing forwards
     /// as well as finalizing it with a mandatroy EOF roken.
     fn lex(mut self) -> Result<LexResult, ErrorKind> {
-        #[cfg(feature = "opti_stats")]
+        #[cfg(any(feature = "opti_stats", test))]
         let mut max_mode_stack_depth = 0usize;
 
         while let Some(next_char) = self.cursor.peek() {
@@ -400,7 +400,7 @@ impl<'src> Lexer<'src> {
 
         self.finalize_lexing();
 
-        #[cfg(feature = "opti_stats")]
+        #[cfg(any(feature = "opti_stats", test))]
         {
             Ok(LexResult {
                 buffer: self.buffer.into_detached(self.source),
@@ -409,7 +409,7 @@ impl<'src> Lexer<'src> {
             })
         }
 
-        #[cfg(not(feature = "opti_stats"))]
+        #[cfg(not(any(feature = "opti_stats", test)))]
         {
             Ok(LexResult {
                 buffer: self.buffer.into_detached(self.source),
