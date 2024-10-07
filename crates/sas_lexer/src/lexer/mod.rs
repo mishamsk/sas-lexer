@@ -3563,17 +3563,19 @@ impl<'src> Lexer<'src> {
         // Checkpoint to be able to rollback
         self.checkpoint();
 
-        // Track parens nesting
-        let mut parens_nesting = 0u32;
+        // Track parens nesting, but only after macro call
+        let mut parens_nesting: Option<u32> = None;
 
         while let Some(c) = self.cursor.advance() {
             match c {
-                '(' => parens_nesting += 1,
+                '(' => parens_nesting = parens_nesting.map(|pnl| pnl + 1),
                 ')' => {
-                    // I believe SAS would fail on non-balanced parens in a comment
-                    // but from masking standpoint it is easier to just ignore them.
-                    // The important part is to handle `* mcall_with_semi(;) still a comment;`
-                    parens_nesting = parens_nesting.saturating_sub(1);
+                    // If we are in parens nesting tracking mode after a macro call
+                    // start, we need to substract until we reach 0, and on 0
+                    // set to None, to stop tracking nesting.
+                    // This is to handle `* mcall_with_semi(;) still a comment;`
+                    parens_nesting =
+                        parens_nesting.and_then(|pnl| if pnl > 1 { Some(pnl - 1) } else { None });
                 }
                 '\n' => {
                     self.add_line();
@@ -3644,9 +3646,9 @@ impl<'src> Lexer<'src> {
                                 Payload::None,
                             );
 
-                            // Emit the error. We are using the `Maybe` variation, since
-                            // there is no guarantee that this is an actual error.
-                            // E.g. the following code is valid:
+                            // Emit a warning. We are using the `Maybe` variation, since
+                            // there is no guarantee that this is an actual comment.
+                            // E.g. in the following code it is not:
                             // ```sas
                             // data _NULL_;
                             // a = 1
@@ -3656,7 +3658,7 @@ impl<'src> Lexer<'src> {
                             // %end;
                             // ;
                             // ```
-                            self.emit_error(ErrorKind::MaybeInvalidOrOutOfOrderStatement);
+                            self.emit_error(ErrorKind::MaybeNotAComment);
 
                             // Report that we lexed a token
                             return true;
@@ -3666,10 +3668,13 @@ impl<'src> Lexer<'src> {
                             // Advance the actual cursor to the end of the macro call
                             // which is the length of the identifier + 1 for the %
                             self.cursor.advance_by(advance_by);
+
+                            // And start tracking parens
+                            parens_nesting = Some(0);
                         }
                     }
                 }
-                ';' if parens_nesting == 0 => {
+                ';' if parens_nesting.unwrap_or(0) == 0 => {
                     // Found the end of the comment
                     // Clear the checkpoint
                     self.clear_checkpoint();
@@ -3684,7 +3689,15 @@ impl<'src> Lexer<'src> {
                     // Report that we lexed a token
                     return true;
                 }
-                _ => {}
+                _ => {
+                    // One thing we need to do, is to handle the following edge case:
+                    // `* %mcall_no_args bla...`. We'll get `parens_nesting == Some(0)`
+                    // when we get here, but since this means it is a parens-less macro
+                    // call, we should stop tracking nesting!
+                    if parens_nesting.is_some_and(|pnl| pnl == 0) {
+                        parens_nesting = None;
+                    }
+                }
             }
         }
 

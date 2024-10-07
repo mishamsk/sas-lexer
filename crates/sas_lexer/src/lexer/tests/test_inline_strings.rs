@@ -3642,23 +3642,49 @@ fn test_macro_rare_stats(#[case] contents: &str, #[case] expected_token: Vec<imp
 
 #[rstest]
 // No error cases
-#[case::first_line_simple("*--comment--;",
+#[case::first_line_simple("*--comment--;%do;",
     vec![
         ("*--comment--;", TokenType::PredictedCommentStat),
+        ("%do", TokenType::KwmDo),
+        (";", TokenType::SEMI),
     ],
     NO_ERRORS,
 )]
 #[case::last_line_simple("data;*--comment--",
-    vec![
-        ("data", TokenType::KwData),
-        (";", TokenType::SEMI),
-        ("*--comment--", TokenType::PredictedCommentStat),
+vec![
+    ("data", TokenType::KwData),
+    (";", TokenType::SEMI),
+    ("*--comment--", TokenType::PredictedCommentStat),
     ],
     NO_ERRORS,
 )]
 #[case::first_line_with_macro("*c&mv.%mc(;,arg=some(;));",
     vec![
         ("*c&mv.%mc(;,arg=some(;));", TokenType::PredictedCommentStat),
+    ],
+    NO_ERRORS,
+)]
+#[case::first_line_unbalanced_parens("*--(;%do;",
+    vec![
+        ("*--(;", TokenType::PredictedCommentStat),
+        ("%do", TokenType::KwmDo),
+        (";", TokenType::SEMI),
+    ],
+    NO_ERRORS,
+)]
+#[case::first_line_macro_and_unbalanced_parens("*--s)(%mc(;)(--;%do;",
+    vec![
+        ("*--s)(%mc(;)(--;", TokenType::PredictedCommentStat),
+        ("%do", TokenType::KwmDo),
+        (";", TokenType::SEMI),
+    ],
+    NO_ERRORS,
+)]
+#[case::first_line_argless_macro_and_unbalanced_parens("* %m s(;%do;",
+    vec![
+        ("* %m s(;", TokenType::PredictedCommentStat),
+        ("%do", TokenType::KwmDo),
+        (";", TokenType::SEMI),
     ],
     NO_ERRORS,
 )]
@@ -3734,7 +3760,7 @@ vec![
     NO_ERRORS,
 )]
 // Error cases. We "predict" a comment before %let and all other stats
-// so we recover missing semicolon
+// so we recover missing semicolon + emit a warning
 #[case::before_let_stat("* /*c*/ 2 %let v=;",
     vec![
         ("* /*c*/ 2 ", TokenType::PredictedCommentStat),
@@ -3745,7 +3771,7 @@ vec![
         (";", TokenType::SEMI),
     ],
     vec![
-        (ErrorKind::MaybeInvalidOrOutOfOrderStatement, 10)
+        (ErrorKind::MaybeNotAComment, 10)
     ]
 )]
 fn test_comment_prediction(
