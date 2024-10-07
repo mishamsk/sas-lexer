@@ -46,6 +46,18 @@ fn create_error_dict_df() -> PolarsResult<LazyFrame> {
                 .collect::<Vec<_>>(),
         ),
         Series::new(
+            "is_internal".into(),
+            ErrorKind::iter()
+                .map(|e| e.is_internal())
+                .collect::<Vec<_>>(),
+        ),
+        Series::new(
+            "is_warning".into(),
+            ErrorKind::iter()
+                .map(|e| e.is_warning())
+                .collect::<Vec<_>>(),
+        ),
+        Series::new(
             "error_message".into(),
             ErrorKind::iter().map(|e| e.to_string()).collect::<Vec<_>>(),
         ),
