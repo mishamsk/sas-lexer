@@ -5,7 +5,7 @@ use std::ops::Range;
 use serde::Serialize;
 
 use super::channel::TokenChannel;
-use super::error::ErrorType;
+use super::error::ErrorKind;
 use super::token_type::TokenType;
 
 use super::text::ByteOffset;
@@ -132,30 +132,28 @@ const STR_LIT_CAPACITY_DIVISOR: usize = 20;
 /// The public API uses `TokenizedBuffer` instead.
 #[derive(Debug, Clone)]
 pub(crate) struct WorkTokenizedBuffer {
-    source_len: ByteOffset,
     line_infos: Vec<LineInfo>,
     token_infos: Vec<TokenInfo>,
     /// Stores unescaped string literals as a single continous string
     /// Payloads of tokens that repsent strings with escaped characters
     /// store the range of the literal within this string.
     string_literals_buffer: String,
+
+    #[cfg(debug_assertions)]
+    source_len: usize,
 }
 
 impl WorkTokenizedBuffer {
     pub(super) fn new(source: &str) -> WorkTokenizedBuffer {
-        // SAFETY: This can only be created from lexer, which explicitly checks for the length
-        #[allow(clippy::unwrap_used)]
-        let source_len = ByteOffset::new(u32::try_from(source.len()).unwrap());
-
         match source.len() {
             0 => WorkTokenizedBuffer {
-                source_len,
-                line_infos: Vec::new(),
-                token_infos: Vec::new(),
+                line_infos: Vec::with_capacity(1),
+                token_infos: Vec::with_capacity(1),
                 string_literals_buffer: String::new(),
+                #[cfg(debug_assertions)]
+                source_len: 0,
             },
             len => WorkTokenizedBuffer {
-                source_len,
                 line_infos: Vec::with_capacity(std::cmp::max(
                     len / LINE_INFO_CAPACITY_DIVISOR,
                     MIN_CAPACITY,
@@ -168,37 +166,52 @@ impl WorkTokenizedBuffer {
                     len / STR_LIT_CAPACITY_DIVISOR,
                     MIN_CAPACITY,
                 )),
+                #[cfg(debug_assertions)]
+                source_len: len,
             },
         }
     }
 
     /// Converts the `WorkTokenizedBuffer` into a `TokenizedBuffer`.
     /// This is supposed to be called only when the tokenization is finished.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the EOF token is not the last token in the buffer.
-    pub(super) fn into_detached(self) -> Result<TokenizedBuffer, ErrorType> {
+    #[allow(clippy::cast_possible_truncation)]
+    pub(super) fn into_detached(mut self, source: &str) -> TokenizedBuffer {
+        // Ensure EOF token is the last token and at least 1 line exists
+        if self.line_infos.is_empty() {
+            self.add_line(ByteOffset::default(), CharOffset::default());
+        }
+
         if !self
             .token_infos
             .last()
             .map_or(false, |t| t.token_type == TokenType::EOF)
         {
-            return Err(ErrorType::InternalErrorMissingEOFToken);
+            self.token_infos.push(TokenInfo {
+                channel: TokenChannel::DEFAULT,
+                token_type: TokenType::EOF,
+                // We know the source length is u32, so this is safe
+                byte_offset: ByteOffset::new(source.len() as u32),
+                start: CharOffset::new(source.chars().count() as u32),
+                line: LineIdx::new(self.line_count() - 1),
+                payload: Payload::None,
+            });
         }
 
-        Ok(TokenizedBuffer {
+        TokenizedBuffer {
             line_infos: self.line_infos,
             token_infos: self.token_infos,
             string_literals_buffer: self.string_literals_buffer,
-        })
+        }
     }
 
     pub(super) fn add_line(&mut self, byte_offset: ByteOffset, start: CharOffset) -> LineIdx {
-        debug_assert!(
-            byte_offset <= self.source_len,
-            "Line byte offset out of bounds"
-        );
+        #[cfg(debug_assertions)]
+        {
+            debug_assert!(
+                usize::from(byte_offset) <= self.source_len,
+                "Line byte offset out of bounds"
+            );
+        }
         self.line_infos.push(LineInfo { byte_offset, start });
         LineIdx::new(self.line_count() - 1)
     }
@@ -213,10 +226,13 @@ impl WorkTokenizedBuffer {
         payload: Payload,
     ) -> TokenIdx {
         // Check that the token start is within the source string
-        debug_assert!(
-            byte_offset <= self.source_len,
-            "Token byte offset out of bounds"
-        );
+        #[cfg(debug_assertions)]
+        {
+            debug_assert!(
+                usize::from(start) <= self.source_len,
+                "Token char offset out of bounds"
+            );
+        }
 
         #[allow(clippy::indexing_slicing)]
         if cfg!(debug_assertions) {
@@ -476,13 +492,13 @@ impl TokenizedBuffer {
     /// # Errors
     ///
     /// Returns an error if the token index is out of bounds.
-    pub fn get_token_start_byte_offset(&self, token: TokenIdx) -> Result<ByteOffset, ErrorType> {
+    pub fn get_token_start_byte_offset(&self, token: TokenIdx) -> Result<ByteOffset, ErrorKind> {
         let tidx = token.0 as usize;
 
         debug_assert!(tidx < self.token_infos.len(), "Token index out of bounds");
         self.token_infos
             .get(tidx)
-            .map_or(Err(ErrorType::TokenIdxOutOfBounds), |t| Ok(t.byte_offset))
+            .map_or(Err(ErrorKind::TokenIdxOutOfBounds), |t| Ok(t.byte_offset))
     }
 
     /// Returns char offset of the token in the source string.
@@ -492,13 +508,13 @@ impl TokenizedBuffer {
     ///
     /// Char here means a Unicode code point, not graphemes. This is
     /// what Python uses to index strings, and IDEs show for cursor position.
-    pub fn get_token_start(&self, token: TokenIdx) -> Result<CharOffset, ErrorType> {
+    pub fn get_token_start(&self, token: TokenIdx) -> Result<CharOffset, ErrorKind> {
         let tidx = token.0 as usize;
 
         debug_assert!(tidx < self.token_infos.len(), "Token index out of bounds");
         self.token_infos
             .get(tidx)
-            .map_or(Err(ErrorType::TokenIdxOutOfBounds), |t| Ok(t.start))
+            .map_or(Err(ErrorKind::TokenIdxOutOfBounds), |t| Ok(t.start))
     }
 
     /// Returns byte offset right after the token in the source string slice.
@@ -509,7 +525,7 @@ impl TokenizedBuffer {
     /// This is the same as the start of the next token or EOF.
     ///
     /// Note that EOF offset is 1 more than the mximum valid index in the source string.
-    pub fn get_token_end_byte_offset(&self, token: TokenIdx) -> Result<ByteOffset, ErrorType> {
+    pub fn get_token_end_byte_offset(&self, token: TokenIdx) -> Result<ByteOffset, ErrorKind> {
         let tidx = token.0 as usize;
 
         debug_assert!(tidx < self.token_infos.len(), "Token index out of bounds");
@@ -517,12 +533,12 @@ impl TokenizedBuffer {
         if tidx + 1 < self.token_infos.len() {
             self.token_infos
                 .get(tidx + 1)
-                .map_or(Err(ErrorType::TokenIdxOutOfBounds), |t| Ok(t.byte_offset))
+                .map_or(Err(ErrorKind::TokenIdxOutOfBounds), |t| Ok(t.byte_offset))
         } else {
             // Must be EOF token => same as start of EOF token
             self.token_infos
                 .get(tidx)
-                .map_or(Err(ErrorType::TokenIdxOutOfBounds), |t| Ok(t.byte_offset))
+                .map_or(Err(ErrorKind::TokenIdxOutOfBounds), |t| Ok(t.byte_offset))
         }
     }
 
@@ -537,7 +553,7 @@ impl TokenizedBuffer {
     ///
     /// Char here means a Unicode code point, not graphemes. This is
     /// what Python uses to index strings, and IDEs show for cursor position.
-    pub fn get_token_end(&self, token: TokenIdx) -> Result<CharOffset, ErrorType> {
+    pub fn get_token_end(&self, token: TokenIdx) -> Result<CharOffset, ErrorKind> {
         let tidx = token.0 as usize;
 
         debug_assert!(tidx < self.token_infos.len(), "Token index out of bounds");
@@ -545,12 +561,12 @@ impl TokenizedBuffer {
         if tidx + 1 < self.token_infos.len() {
             self.token_infos
                 .get(tidx + 1)
-                .map_or(Err(ErrorType::TokenIdxOutOfBounds), |t| Ok(t.start))
+                .map_or(Err(ErrorKind::TokenIdxOutOfBounds), |t| Ok(t.start))
         } else {
             // Must be EOF token => same as start of EOF token
             self.token_infos
                 .get(tidx)
-                .map_or(Err(ErrorType::TokenIdxOutOfBounds), |t| Ok(t.start))
+                .map_or(Err(ErrorKind::TokenIdxOutOfBounds), |t| Ok(t.start))
         }
     }
 
@@ -559,13 +575,13 @@ impl TokenizedBuffer {
     /// # Errors
     ///
     /// Returns an error if the token index is out of bounds.
-    pub fn get_token_start_line(&self, token: TokenIdx) -> Result<u32, ErrorType> {
+    pub fn get_token_start_line(&self, token: TokenIdx) -> Result<u32, ErrorKind> {
         let tidx = token.0 as usize;
 
         debug_assert!(tidx < self.token_infos.len(), "Token index out of bounds");
         self.token_infos
             .get(tidx)
-            .map_or(Err(ErrorType::TokenIdxOutOfBounds), |t| Ok(t.line.0 + 1))
+            .map_or(Err(ErrorKind::TokenIdxOutOfBounds), |t| Ok(t.line.0 + 1))
     }
 
     /// Returns line number of the token end, one-based.
@@ -573,7 +589,7 @@ impl TokenizedBuffer {
     /// # Errors
     ///
     /// Returns an error if the token index is out of bounds.
-    pub fn get_token_end_line(&self, token: TokenIdx) -> Result<u32, ErrorType> {
+    pub fn get_token_end_line(&self, token: TokenIdx) -> Result<u32, ErrorKind> {
         let tidx = token.0 as usize;
 
         debug_assert!(tidx < self.token_infos.len(), "Token index out of bounds");
@@ -588,13 +604,13 @@ impl TokenizedBuffer {
         let next_tok_inf = self
             .token_infos
             .get(tidx + 1)
-            .ok_or(ErrorType::TokenIdxOutOfBounds)?;
+            .ok_or(ErrorKind::TokenIdxOutOfBounds)?;
 
         let (next_token_line_idx, next_token_line_info) = self
             .line_infos
             .get(next_tok_inf.line.0 as usize)
             .map(|li| (next_tok_inf.line, li))
-            .ok_or(ErrorType::TokenIdxOutOfBounds)?;
+            .ok_or(ErrorKind::TokenIdxOutOfBounds)?;
 
         Ok(next_token_line_idx.0
             // lines are 1-based, but line indexes are 0-based.
@@ -614,7 +630,7 @@ impl TokenizedBuffer {
     /// # Errors
     ///
     /// Returns an error if the token index is out of bounds.
-    pub fn get_token_start_column(&self, token: TokenIdx) -> Result<u32, ErrorType> {
+    pub fn get_token_start_column(&self, token: TokenIdx) -> Result<u32, ErrorKind> {
         let tidx = token.0 as usize;
 
         debug_assert!(tidx < self.token_infos.len(), "Token index out of bounds");
@@ -622,11 +638,11 @@ impl TokenizedBuffer {
         let token_info = self
             .token_infos
             .get(tidx)
-            .ok_or(ErrorType::TokenIdxOutOfBounds)?;
+            .ok_or(ErrorKind::TokenIdxOutOfBounds)?;
         let line_info = self
             .line_infos
             .get(token_info.line.0 as usize)
-            .ok_or(ErrorType::TokenIdxOutOfBounds)?;
+            .ok_or(ErrorKind::TokenIdxOutOfBounds)?;
 
         Ok(token_info.start.get() - line_info.start.get())
     }
@@ -636,7 +652,7 @@ impl TokenizedBuffer {
     /// # Errors
     ///
     /// Returns an error if the token index is out of bounds.
-    pub fn get_token_end_column(&self, token: TokenIdx) -> Result<u32, ErrorType> {
+    pub fn get_token_end_column(&self, token: TokenIdx) -> Result<u32, ErrorKind> {
         let tidx = token.0 as usize;
 
         debug_assert!(tidx < self.token_infos.len(), "Token index out of bounds");
@@ -647,7 +663,7 @@ impl TokenizedBuffer {
                 .and_then(|end_line_one_based| {
                     self.line_infos
                         .get((end_line_one_based - 1) as usize)
-                        .ok_or(ErrorType::TokenIdxOutOfBounds)
+                        .ok_or(ErrorKind::TokenIdxOutOfBounds)
                 })?;
 
         Ok(token_end.get() - token_end_line_info.start.get())
@@ -658,13 +674,13 @@ impl TokenizedBuffer {
     /// # Errors
     ///
     /// Returns an error if the token index is out of bounds.
-    pub fn get_token_type(&self, token: TokenIdx) -> Result<TokenType, ErrorType> {
+    pub fn get_token_type(&self, token: TokenIdx) -> Result<TokenType, ErrorKind> {
         let tidx = token.0 as usize;
 
         debug_assert!(tidx < self.token_infos.len(), "Token index out of bounds");
         self.token_infos
             .get(tidx)
-            .map_or(Err(ErrorType::TokenIdxOutOfBounds), |t| Ok(t.token_type))
+            .map_or(Err(ErrorKind::TokenIdxOutOfBounds), |t| Ok(t.token_type))
     }
 
     /// Returns the token channel
@@ -672,13 +688,13 @@ impl TokenizedBuffer {
     /// # Errors
     ///
     /// Returns an error if the token index is out of bounds.
-    pub fn get_token_channel(&self, token: TokenIdx) -> Result<TokenChannel, ErrorType> {
+    pub fn get_token_channel(&self, token: TokenIdx) -> Result<TokenChannel, ErrorKind> {
         let tidx = token.0 as usize;
 
         debug_assert!(tidx < self.token_infos.len(), "Token index out of bounds");
         self.token_infos
             .get(tidx)
-            .map_or(Err(ErrorType::TokenIdxOutOfBounds), |t| Ok(t.channel))
+            .map_or(Err(ErrorKind::TokenIdxOutOfBounds), |t| Ok(t.channel))
     }
 
     /// Retruns the text slice from the source using the token range.
@@ -691,13 +707,13 @@ impl TokenizedBuffer {
         &'a self,
         token: TokenIdx,
         source: &'a S,
-    ) -> Result<Option<&'a str>, ErrorType> {
+    ) -> Result<Option<&'a str>, ErrorKind> {
         let tidx = token.0 as usize;
 
         debug_assert!(tidx < self.token_infos.len(), "Token index out of bounds");
 
         let Some(token_info) = self.token_infos.get(tidx) else {
-            return Err(ErrorType::TokenIdxOutOfBounds);
+            return Err(ErrorKind::TokenIdxOutOfBounds);
         };
 
         let text_range = if let Ok(end_offset) = self.get_token_end_byte_offset(token) {
@@ -706,7 +722,7 @@ impl TokenizedBuffer {
                 end: end_offset.into(),
             }
         } else {
-            return Err(ErrorType::TokenIdxOutOfBounds);
+            return Err(ErrorKind::TokenIdxOutOfBounds);
         };
 
         debug_assert!(
@@ -726,13 +742,13 @@ impl TokenizedBuffer {
     /// # Errors
     ///
     /// Returns an error if the token index is out of bounds.
-    pub fn get_token_payload(&self, token: TokenIdx) -> Result<Payload, ErrorType> {
+    pub fn get_token_payload(&self, token: TokenIdx) -> Result<Payload, ErrorKind> {
         let tidx = token.0 as usize;
 
         debug_assert!(tidx < self.token_infos.len(), "Token index out of bounds");
         self.token_infos
             .get(tidx)
-            .map_or(Err(ErrorType::TokenIdxOutOfBounds), |t| Ok(t.payload))
+            .map_or(Err(ErrorKind::TokenIdxOutOfBounds), |t| Ok(t.payload))
     }
 
     /// Returns the string literal from range defined by start and stop.
@@ -742,13 +758,13 @@ impl TokenizedBuffer {
     /// # Errors
     ///
     /// Returns an error if the range is out of bounds.
-    pub fn get_string_literal(&self, start: u32, stop: u32) -> Result<&str, ErrorType> {
+    pub fn get_string_literal(&self, start: u32, stop: u32) -> Result<&str, ErrorKind> {
         let start = start as usize;
         let stop = stop as usize;
 
         self.string_literals_buffer
             .get(start..stop)
-            .ok_or(ErrorType::StringLiteralOutOfBounds)
+            .ok_or(ErrorKind::StringLiteralOutOfBounds)
     }
 
     /// Returns a vector of `ResolvedAntlrTokenInfo` that can be used
@@ -827,14 +843,6 @@ impl IntoIterator for &TokenizedBuffer {
     }
 }
 
-impl TryFrom<WorkTokenizedBuffer> for TokenizedBuffer {
-    type Error = ErrorType;
-
-    fn try_from(buffer: WorkTokenizedBuffer) -> Result<Self, Self::Error> {
-        buffer.into_detached()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -881,7 +889,7 @@ mod tests {
             Payload::None,
         );
 
-        (buffer.try_into().unwrap(), token1, token2)
+        (buffer.into_detached(source), token1, token2)
     }
 
     #[test]
@@ -889,8 +897,13 @@ mod tests {
         let source = "Hello, world!";
         let work_buf = WorkTokenizedBuffer::new(source);
 
-        let buf = work_buf.into_detached();
-        assert_eq!(buf.unwrap_err(), ErrorType::InternalErrorMissingEOFToken);
+        let buf = work_buf.into_detached(source);
+        assert_eq!(buf.line_count(), 1u32);
+        assert_eq!(buf.token_count(), 1u32);
+        assert_eq!(
+            buf.get_token_type(TokenIdx::new(0)).expect("wrong token"),
+            TokenType::EOF
+        );
     }
 
     #[test]
@@ -987,7 +1000,7 @@ mod tests {
             Payload::None,
         );
 
-        let buf = work_buf.into_detached().unwrap();
+        let buf = work_buf.into_detached(source);
 
         assert_eq!(
             buf.get_token_type(token).expect("wrong token"),

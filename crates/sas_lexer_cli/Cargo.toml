@@ -12,7 +12,7 @@ name = "sas-lexer"
 path = "src/main.rs"
 
 [dependencies]
-sas_lexer = { workspace = true }
+sas_lexer = { workspace = true, features = ["opti_stats"] }
 clap = { version = "4.5.10", features = ["derive", "env"] }
 walkdir = { workspace = true }
 strum = { workspace = true }

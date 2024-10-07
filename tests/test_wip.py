@@ -18,6 +18,7 @@ def test_wip():
     file_count = 0
     tokens_count = 0
     for sas_file in Path(SAS_LEX_SAMPLES).rglob("*.sas"):
+        file_count += 1
         sas_file.read_text(errors="replace")
 
     print(f"Plain read from {file_count} files. Elapsed: {(perf_counter_ns() - st) / 1_000_000} ms")

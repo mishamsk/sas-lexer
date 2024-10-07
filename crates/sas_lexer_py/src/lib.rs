@@ -3,16 +3,16 @@ use pyo3::{
     prelude::*,
     types::{PyBytes, PyString},
 };
-use sas_lexer::lex;
+use sas_lexer::{lex, LexResult};
 
 /// TODO
 #[pyfunction]
 fn lex_str<'py>(py: Python<'py>, src: &Bound<'py, PyString>) -> PyResult<Bound<'py, PyBytes>> {
     let src: &str = src.extract()?;
 
-    let (buf, _) = lex(&src).map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+    let LexResult { buffer, .. } = lex(&src).map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
 
-    let tok_vec = buf.into_resolved_token_vec();
+    let tok_vec = buffer.into_resolved_token_vec();
 
     let data = rmp_serde::encode::to_vec(&tok_vec)
         .map_err(|e| PyRuntimeError::new_err(format!("Failed to serialize to msgpack: {e}")))?;

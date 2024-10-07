@@ -5,8 +5,8 @@ use std::{
 };
 
 use sas_lexer::{
-    error::{ErrorInfo, ErrorType},
-    lex, TokenizedBuffer,
+    error::{ErrorInfo, ErrorKind},
+    lex, LexResult, TokenizedBuffer,
 };
 
 use crate::print::{print_errors, print_tokens};
@@ -15,11 +15,20 @@ pub(crate) fn safe_lex(
     source: &String,
     print_lex_return_errors: bool,
     print_stack_unwind_errors: bool,
-) -> Option<(TokenizedBuffer, Vec<ErrorInfo>, Duration)> {
+) -> Option<(TokenizedBuffer, Vec<ErrorInfo>, Duration, Option<usize>)> {
     let start = Instant::now();
 
     let result = catch_unwind(|| match lex(source) {
-        Ok((tok_buffer, errors)) => Some((tok_buffer, errors, start.elapsed())),
+        Ok(LexResult {
+            buffer: tok_buffer,
+            errors,
+            max_mode_stack_depth,
+        }) => Some((
+            tok_buffer,
+            errors,
+            start.elapsed(),
+            Some(max_mode_stack_depth),
+        )),
         Err(error) => {
             if print_lex_return_errors {
                 eprintln!("Error: {error}");
@@ -64,15 +73,15 @@ pub(super) fn lex_and_print(source: &String, print_config: LexPrintConfig) -> Op
         print_config.print_lex_return_errors,
         print_config.print_stack_unwind_errors,
     ) {
-        Some((tok_buffer, errors, lex_duration)) => {
+        Some((tok_buffer, errors, lex_duration, _)) => {
             let total_tokens = tok_buffer.token_count();
             let (c_int, c_unknown, c_user) =
                 errors
                     .iter()
                     .fold((0, 0, 0), |(c_int, c_unknown, c_user), e| {
-                        match e.error_type() {
+                        match e.error_kind() {
                             e if e.is_internal() => (c_int + 1, c_unknown, c_user),
-                            ErrorType::UnexpectedCharacter => (c_int, c_unknown + 1, c_user),
+                            ErrorKind::UnexpectedCharacter => (c_int, c_unknown + 1, c_user),
                             _ => (c_int, c_unknown, c_user + 1),
                         }
                     });

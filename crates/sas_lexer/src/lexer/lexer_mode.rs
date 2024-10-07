@@ -1,4 +1,4 @@
-use super::{channel::TokenChannel, error::ErrorType, token_type::TokenType};
+use super::{channel::TokenChannel, error::ErrorKind, token_type::TokenType};
 use strum::EnumIs;
 #[cfg(test)]
 use strum::EnumIter;
@@ -283,9 +283,9 @@ pub(crate) enum LexerMode {
     /// Mode for lexing right after `%let`/`%local`/`%global`/`%do`, where
     /// we expect a variable name expression. Boolean flag indicates if we
     /// have found at least one token of the variable name.
-    /// `ErrorType` is used to supply relevant error message, if any is
+    /// `ErrorKind` is used to supply relevant error message, if any is
     /// emitted by SAS if no name is found.
-    MacroVarNameExpr(bool, Option<ErrorType>),
+    MacroVarNameExpr(bool, Option<ErrorKind>),
     /// Mode for lexing unrestricted macro text expressions terminated by semi.
     /// These are used for `%let` initializations, `%put`, etc.
     MacroSemiTerminatedTextExpr,

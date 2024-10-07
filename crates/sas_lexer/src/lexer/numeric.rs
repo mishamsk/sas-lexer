@@ -8,7 +8,7 @@ use lexical::{
     NumberFormatBuilder, ParseFloatOptions, ParseIntegerOptions,
 };
 
-use super::{buffer::Payload, error::ErrorType, token_type::TokenType};
+use super::{buffer::Payload, error::ErrorKind, token_type::TokenType};
 
 /// The default SAS numeric parser format, works for integers and floats
 const SAS_DECIMAL: u128 = NumberFormatBuilder::new()
@@ -33,7 +33,7 @@ pub(super) struct NumericParserResult {
     /// in bytes (not characters).
     pub(super) length: NonZeroUsize,
     /// An optional error (e.g. overflow)
-    pub(super) error: Option<ErrorType>,
+    pub(super) error: Option<ErrorKind>,
 }
 
 fn _try_parse_integer(byte_view: &[u8]) -> Option<NumericParserResult> {
@@ -99,7 +99,7 @@ fn _try_parse_float(byte_view: &[u8]) -> Option<NumericParserResult> {
             NonZeroUsize::new(len).map(|length| NumericParserResult {
                 token: (TokenType::FloatLiteral, Payload::Float(0.0)),
                 length,
-                error: Some(ErrorType::InvalidNumericLiteral),
+                error: Some(ErrorKind::InvalidNumericLiteral),
             })
         }
         Err(EmptyExponent(len)) => {
@@ -107,7 +107,7 @@ fn _try_parse_float(byte_view: &[u8]) -> Option<NumericParserResult> {
             NonZeroUsize::new(len).map(|length| NumericParserResult {
                 token: (TokenType::FloatLiteral, Payload::Float(0.0)),
                 length,
-                error: Some(ErrorType::InvalidNumericLiteral),
+                error: Some(ErrorKind::InvalidNumericLiteral),
             })
         }
         // Anything else means not a kind of error we recognize
@@ -193,7 +193,7 @@ pub(super) fn try_parse_hex_integer(source: &str) -> Option<NumericParserResult>
                     NonZeroUsize::new(len).map(|length| NumericParserResult {
                         token: (TokenType::FloatLiteral, Payload::Float(value)),
                         length,
-                        error: Some(ErrorType::InvalidNumericLiteral),
+                        error: Some(ErrorKind::InvalidNumericLiteral),
                     })
                 }
                 _ => {

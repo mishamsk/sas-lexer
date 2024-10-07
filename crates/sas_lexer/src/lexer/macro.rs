@@ -3,7 +3,7 @@ use unicode_ident::is_xid_continue;
 
 use super::{
     cursor::Cursor,
-    error::ErrorType,
+    error::ErrorKind,
     sas_lang::is_valid_sas_name_start,
     token_type::{
         parse_macro_keyword, TokenType, TokenTypeMacroCallOrStat,
@@ -113,7 +113,7 @@ pub(super) const fn is_macro_eval_logical_op(tok_type: TokenType) -> bool {
 /// Error in this function means a bug, but is returned for safety
 pub(super) fn lex_macro_call_stat_or_label(
     cursor: &mut Cursor,
-) -> Result<(TokenTypeMacroCallOrStat, u32), ErrorType> {
+) -> Result<(TokenTypeMacroCallOrStat, u32), ErrorKind> {
     debug_assert!(
         cursor.peek().is_some_and(is_valid_sas_name_start),
         "Unexpected first character in the cursor: {:?}",
@@ -146,7 +146,7 @@ pub(super) fn lex_macro_call_stat_or_label(
     let pending_ident_len = (start_rem_length - cursor.remaining_len()) as usize;
     let pending_ident = source_view
         .get(..pending_ident_len)
-        .ok_or(ErrorType::InternalErrorOutOfBounds)?;
+        .ok_or(ErrorKind::InternalErrorOutOfBounds)?;
 
     // If the identifier is not ASCII or longer then max length,
     // we can safely return true must be a macro call
@@ -176,7 +176,7 @@ pub(super) fn lex_macro_call_stat_or_label(
             TokenTypeMacroCallOrStat::try_from(t)
         })
         .map(|t| (t, cursor.char_offset() - start_char_offset))
-        .map_err(|()| ErrorType::InternalErrorOutOfBounds)
+        .map_err(|()| ErrorKind::InternalErrorOutOfBounds)
 }
 
 /// Predicate to check if the following chracters are one of macro logical
