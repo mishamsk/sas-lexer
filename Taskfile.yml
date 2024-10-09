@@ -4,6 +4,94 @@ dotenv:
   - .env
 
 tasks:
+  # Python tasks
+  py:_init:
+    internal: true
+    preconditions:
+      # Check UV installed
+      - sh: uv --version
+        msg: "UV is not installed. Please install it before running this task."
+    cmds:
+      - |
+        if test -d .venv; then
+            echo Found existing virutal env at .venv. Removing...
+            rm -fR .venv
+        else
+            echo No venv exist. Creating anew...
+        fi
+      # Create a virtual environment
+      - uv venv --python python
+      # Create local .env file if it doesn't exist
+      - test -f .env || cp .env.example .env
+      # Sync dependencies
+      - task: py:sync
+      # Set up pre-commit
+      - pre-commit install
+      - echo "Done"
+
+  py:init:
+    desc: "Checks system python is correct and sets up environment"
+    preconditions:
+      # Make sure .venv doesn't exist
+      - sh: test ! -d .venv
+        msg: "A virtual environment already exists. Please remove it before running or use py:init-force."
+    cmds:
+      - task: py:_init
+
+  py:init-force:
+    desc: "Checks system python is correct and recreates the environment"
+    prompt: "Are you sure you want to recreate the virtual environment?"
+    cmds:
+      - task: clean-all-caches
+      - task: clean-test
+      - task: py:_init
+
+  py:sync:
+    desc: "Sync dependencies & install project"
+    cmd: uv sync --all-extras --locked --compile-bytecode
+
+  # Cleanup tasks
+  clean-pyc:
+    desc: remove Python file artifacts
+    cmds:
+      - find . -name '*.pyc' -not -path '*/.venv/*' -not -path '*/.tox/*' -exec rm -f {} +
+      - find . -name '*.pyo' -not -path '*/.venv/*' -not -path '*/.tox/*' -exec rm -f {} +
+      - find . -name '*~' -not -path '*/.venv/*' -not -path '*/.tox/*' -exec rm -f {} +
+      - find . -name '__pycache__' -not -path '*/.venv/*' -not -path '*/.tox/*' -exec rm -fr {} +
+
+  clean-test:
+    desc: remove test and coverage artifacts
+    cmds:
+      - rm -f .coverage
+      - rm -f .coverage.*
+      - rm -f coverage.xml
+      - rm -f report.xml
+      - rm -fr htmlcov/
+      - rm -fr .pytest_cache
+      - rm -fr testtemp/
+
+  clean-lint-caches:
+    desc: remove lint (mypy, ruff) caches
+    cmds:
+      - rm -fr .mypy_cache
+      - rm -fr .ruff_cache
+
+  clean-all-caches:
+    desc: remove all caches including Taskfile
+    cmds:
+      - task: clean-pyc
+      - task: clean-lint-caches
+      - rm -fr .pytest_cache
+      - rm -fr .task
+
+  clean:
+    desc: Clean up everything. Similar to doing a fresh clone except for .env
+    cmds:
+      - task: clean-all-caches
+      - task: clean-test
+      - cargo clean
+
+  # Build tasks
   build:rel:
     sources:
       - crates/**/*.*
@@ -14,6 +102,21 @@ tasks:
     cmds:
       - cargo build --release
 
+  build:dev:
+    sources:
+      - crates/**/*.*
+      - Cargo.toml
+      - Cargo.lock
+      - src/**/*.*
+      - pyproject.toml
+      - uv.lock
+    generates:
+      - target/**/*.*
+    cmds:
+      - cargo build
+      - maturin develop --uv -r
+
+  # Performance tasks
   perf:profile:
     desc: Profile the application
     cmds:

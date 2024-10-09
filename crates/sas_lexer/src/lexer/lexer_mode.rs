@@ -175,7 +175,7 @@ pub(crate) enum LexerMode {
     WsOrCStyleCommentOnly,
     /// A special mode where only a specific non-letter char is expected.
     /// In this mode we also auto-recover if the expected character is not found
-    /// emitting an error but also creating the expected token    
+    /// emitting an error but also creating the expected token
     ExpectSymbol(TokenType, TokenChannel),
     /// A common case where we expect a semicolon or EOF. Works like
     /// `ExpectSymbol` but with a special case for EOF
@@ -216,7 +216,7 @@ pub(crate) enum LexerMode {
     /// If found, adds necessary mode stack to parse the macro def args.
     ///
     /// Note - it should always be preceded by the `WsOrCStyleCommentOnly` mode
-    /// as it literally checks the `next_char` only.    
+    /// as it literally checks the `next_char` only.
     MaybeMacroDefArgs,
     /// Macro def argument. I.e. inside the parens of a macro definition,
     /// before an optional `=`. It reads the argument name, optional `=`
@@ -258,7 +258,7 @@ pub(crate) enum LexerMode {
         /// terminators.
         pnl: u32,
     },
-    /// Macro arithmetic/logical expression, as in `%eval(-->1+1<--)`, or `%if 1+1`    
+    /// Macro arithmetic/logical expression, as in `%eval(-->1+1<--)`, or `%if 1+1`
     MacroEval {
         /// See `MacroEvalExprFlags` for the packed flags explanation
         macro_eval_flags: MacroEvalExprFlags,

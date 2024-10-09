@@ -1,0 +1,109 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in library 'sas_lexer'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--lib",
+                    "--package=sas_lexer"
+                ],
+                "problemMatcher": "$rustc",
+                "filter": {
+                    "name": "sas_lexer",
+                    "kind": "lib"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug benchmark 'lexer'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bench=lexer",
+                    "--package=sas_lexer"
+                ],
+                "problemMatcher": "$rustc",
+                "filter": {
+                    "name": "lexer",
+                    "kind": "bench"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'sas-lexer'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=sas-lexer",
+                    "--package=sas_lexer_cli"
+                ],
+                "problemMatcher": "$rustc",
+                "filter": {
+                    "name": "sas-lexer",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug lexing - current file",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=sas-lexer",
+                    "--package=sas_lexer_cli"
+                ],
+                "problemMatcher": "$rustc",
+                "filter": {
+                    "name": "sas-lexer",
+                    "kind": "bin"
+                }
+            },
+            "args": [
+                "lex",
+                "${file}"
+            ],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'sas-lexer'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=sas-lexer",
+                    "--package=sas_lexer_cli"
+                ],
+                "problemMatcher": "$rustc",
+                "filter": {
+                    "name": "sas-lexer",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}

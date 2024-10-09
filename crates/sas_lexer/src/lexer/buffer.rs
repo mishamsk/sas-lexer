@@ -426,7 +426,7 @@ pub struct ResolvedTokenInfo {
     /// u32 as we only support 4gb files
     pub stop: u32,
 
-    /// Starting line of the token, 1-based.    
+    /// Starting line of the token, 1-based.
     pub line: u32,
 
     /// Zero-based column of the token start on the start line.

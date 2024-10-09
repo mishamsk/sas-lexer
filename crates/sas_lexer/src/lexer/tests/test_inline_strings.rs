@@ -327,20 +327,20 @@ fn test_string_expr_with_macro_no_escape(
 )]
 #[case::with_unlexed_macro_comment("\"%* not a comment;\"",
     vec![
-        ("\"%* not a comment;\"", TokenType::StringLiteral),        
+        ("\"%* not a comment;\"", TokenType::StringLiteral),
     ]
 )]
 #[case::with_unlexed_macro_comment_in_macro("%put \"%* not a comment;\"",
     vec![
         ("%put", TokenType::KwmPut),
         (" ", TokenType::WS),
-        ("\"%* not a comment;\"", TokenType::StringLiteral),        
+        ("\"%* not a comment;\"", TokenType::StringLiteral),
         ("", TokenType::SEMI),
     ]
 )]
 #[case::with_unlexed_cstyle_comment("\"/*not a comment*/\"",
     vec![
-        ("\"/*not a comment*/\"", TokenType::StringLiteral),        
+        ("\"/*not a comment*/\"", TokenType::StringLiteral),
     ]
 )]
 fn test_complex_string_expr(
@@ -355,7 +355,7 @@ fn test_complex_string_expr(
     vec![
         ("%put", TokenType::KwmPut),
         (" ", TokenType::WS),
-        ("\"", TokenType::StringExprStart),        
+        ("\"", TokenType::StringExprStart),
         ("%let", TokenType::KwmLet),
         (" ", TokenType::WS),
         ("v", TokenType::MacroString),
@@ -363,7 +363,7 @@ fn test_complex_string_expr(
         ("1", TokenType::MacroString),
         (";", TokenType::SEMI),
         ("\"", TokenType::StringExprEnd),
-        (";", TokenType::SEMI),        
+        (";", TokenType::SEMI),
         ],
     vec![
         (ErrorKind::OpenCodeRecursionError, 6),
@@ -787,7 +787,7 @@ fn test_numeric_literal_range() {
         ("&mv.", TokenType::MacroVarExpr),
         ("9", TokenType::MacroString),
         ("=", TokenType::ASSIGN),
-        ("1", TokenType::MacroString),        
+        ("1", TokenType::MacroString),
         (";", TokenType::SEMI),
         ]
 )]
@@ -812,7 +812,7 @@ fn test_numeric_literal_range() {
         ("=", TokenType::ASSIGN),
         ("   ", TokenType::WS),
         // Trailing whitespace is not significant in SAS, but
-        // we defer to parser to trim it          
+        // we defer to parser to trim it
         ("1 1  ", TokenType::MacroString),
         (";", TokenType::SEMI),
         ]
@@ -1032,7 +1032,7 @@ fn test_macro_let(#[case] contents: &str, #[case] expected_token: Vec<impl Token
         (".b=1", TokenType::MacroString),
         (";", TokenType::SEMI),
         ],
-    // Real SAS error will be: 
+    // Real SAS error will be:
     // /* ERROR: Symbolic variable name a[resolved %m call].b must contain only letters, digits, and underscores. */
     vec![(ErrorKind::MissingExpectedAssign, 8)]
 )]
@@ -1082,10 +1082,10 @@ vec![
     vec![
         ("%let", TokenType::KwmLet),
         // Recovered from missing assign hence empty string
-        ("", TokenType::ASSIGN),        
+        ("", TokenType::ASSIGN),
         // Recovered, hence empty string
         // But doesn't produce an error!!!
-        ("", TokenType::SEMI),        
+        ("", TokenType::SEMI),
         ],
     vec![
         (ErrorKind::InvalidMacroLetVarName, 4),
@@ -1215,7 +1215,7 @@ fn test_macro_let_error_recovery(
         ("(", TokenType::MacroString),
         ("/*c*/", TokenType::CStyleComment),
         (")", TokenType::MacroString),
-        (")", TokenType::RPAREN),        
+        (")", TokenType::RPAREN),
     ]
 )]
 #[case::balanced_parens_after_slash_with_comment("%t(/(/*c*/))",
@@ -1225,7 +1225,7 @@ fn test_macro_let_error_recovery(
         ("/(", TokenType::MacroString),
         ("/*c*/", TokenType::CStyleComment),
         (")", TokenType::MacroString),
-        (")", TokenType::RPAREN),        
+        (")", TokenType::RPAREN),
     ]
 )]
 #[case::bare_nested_parens("%t(some(),());",
@@ -1474,7 +1474,7 @@ fn test_macro_call(#[case] contents: &str, #[case] expected_token: Vec<impl Toke
     ("(", TokenType::LPAREN),
     ("inner_arg", TokenType::MacroString),
     (")", TokenType::RPAREN),
-    ("g=c", TokenType::MacroString),    
+    ("g=c", TokenType::MacroString),
 ])]
 // Now the cases with valid dynamic macro call argument names.
 // Here trailing WS is not significant and = must be lexed as assign
@@ -1582,7 +1582,7 @@ fn test_macro_call_arg_disambiguation(#[case] expected_tokens: Vec<(&str, TokenT
     vec![
         ("%sTr", TokenType::KwmStr, TokenChannel::HIDDEN),
         ("(", TokenType::LPAREN, TokenChannel::HIDDEN),
-        (")", TokenType::RPAREN, TokenChannel::HIDDEN),        
+        (")", TokenType::RPAREN, TokenChannel::HIDDEN),
         ]
 )]
 #[case::with_macro_chars("%str(&9 and &&&, 9% and % )",
@@ -1761,7 +1761,7 @@ fn test_macro_str_call(#[case] contents: &str, #[case] expected_token: Vec<impl 
         ("%str", TokenType::KwmStr, TokenChannel::HIDDEN),
         ("(", TokenType::LPAREN, TokenChannel::HIDDEN),
         (" ", TokenType::MacroString, TokenChannel::DEFAULT),
-        // Recovered from missing hence empty string        
+        // Recovered from missing hence empty string
         ("", TokenType::RPAREN, TokenChannel::HIDDEN),
         ("%let", TokenType::KwmLet, TokenChannel::DEFAULT),
         (" ", TokenType::WS, TokenChannel::HIDDEN),
@@ -1799,7 +1799,7 @@ fn test_macro_str_call_error_recovery(
     vec![
         ("%nrsTr", TokenType::KwmNrStr, TokenChannel::HIDDEN),
         ("(", TokenType::LPAREN, TokenChannel::HIDDEN),
-        (")", TokenType::RPAREN, TokenChannel::HIDDEN),        
+        (")", TokenType::RPAREN, TokenChannel::HIDDEN),
         ]
 )]
 #[case::with_macro_chars("%nrstr(&9 and &&&, 9% and % )",
@@ -2250,7 +2250,7 @@ vec![
     ("%pUt", TokenType::KwmPut),
     (" ", TokenType::WS),
     ("some\r\n🔥\nother", TokenType::MacroString),
-    ("&mv", TokenType::MacroVarExpr),        
+    ("&mv", TokenType::MacroVarExpr),
     (";", TokenType::SEMI),
     ]
 )]
@@ -2260,7 +2260,7 @@ vec![
         (" \n", TokenType::WS),
         ("v=[", TokenType::MacroString),
         ("&m_s.", TokenType::MacroVarExpr),
-        ("]", TokenType::MacroString),        
+        ("]", TokenType::MacroString),
         (";", TokenType::SEMI),
         ]
 )]
@@ -2270,7 +2270,7 @@ vec![
         ("\t\n \n", TokenType::WS),
         ("pre <s>=[", TokenType::MacroString),
         ("&mv", TokenType::MacroVarExpr),
-        ("]", TokenType::MacroString),        
+        ("]", TokenType::MacroString),
         (";", TokenType::SEMI),
         ]
 )]
@@ -2286,15 +2286,15 @@ vec![
         ("  ", TokenType::WS),
         ("_AlL_ ", TokenType::MacroString),
         ("/*c*/", TokenType::CStyleComment),
-        (" pre post\n                        _AuTOMATIC_ ", TokenType::MacroString),        
+        (" pre post\n                        _AuTOMATIC_ ", TokenType::MacroString),
         ("/*c*/", TokenType::CStyleComment),
-        (" pre post\n                        _GlOBAL_ ", TokenType::MacroString),        
+        (" pre post\n                        _GlOBAL_ ", TokenType::MacroString),
         ("/*c*/", TokenType::CStyleComment),
-        (" pre post\n                        _LoCAL_ ", TokenType::MacroString),        
+        (" pre post\n                        _LoCAL_ ", TokenType::MacroString),
         ("/*c*/", TokenType::CStyleComment),
-        (" pre post\n                        _ReADONLY_ ", TokenType::MacroString),        
+        (" pre post\n                        _ReADONLY_ ", TokenType::MacroString),
         ("/*c*/", TokenType::CStyleComment),
-        (" pre post\n                        _UsER_ ", TokenType::MacroString),        
+        (" pre post\n                        _UsER_ ", TokenType::MacroString),
         ("/*c*/", TokenType::CStyleComment),
         (" pre post\n                        _WrITABLE_ ", TokenType::MacroString),
         ("/*c*/", TokenType::CStyleComment),
@@ -2329,7 +2329,7 @@ vec![
         (" ", TokenType::WS),
         ("(", TokenType::LPAREN),
         (")", TokenType::RPAREN),
-        ("post)", TokenType::MacroString),        
+        ("post)", TokenType::MacroString),
         (";" ,TokenType::SEMI),
         ]
 )]
@@ -2488,35 +2488,35 @@ fn test_macro_strings_with_mnemonics_eval_expr(#[case] op_str: &str) {
 }
 
 #[rstest]
-#[case::comma_and_semi(",eQ;", 
+#[case::comma_and_semi(",eQ;",
     vec![
         (",", TokenType::MacroString, Payload::None),
         ("eQ", TokenType::KwEQ, Payload::None),
         (";", TokenType::MacroString, Payload::None),
     ]
 )]
-#[case::not_integer_1("1 2 ~= 3 4", 
+#[case::not_integer_1("1 2 ~= 3 4",
     vec![
         ("1 2", TokenType::MacroString, Payload::None),
-        (" ", TokenType::WS, Payload::None),            
+        (" ", TokenType::WS, Payload::None),
         ("~=", TokenType::NE, Payload::None),
         (" ", TokenType::WS, Payload::None),
         ("3 4", TokenType::MacroString, Payload::None),
     ]
 )]
-#[case::not_integer_2("1.2 ~= 3.4", 
+#[case::not_integer_2("1.2 ~= 3.4",
     vec![
         ("1.2", TokenType::MacroString, Payload::None),
-        (" ", TokenType::WS, Payload::None),            
+        (" ", TokenType::WS, Payload::None),
         ("~=", TokenType::NE, Payload::None),
         (" ", TokenType::WS, Payload::None),
         ("3.4", TokenType::MacroString, Payload::None),
     ]
 )]
-#[case::looks_like_but_not_integer("12s ~= 01m3", 
+#[case::looks_like_but_not_integer("12s ~= 01m3",
     vec![
         ("12s", TokenType::MacroString, Payload::None),
-        (" ", TokenType::WS, Payload::None),            
+        (" ", TokenType::WS, Payload::None),
         ("~=", TokenType::NE, Payload::None),
         (" ", TokenType::WS, Payload::None),
         ("01m3", TokenType::MacroString, Payload::None),
@@ -2525,25 +2525,25 @@ fn test_macro_strings_with_mnemonics_eval_expr(#[case] op_str: &str) {
 #[case::hex_integer_literals("0FFx < 9ffX",
     vec![
         ("0FFx", TokenType::IntegerLiteral, Payload::Integer(255)),
-        (" ", TokenType::WS, Payload::None),            
+        (" ", TokenType::WS, Payload::None),
         ("<", TokenType::LT, Payload::None),
         (" ", TokenType::WS, Payload::None),
-        ("9ffX", TokenType::IntegerLiteral, Payload::Integer(2559)),        
+        ("9ffX", TokenType::IntegerLiteral, Payload::Integer(2559)),
     ]
 )]
 #[case::not_hex_integer_literals("0F_Fx eq fffX",
     vec![
         ("0F_Fx", TokenType::MacroString, Payload::None),
-        (" ", TokenType::WS, Payload::None),            
+        (" ", TokenType::WS, Payload::None),
         ("eq", TokenType::KwEQ, Payload::None),
         (" ", TokenType::WS, Payload::None),
-        ("fffX", TokenType::MacroString, Payload::None),        
+        ("fffX", TokenType::MacroString, Payload::None),
     ]
 )]
 #[case::ws_handling_str_literals("'a' 'b' = 'c'",
     vec![
         ("'a'", TokenType::StringLiteral, Payload::None),
-        (" ", TokenType::MacroString, Payload::None),            
+        (" ", TokenType::MacroString, Payload::None),
         ("'b'", TokenType::StringLiteral, Payload::None),
         (" ", TokenType::WS, Payload::None),
         ("=", TokenType::ASSIGN, Payload::None),
@@ -2577,7 +2577,7 @@ fn test_macro_strings_with_mnemonics_eval_expr(#[case] op_str: &str) {
         ("2", TokenType::IntegerLiteral, Payload::Integer(2)),
     ]
 )]
-#[case::all_in_expr(" (\n🔥>  &m.v)*/*c*/(\t3 * ( 5-0ffx) ) eq %m.suf \"\"", 
+#[case::all_in_expr(" (\n🔥>  &m.v)*/*c*/(\t3 * ( 5-0ffx) ) eq %m.suf \"\"",
     vec![
         (" ", TokenType::WS, Payload::None),
         ("(", TokenType::LPAREN, Payload::None),
@@ -2608,7 +2608,7 @@ fn test_macro_strings_with_mnemonics_eval_expr(#[case] op_str: &str) {
         ("eq", TokenType::KwEQ, Payload::None),
         (" ", TokenType::WS, Payload::None),
         ("%m", TokenType::MacroIdentifier, Payload::None),
-        (".suf ", TokenType::MacroString, Payload::None),        
+        (".suf ", TokenType::MacroString, Payload::None),
         ("\"\"", TokenType::StringLiteral, Payload::None),
     ]
 )]
@@ -2632,26 +2632,26 @@ fn test_macro_eval_expr(
 }
 
 #[rstest]
-#[case::comma_and_semi("1,eQ;", 
+#[case::comma_and_semi("1,eQ;",
     vec![
         ("1", TokenType::IntegerLiteral, Payload::Integer(1)),
-        (",", TokenType::COMMA, Payload::None),        
+        (",", TokenType::COMMA, Payload::None),
         ("eQ;", TokenType::MacroString, Payload::None),
     ]
 )]
-#[case::not_integer_1("1 2 ~= 3 4", 
+#[case::not_integer_1("1 2 ~= 3 4",
     vec![
         ("1 2", TokenType::MacroString, Payload::None),
-        (" ", TokenType::WS, Payload::None),            
+        (" ", TokenType::WS, Payload::None),
         ("~=", TokenType::NE, Payload::None),
         (" ", TokenType::WS, Payload::None),
         ("3 4", TokenType::MacroString, Payload::None),
     ]
 )]
-#[case::float("1.2 ~= 3.4", 
+#[case::float("1.2 ~= 3.4",
     vec![
         ("1.2", TokenType::FloatLiteral, Payload::Float(1.2)),
-        (" ", TokenType::WS, Payload::None),            
+        (" ", TokenType::WS, Payload::None),
         ("~=", TokenType::NE, Payload::None),
         (" ", TokenType::WS, Payload::None),
         ("3.4", TokenType::FloatLiteral, Payload::Float(3.4)),
@@ -2660,25 +2660,25 @@ fn test_macro_eval_expr(
 #[case::hex_integer_literals("0FFx < 9ffX",
     vec![
         ("0FFx", TokenType::IntegerLiteral, Payload::Integer(255)),
-        (" ", TokenType::WS, Payload::None),            
+        (" ", TokenType::WS, Payload::None),
         ("<", TokenType::LT, Payload::None),
         (" ", TokenType::WS, Payload::None),
-        ("9ffX", TokenType::IntegerLiteral, Payload::Integer(2559)),        
+        ("9ffX", TokenType::IntegerLiteral, Payload::Integer(2559)),
     ]
 )]
 #[case::not_hex_integer_literals("0F_Fx eq fffX",
     vec![
         ("0F_Fx", TokenType::MacroString, Payload::None),
-        (" ", TokenType::WS, Payload::None),            
+        (" ", TokenType::WS, Payload::None),
         ("eq", TokenType::KwEQ, Payload::None),
         (" ", TokenType::WS, Payload::None),
-        ("fffX", TokenType::MacroString, Payload::None),        
+        ("fffX", TokenType::MacroString, Payload::None),
     ]
 )]
 #[case::ws_handling_str_literals("'a' 'b' = 'c'",
     vec![
         ("'a'", TokenType::StringLiteral, Payload::None),
-        (" ", TokenType::MacroString, Payload::None),            
+        (" ", TokenType::MacroString, Payload::None),
         ("'b'", TokenType::StringLiteral, Payload::None),
         (" ", TokenType::WS, Payload::None),
         ("=", TokenType::ASSIGN, Payload::None),
@@ -2712,7 +2712,7 @@ fn test_macro_eval_expr(
         ("2", TokenType::IntegerLiteral, Payload::Integer(2)),
     ]
 )]
-#[case::all_in_expr(" (\n🔥>  &m.v)*/*c*/(\t3 * ( 5.1-0ffx) ) eq %m.suf \"\"", 
+#[case::all_in_expr(" (\n🔥>  &m.v)*/*c*/(\t3 * ( 5.1-0ffx) ) eq %m.suf \"\"",
     vec![
         (" ", TokenType::WS, Payload::None),
         ("(", TokenType::LPAREN, Payload::None),
@@ -2743,7 +2743,7 @@ fn test_macro_eval_expr(
         ("eq", TokenType::KwEQ, Payload::None),
         (" ", TokenType::WS, Payload::None),
         ("%m", TokenType::MacroIdentifier, Payload::None),
-        (".suf ", TokenType::MacroString, Payload::None),        
+        (".suf ", TokenType::MacroString, Payload::None),
         ("\"\"", TokenType::StringLiteral, Payload::None),
     ]
 )]
@@ -2874,7 +2874,7 @@ fn test_macro_eval_empty_logical_operand(
             (",", TokenType::COMMA),
             ("#", TokenType::UNKNOWN),
             (",", TokenType::COMMA),
-            ("#", TokenType::UNKNOWN),            
+            ("#", TokenType::UNKNOWN),
             (")", TokenType::RPAREN),
         ],
         vec![
@@ -2900,7 +2900,7 @@ fn test_macro_eval_empty_logical_operand(
             ("%to", TokenType::KwmTo),
             (" ", TokenType::WS),
             ("#", TokenType::UNKNOWN),
-            (";", TokenType::SEMI),            
+            (";", TokenType::SEMI),
         ],
         vec![
             ("%do", TokenType::KwmDo),
@@ -2924,7 +2924,7 @@ fn test_macro_eval_empty_logical_operand(
             ("%if", TokenType::KwmIf),
             (" ", TokenType::WS),
             ("#", TokenType::UNKNOWN),
-            ("%tHeN", TokenType::KwmThen),            
+            ("%tHeN", TokenType::KwmThen),
         ],
     )]
     template: Vec<(&str, TokenType)>,
@@ -3001,13 +3001,13 @@ fn test_macro_eval_empty_logical_operand(
         vec![
             ("", TokenType::MacroStringEmpty, Payload::None),
             ("#", TokenType::UNKNOWN, Payload::None),
-            (" ", TokenType::WS, Payload::None),            
+            (" ", TokenType::WS, Payload::None),
             ("", TokenType::MacroStringEmpty, Payload::None),
-            ("and", TokenType::KwAND, Payload::None),            
-            (" ", TokenType::WS, Payload::None),            
+            ("and", TokenType::KwAND, Payload::None),
+            (" ", TokenType::WS, Payload::None),
             ("", TokenType::MacroStringEmpty, Payload::None),
             ("#", TokenType::UNKNOWN, Payload::None),
-            ("", TokenType::MacroStringEmpty, Payload::None),            
+            ("", TokenType::MacroStringEmpty, Payload::None),
         ],
     )]
     expr_template: Vec<(&str, TokenType, Payload)>,
@@ -3068,7 +3068,7 @@ fn test_macro_eval_empty_logical_operand(
         ("%to", TokenType::KwmTo, Payload::None),
         (" ", TokenType::WS, Payload::None),
         ("2", TokenType::IntegerLiteral, Payload::Integer(2)),
-        ("  ", TokenType::WS, Payload::None),        
+        ("  ", TokenType::WS, Payload::None),
         (";", TokenType::SEMI, Payload::None),
         ]
 )]
@@ -3083,7 +3083,7 @@ fn test_macro_eval_empty_logical_operand(
         ("%to", TokenType::KwmTo, Payload::None),
         (" ", TokenType::WS, Payload::None),
         // Known limitation of our "predictive" lexer
-        ("2  ", TokenType::MacroString, Payload::None),        
+        ("2  ", TokenType::MacroString, Payload::None),
         ("/*c*/", TokenType::CStyleComment, Payload::None),
         ("  ", TokenType::WS, Payload::None),
         (";", TokenType::SEMI, Payload::None),
@@ -3235,7 +3235,7 @@ fn test_macro_do(#[case] contents: &str, #[case] expected_token: Vec<impl TokenT
         (" ", TokenType::WS, Payload::None),
         ("val", TokenType::MacroString, Payload::None),
         (",", TokenType::COMMA, Payload::None),
-        (" \n\t ", TokenType::WS, Payload::None),        
+        (" \n\t ", TokenType::WS, Payload::None),
         ("good", TokenType::Identifier, Payload::None),
         (" ", TokenType::WS, Payload::None),
         (")", TokenType::RPAREN, Payload::None),
@@ -3248,14 +3248,14 @@ fn test_macro_do(#[case] contents: &str, #[case] expected_token: Vec<impl TokenT
 #[case::macro_name_error_recovery("%macro &err (arg = val);",
     vec![
         ("%macro", TokenType::KwmMacro, Payload::None),
-        (" ", TokenType::WS, Payload::None),        
+        (" ", TokenType::WS, Payload::None),
         ("&err", TokenType::MacroVarExpr, Payload::None),
-        (" ", TokenType::WS, Payload::None),        
+        (" ", TokenType::WS, Payload::None),
         ("(arg", TokenType::MacroString, Payload::None),
         (" ", TokenType::WS, Payload::None),
         ("=", TokenType::ASSIGN, Payload::None),
         (" ", TokenType::WS, Payload::None),
-        ("val)", TokenType::MacroString, Payload::None),        
+        ("val)", TokenType::MacroString, Payload::None),
         (";", TokenType::SEMI, Payload::None),
     ],
     vec![(
@@ -3276,13 +3276,13 @@ fn test_macro_def(
 #[case::ints_not_evaluated(
     // Integers are not evaluated
     vec![
-        ("1+1", TokenType::MacroString)            
+        ("1+1", TokenType::MacroString)
     ]
 )]
 #[case::look_like_named_args_and_comma(
     // No named args, and comma in balanced parens is not a terminator
     vec![
-        ("arg1=some(,arg2=())", TokenType::MacroString)            
+        ("arg1=some(,arg2=())", TokenType::MacroString)
     ],
 )]
 #[case::balanced_parens_after_slash_with_comment(
@@ -3300,7 +3300,7 @@ fn test_macro_def(
         (",", TokenType::COMMA),
         ("/*c*/", TokenType::CStyleComment),
         ("2", TokenType::MacroString),
-        ("/*c*/", TokenType::CStyleComment),        
+        ("/*c*/", TokenType::CStyleComment),
     ]
 )]
 fn test_macro_simple_builtins(
@@ -3400,7 +3400,7 @@ fn test_macro_simple_builtins(
         ("(", TokenType::LPAREN),
         ("PATHNAME", TokenType::MacroString),
         ("=", TokenType::ASSIGN),
-        ("lib", TokenType::MacroString),        
+        ("lib", TokenType::MacroString),
         (")", TokenType::RPAREN),
     ]
 )]
@@ -3410,7 +3410,7 @@ fn test_macro_simple_builtins(
         ("%SYSmexecdepth", TokenType::KwmSysmexecdepth),
         ("(", TokenType::LPAREN),
         ("val", TokenType::Identifier),
-        (")", TokenType::RPAREN),        
+        (")", TokenType::RPAREN),
     ]
 )]
 // Tests that we correctly populate mode stack for 3+ argument built-ins
@@ -3470,7 +3470,7 @@ fn test_macro_special_builtins(
 #[case::input(
     "%Input first &second;",
     vec![
-        ("%Input", TokenType::KwmInput),        
+        ("%Input", TokenType::KwmInput),
         (" ", TokenType::WS),
         ("first", TokenType::MacroString),
         (" ", TokenType::WS),
@@ -3482,7 +3482,7 @@ fn test_macro_special_builtins(
     "%Mend disc;",
     vec![
         ("%Mend", TokenType::KwmMend),
-        (" ", TokenType::WS),        
+        (" ", TokenType::WS),
         ("disc", TokenType::MacroString),
         (";", TokenType::SEMI),
     ]
@@ -3513,7 +3513,7 @@ fn test_macro_special_builtins(
         ("(", TokenType::LPAREN),
         ("&path", TokenType::MacroVarExpr),
         (")", TokenType::RPAREN),
-        (";", TokenType::SEMI),        
+        (";", TokenType::SEMI),
     ]
 )]
 #[case::sysmacdelete(
@@ -3755,7 +3755,7 @@ vec![
         (" ", TokenType::WS, Payload::None),
         ("2", TokenType::IntegerLiteral, Payload::Integer(2)),
         (" ", TokenType::WS, Payload::None),
-        ("%else", TokenType::KwmElse, Payload::None),        
+        ("%else", TokenType::KwmElse, Payload::None),
     ],
     NO_ERRORS,
 )]
