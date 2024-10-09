@@ -65,13 +65,19 @@ fn create_error_dict_df() -> PolarsResult<LazyFrame> {
     .lazy())
 }
 
-fn create_error_df(file_id: u32, errors: &Vec<ErrorInfo>) -> PolarsResult<LazyFrame> {
+fn create_error_df(
+    file_id: u32,
+    errors: &Vec<ErrorInfo>,
+    source: &str,
+    context_lines: usize,
+) -> PolarsResult<LazyFrame> {
     let mut error_kind = Vec::with_capacity(errors.len());
     let mut at_byte_offset = Vec::with_capacity(errors.len());
     let mut at_char_offset = Vec::with_capacity(errors.len());
     let mut on_line = Vec::with_capacity(errors.len());
     let mut at_column = Vec::with_capacity(errors.len());
     let mut last_token = Vec::with_capacity(errors.len());
+    let mut context = Vec::with_capacity(errors.len());
 
     for error in errors {
         error_kind.push(error.error_kind() as u32);
@@ -81,6 +87,13 @@ fn create_error_df(file_id: u32, errors: &Vec<ErrorInfo>) -> PolarsResult<LazyFr
         at_column.push(error.at_column());
 
         last_token.push(error.last_token().map(|idx| idx.get()));
+        context.push(
+            source
+                .lines()
+                .skip((error.on_line() as usize).saturating_sub(context_lines))
+                .take(context_lines * 2)
+                .collect::<String>(),
+        );
     }
 
     let df = DataFrame::new(vec![
@@ -90,6 +103,7 @@ fn create_error_df(file_id: u32, errors: &Vec<ErrorInfo>) -> PolarsResult<LazyFr
         Series::new("on_line".into(), on_line),
         Series::new("at_column".into(), at_column),
         Series::new("last_token".into(), last_token),
+        Series::new("context".into(), context),
     ])?;
 
     Ok(df
@@ -180,7 +194,11 @@ fn create_token_df(
 }
 
 #[allow(clippy::cast_possible_truncation)]
-fn gen_stats_inner(output: &Option<PathBuf>, samples: &PathBuf) -> Result<(), PolarsError> {
+fn gen_stats_inner(
+    output: &Option<PathBuf>,
+    samples: &PathBuf,
+    error_context_lines: usize,
+) -> Result<(), PolarsError> {
     let all_files = WalkDir::new(samples)
         .into_iter()
         .filter_map(Result::ok)
@@ -250,7 +268,12 @@ fn gen_stats_inner(output: &Option<PathBuf>, samples: &PathBuf) -> Result<(), Po
 
                         if !errors.is_empty() {
                             files_with_errors += 1;
-                            error_dfs.push(create_error_df(file_id, &errors)?);
+                            error_dfs.push(create_error_df(
+                                file_id,
+                                &errors,
+                                &contents,
+                                error_context_lines,
+                            )?);
                         }
 
                         duration = Some(dur);
@@ -497,8 +520,8 @@ fn gen_stats_inner(output: &Option<PathBuf>, samples: &PathBuf) -> Result<(), Po
     Ok(())
 }
 
-pub(super) fn gen_stats(output: &Option<PathBuf>, samples: &PathBuf) {
-    if let Err(err) = gen_stats_inner(output, samples) {
+pub(super) fn gen_stats(output: &Option<PathBuf>, samples: &PathBuf, error_context_lines: usize) {
+    if let Err(err) = gen_stats_inner(output, samples, error_context_lines) {
         eprintln!("Failed to generate stats: {err:?}");
     }
 }

@@ -68,6 +68,11 @@ enum Commands {
         #[arg(short, long)]
         output: Option<PathBuf>,
 
+        /// Number of lines around an error to store as context.
+        /// If not provided, defaults to 1.
+        #[arg(short = 'C', long)]
+        error_context_lines: Option<usize>,
+
         /// A folder with samples. Reads all files with the `.sas` extension.
         #[arg(env = "SAS_LEX_SAMPLES", required = true)]
         samples: PathBuf,
@@ -208,7 +213,11 @@ fn main() -> io::Result<()> {
         Commands::Gen {
             grammar_file_path: grammar,
         } => write_tokens_file(grammar)?,
-        Commands::Stats { output, samples } => gen_stats(output, samples),
+        Commands::Stats {
+            output,
+            samples,
+            error_context_lines,
+        } => gen_stats(output, samples, error_context_lines.unwrap_or(1)),
     }
 
     Ok(())
