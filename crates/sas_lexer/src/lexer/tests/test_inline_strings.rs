@@ -7,7 +7,7 @@ use rstest::{fixture, rstest};
 use super::super::{
     buffer::Payload,
     error::ErrorKind,
-    lex,
+    lex_program,
     token_type::{KEYWORDS, MKEYWORDS},
     LexResult, TokenChannel, TokenType,
 };
@@ -29,7 +29,7 @@ fn kwm_to_str_map() -> HashMap<TokenType, String> {
 #[test]
 fn test_unicode_char_offset() {
     let source = "'🔥'";
-    let LexResult { buffer, errors, .. } = lex(&source).unwrap();
+    let LexResult { buffer, errors, .. } = lex_program(&source).unwrap();
 
     assert_eq!(errors.len(), 0, "Expected no errors, got {}", errors.len());
 
@@ -59,7 +59,7 @@ fn test_unicode_char_offset() {
     // Now test the ubiquotous Hoe many characters is 🤦🏼‍♂️ case.
     // We want python compatibility here. So 5 characters.
     let source = "'🤦🏼‍♂️'";
-    let LexResult { buffer, errors, .. } = lex(&source).unwrap();
+    let LexResult { buffer, errors, .. } = lex_program(&source).unwrap();
 
     assert_eq!(errors.len(), 0, "Expected no errors, got {}", errors.len());
 
@@ -77,7 +77,7 @@ fn test_unicode_char_offset() {
 fn test_column_count_with_bom() {
     let source = "\u{FEFF}/* this is comment */";
 
-    let LexResult { buffer, errors, .. } = lex(&source).unwrap();
+    let LexResult { buffer, errors, .. } = lex_program(&source).unwrap();
 
     assert_eq!(errors.len(), 0, "Expected no errors, got {}", errors.len());
 
@@ -108,7 +108,7 @@ fn test_end_line_with_empty_tok() {
 
     assert_lexing(source, expected_tokens, NO_ERRORS);
 
-    let LexResult { buffer, .. } = lex(&source).unwrap();
+    let LexResult { buffer, .. } = lex_program(&source).unwrap();
 
     // Get the empty token MacroStringEmpty and check the end line
     let token = buffer.into_iter().nth(3).unwrap();
@@ -443,7 +443,7 @@ fn test_datalines(#[values("", ";", ";\n\t/*comment*/  ")] prefix: &str, #[case]
         (["dAtALiNeS", "lInEs", "cArDs", "cArDs  ", "cArDs\n"], ";")
     };
 
-    let LexResult { buffer, .. } = lex(&prefix).unwrap();
+    let LexResult { buffer, .. } = lex_program(&prefix).unwrap();
 
     let prefix_expected_tokens = if prefix.is_empty() {
         vec![]

@@ -54,22 +54,40 @@ struct LexerCheckpoint<'src> {
 
 #[derive(Debug)]
 struct Lexer<'src> {
+    /// Source text being lexed
     source: &'src str,
+
+    /// Length of the source text. Stored for faster access over `source.len()`
     source_len: u32,
+
+    /// The "work" token buffer being built
     buffer: WorkTokenizedBuffer,
+
+    /// Cursor for the source text
     cursor: cursor::Cursor<'src>,
+
     /// Start byte offset of the token being lexed
     cur_token_byte_offset: ByteOffset,
+
     /// Start char offset of the token being lexed
     cur_token_start: CharOffset,
+
     /// Start line index of the token being lexed
     cur_token_line: LineIdx,
+
     /// Lexer mode stack
     mode_stack: Vec<LexerMode>,
+
     /// Errors encountered during lexing
     errors: Vec<ErrorInfo>,
+
     /// Checkpoint for the lexer to rollback to
     checkpoint: Option<LexerCheckpoint<'src>>,
+
+    /// Macro nesting level. Tracks the nesting of macro definitions,
+    /// as lexing inside macro definitions is different from the
+    /// open code
+    macro_nesting_level: u32,
 
     /// Stores the last state for debug assertions to check
     /// against infinite loops. It is the remaining input length
@@ -89,7 +107,11 @@ pub struct LexResult {
 }
 
 impl<'src> Lexer<'src> {
-    fn new(source: &str, init_mode: Option<LexerMode>) -> Result<Lexer, ErrorKind> {
+    fn new(
+        source: &str,
+        init_mode: Option<LexerMode>,
+        macro_nesting_level: Option<u32>,
+    ) -> Result<Lexer, ErrorKind> {
         let Ok(source_len) = u32::try_from(source.len()) else {
             return Err(ErrorKind::FileTooLarge);
         };
@@ -121,6 +143,7 @@ impl<'src> Lexer<'src> {
             mode_stack,
             errors: Vec::new(),
             checkpoint: None,
+            macro_nesting_level: macro_nesting_level.unwrap_or(0),
         })
     }
 
@@ -602,22 +625,19 @@ impl<'src> Lexer<'src> {
             LexerMode::MacroDefName => {
                 self.start_token();
 
-                if self.lex_macro_def_identifier(next_char, false) {
-                    // Pop only now, as `lex_macro_def_identifier` has a debug assertion
-                    // that we are in the correct mode
-                    self.pop_mode();
-                } else {
-                    // We didn't have an expected ascii identifier.
-                    // The call has already emitted an error.
+                self.lex_macro_def_identifier(next_char, false);
 
-                    // SAS will actually skip the entire macro definition including the body,
-                    // not just the macro statement. But we'll try to salvage at least smth.
+                // If we didn't have an expected ascii identifier.
+                // The call has already emitted an error.
 
-                    // It is as easy as just popping current mode, since we have
-                    // `LexerMode::MacroStatOptionsTextExpr` on the stack as well as args
-                    // and tey will catch the rest of the macro definition
-                    self.pop_mode();
-                };
+                // SAS will actually skip the entire macro definition including the body,
+                // not just the macro statement. But we'll try to salvage at least smth.
+                // It is as easy as just popping current mode, since we have
+                // `LexerMode::MacroStatOptionsTextExpr` on the stack as well as args
+                // and tey will catch the rest of the macro definition
+
+                // Thus no matter the return value, we'll pop the mode
+                self.pop_mode();
             }
         }
     }
@@ -3550,7 +3570,24 @@ impl<'src> Lexer<'src> {
         }
     }
 
+    /// Lexes a predicted comment statement in open code.
+    ///
+    /// We only predict for open code, since within macro definitions
+    /// SAS behaves differently and all macro is actually executed which leads
+    /// to various unexpected things => the downstream parser should properly
+    /// parse comment statements within macro definitions.
+    ///
+    /// More on the topic in official SAS documentation:
+    /// https://documentation.sas.com/doc/en/pgmsascdc/9.4_3.5/mcrolref/n17rxjs5x93mghn1mdxesvg78drx.htm
+    /// and
+    /// https://sas.service-now.com/csm?id=kb_article_view&sysparm_article=KB0036213
     fn lex_predicted_comment(&mut self) -> bool {
+        // Check if we are in open code or not
+        if self.macro_nesting_level > 0 {
+            // We are in a macro definition, so we do not predict comments
+            return false;
+        }
+
         // Check if the last token on default channel was a semicolon or
         // nothing at all (start of the file)
         match self.buffer.last_token_info_on_default_channel() {
@@ -3580,6 +3617,9 @@ impl<'src> Lexer<'src> {
                 '\n' => {
                     self.add_line();
                 }
+                // Despite the documentation, it seems that macro is not executed
+                // in open code, e.g. macro calls do not run and thus do not mask
+                // semicolons.
                 '%' if self.cursor.peek().is_some_and(is_valid_sas_name_start) => {
                     // Pass a clone of the actual cursor to perform lookahead
                     let mut la_cursor = self.cursor.clone();
@@ -3600,8 +3640,8 @@ impl<'src> Lexer<'src> {
                         | TokenTypeMacroCallOrStat::KwmElse => {
                             // We assume the following usage possible:
                             // ```sas
-                            // macro m; * 2 &mend;
-                            // data _null_; a = 1 &m();
+                            // macro m; * 2 %mend;
+                            // data _null_; a = 1 %m();
                             // ```
                             // hence we rollback, and tell the caller "no, this is not a comment"
                             self.rollback();
@@ -3609,7 +3649,7 @@ impl<'src> Lexer<'src> {
                             return false;
                         }
                         kwm if is_macro_stat_tok_type(kwm.into()) => {
-                            // All other cases of following statmenets we assume this was a comment,
+                            // All other cases of following statements we assume this was a comment,
                             // but missing the semicolon. Hence we emit the comment token, the
                             // error and return
 
@@ -4379,6 +4419,11 @@ impl<'src> Lexer<'src> {
                 self.push_mode(LexerMode::ExpectSemiOrEOF);
                 self.push_mode(LexerMode::MacroStatOptionsTextExpr);
                 self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+
+                // For %mend we also need to pop the macro nesting level
+                if kw_tok_type == TokenTypeMacroCallOrStat::KwmMend {
+                    self.macro_nesting_level = self.macro_nesting_level.saturating_sub(1);
+                }
             }
             TokenTypeMacroCallOrStat::KwmDo => {
                 // First skip WS and comments, then put lexer into do dispatch mode
@@ -4440,6 +4485,9 @@ impl<'src> Lexer<'src> {
                 self.push_mode(LexerMode::WsOrCStyleCommentOnly);
                 self.push_mode(LexerMode::MacroDefName);
                 self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+
+                // Increment the macro nesting level
+                self.macro_nesting_level += 1;
             } // TODO!!!!!! PLACEHOLDER - should be exhaustive
             _ => {
                 self.push_mode(LexerMode::ExpectSemiOrEOF);
@@ -4706,7 +4754,11 @@ impl<'src> Lexer<'src> {
     }
 }
 
-/// Lex the source code and return the tokenized buffer.
+/// Lex the source code of an entire program and return the tokenized buffer.
+///
+/// This is the most common way to use the lexer, and assume that a standalone
+/// program is being lexed. I.e. the code is not partial code snippet or
+/// file that is meant to be included in a parent program.
 ///
 /// Known differences from the SAS lexer:
 /// - String expressions in macro context are lexed as in open code,
@@ -4731,12 +4783,12 @@ impl<'src> Lexer<'src> {
 ///
 /// # Examples
 /// ```
-/// use sas_lexer::lex;
-/// let source = "let x = 42;";
-/// let result = lex(&source);
+/// use sas_lexer::lex_program;
+/// let source = "%let x = 42;";
+/// let result = lex_program(&source);
 /// assert!(result.is_ok());
 /// ```
-pub fn lex<S: AsRef<str>>(source: &S) -> Result<LexResult, ErrorKind> {
-    let lexer = Lexer::new(source.as_ref(), None)?;
+pub fn lex_program<S: AsRef<str>>(source: &S) -> Result<LexResult, ErrorKind> {
+    let lexer = Lexer::new(source.as_ref(), None, None)?;
     lexer.lex()
 }

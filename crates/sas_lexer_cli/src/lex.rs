@@ -6,7 +6,7 @@ use std::{
 
 use sas_lexer::{
     error::{ErrorInfo, ErrorKind},
-    lex, LexResult, TokenizedBuffer,
+    lex_program, LexResult, TokenizedBuffer,
 };
 
 use crate::print::{print_errors, print_tokens};
@@ -18,7 +18,7 @@ pub(crate) fn safe_lex(
 ) -> Option<(TokenizedBuffer, Vec<ErrorInfo>, Duration, Option<usize>)> {
     let start = Instant::now();
 
-    let result = catch_unwind(|| match lex(source) {
+    let result = catch_unwind(|| match lex_program(source) {
         Ok(LexResult {
             buffer: tok_buffer,
             errors,

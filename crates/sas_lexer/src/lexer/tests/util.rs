@@ -1,6 +1,6 @@
 use crate::{
     error::{ErrorInfo, ErrorKind},
-    lex, LexResult, Payload, TokenChannel, TokenIdx, TokenType, TokenizedBuffer,
+    lex_program, LexResult, Payload, TokenChannel, TokenIdx, TokenType, TokenizedBuffer,
 };
 
 fn token_to_string_inner<S: AsRef<str>>(
@@ -717,7 +717,7 @@ pub(super) fn assert_lexing<TT: TokenTestCase, ET: ErrorTestCase>(
     expected_tokens: Vec<TT>,
     expected_errors: Vec<ET>,
 ) {
-    let LexResult { buffer, errors, .. } = lex(&source).unwrap();
+    let LexResult { buffer, errors, .. } = lex_program(&source).unwrap();
 
     // Check tokens
     let tokens: Vec<TokenIdx> = buffer.into_iter().collect();

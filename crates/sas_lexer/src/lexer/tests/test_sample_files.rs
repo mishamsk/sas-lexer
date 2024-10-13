@@ -1,5 +1,5 @@
 use super::{
-    super::{lex, LexResult},
+    super::{lex_program, LexResult},
     util::{error_to_string, token_to_string},
 };
 use insta::assert_yaml_snapshot;
@@ -33,7 +33,7 @@ fn test_snapshots(#[files("src/lexer/tests/samples/**/*.sas")] path: PathBuf) {
         buffer: tok_buffer,
         errors,
         ..
-    } = lex(&contents).unwrap();
+    } = lex_program(&contents).unwrap();
     let tokens: Vec<String> = tok_buffer
         .into_iter()
         .map(|tidx| token_to_string(tidx, &tok_buffer, &contents))
@@ -64,7 +64,7 @@ fn test_full_coverage(#[files("src/lexer/tests/samples/**/*.sas")] path: PathBuf
 
     let LexResult {
         buffer: tok_buffer, ..
-    } = lex(&contents).unwrap();
+    } = lex_program(&contents).unwrap();
 
     let mut end = 0;
 

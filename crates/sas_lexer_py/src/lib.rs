@@ -3,14 +3,18 @@ use pyo3::{
     prelude::*,
     types::{PyBytes, PyString},
 };
-use sas_lexer::{lex, LexResult};
+use sas_lexer::{lex_program, LexResult};
 
 /// TODO
 #[pyfunction]
-fn lex_str<'py>(py: Python<'py>, src: &Bound<'py, PyString>) -> PyResult<Bound<'py, PyBytes>> {
+fn lex_program_from_str<'py>(
+    py: Python<'py>,
+    src: &Bound<'py, PyString>,
+) -> PyResult<Bound<'py, PyBytes>> {
     let src: &str = src.extract()?;
 
-    let LexResult { buffer, .. } = lex(&src).map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+    let LexResult { buffer, .. } =
+        lex_program(&src).map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
 
     let tok_vec = buffer.into_resolved_token_vec();
 
@@ -20,10 +24,7 @@ fn lex_str<'py>(py: Python<'py>, src: &Bound<'py, PyString>) -> PyResult<Bound<'
     Ok(PyBytes::new_bound(py, &data))
 }
 
-/// A Python module implemented in Rust. The name of this function must match
-/// the `lib.name` setting in the `Cargo.toml`, else Python will not be able to
-/// import the module.
 #[pymodule]
 fn _sas_lexer_rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(lex_str, m)?)
+    m.add_function(wrap_pyfunction!(lex_program_from_str, m)?)
 }

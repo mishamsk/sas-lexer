@@ -1,6 +1,6 @@
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 use pprof::criterion::{Output, PProfProfiler};
-use sas_lexer::lex;
+use sas_lexer::lex_program;
 use std::fs::File;
 use std::io::{self, Read};
 use std::path::Path;
@@ -37,7 +37,7 @@ fn benchmark_lex(c: &mut Criterion) {
         .throughput(Throughput::Bytes(source_len))
         .bench_function("lex", |b| {
             b.iter(|| {
-                lex(&source).expect("Lexing failed");
+                lex_program(&source).expect("Lexing failed");
             })
         });
 }
