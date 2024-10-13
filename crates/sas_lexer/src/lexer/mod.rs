@@ -343,7 +343,12 @@ impl<'src> Lexer<'src> {
         token_type: TokenType,
         payload: Payload,
     ) {
-        if !self.buffer.update_last_token(channel, token_type, payload) {
+        if !self.buffer.last_token_info_mut().map_or(false, |t| {
+            t.channel = channel;
+            t.token_type = token_type;
+            t.payload = payload;
+            true
+        }) {
             // This is an internal error, we should always have a token to replace
             self.emit_error(ErrorKind::InternalErrorNoTokenToReplace);
 
@@ -355,7 +360,7 @@ impl<'src> Lexer<'src> {
                 self.cur_token_line,
                 payload,
             );
-        }
+        };
     }
 
     fn prep_error_info_at_cur_offset(&self, error: ErrorKind) -> ErrorInfo {
@@ -467,7 +472,7 @@ impl<'src> Lexer<'src> {
                 | LexerMode::MakeCheckpoint
                 | LexerMode::WsOrCStyleCommentOnly
                 | LexerMode::MacroLocalGlobal { .. }
-                | LexerMode::MaybeMacroCallArgs
+                | LexerMode::MaybeMacroCallArgsOrLabel { .. }
                 | LexerMode::MaybeMacroCallArgAssign { .. }
                 | LexerMode::MacroCallArgOrValue { .. }
                 | LexerMode::MaybeMacroDefArgs
@@ -586,8 +591,8 @@ impl<'src> Lexer<'src> {
             LexerMode::MacroStrQuotedExpr { mask_macro, pnl } => {
                 self.dispatch_macro_str_quoted_expr(next_char, mask_macro, pnl);
             }
-            LexerMode::MaybeMacroCallArgs => {
-                self.lex_maybe_macro_call_args(next_char);
+            LexerMode::MaybeMacroCallArgsOrLabel { check_macro_label } => {
+                self.lex_maybe_macro_call_args_or_label(next_char, check_macro_label);
             }
             LexerMode::MaybeMacroCallArgAssign { flags } => {
                 self.lex_maybe_macro_call_arg_assign(next_char, flags);
@@ -726,7 +731,7 @@ impl<'src> Lexer<'src> {
                         self.lex_macro_comment();
                     }
                     c if is_valid_sas_name_start(c) => {
-                        self.lex_macro_identifier();
+                        self.lex_macro_identifier(true);
                     }
                     _ => {
                         // Not a macro, just a percent
@@ -822,7 +827,7 @@ impl<'src> Lexer<'src> {
                             self.lex_macro_string_in_macro_eval_context(macro_eval_flags);
                         }
                     }
-                    MacroKwType::MacroCallOrLabel => {}
+                    MacroKwType::MacroCall => {}
                 }
             }
             ')' if parens_nesting_level == 0 => {
@@ -1355,7 +1360,7 @@ impl<'src> Lexer<'src> {
                         // Error for statement case has already been emitted by `lex_macro_call`
                         pop_mode_and_check(self);
                     }
-                    MacroKwType::MacroCallOrLabel => {
+                    MacroKwType::MacroCall => {
                         if first_token {
                             update_mode(self);
                         };
@@ -1436,7 +1441,7 @@ impl<'src> Lexer<'src> {
                         self.cursor.advance();
                         self.lex_macro_string_unrestricted();
                     }
-                    MacroKwType::MacroCallOrLabel => {}
+                    MacroKwType::MacroCall => {}
                 }
             }
             '\n' => {
@@ -1577,7 +1582,7 @@ impl<'src> Lexer<'src> {
                         self.cursor.advance();
                         self.lex_macro_string_unrestricted();
                     }
-                    MacroKwType::MacroCallOrLabel => {}
+                    MacroKwType::MacroCall => {}
                 }
             }
             ';' => {
@@ -1672,38 +1677,76 @@ impl<'src> Lexer<'src> {
     /// Checks next char for `(` and either emits the LPAREN token with
     /// the necessary following modes or rolls back to the checkpoint
     #[inline]
-    fn lex_maybe_macro_call_args(&mut self, next_char: char) {
-        if next_char == '(' {
-            // Add the LPAREN token
-            self.start_token();
-            self.cursor.advance();
+    fn lex_maybe_macro_call_args_or_label(&mut self, next_char: char, check_macro_label: bool) {
+        debug_assert!(
+            matches!(self.mode(), LexerMode::MaybeMacroCallArgsOrLabel { check_macro_label: c } if c == check_macro_label)
+        );
 
-            self.emit_token(TokenChannel::DEFAULT, TokenType::LPAREN, Payload::None);
+        match next_char {
+            '(' => {
+                // Add the LPAREN token
+                self.start_token();
+                self.cursor.advance();
 
-            // Clear the checkpoint
-            self.clear_checkpoint();
+                self.emit_token(TokenChannel::DEFAULT, TokenType::LPAREN, Payload::None);
 
-            // Pop the MaybeMacroCallArgs mode
-            self.pop_mode();
+                // Clear the checkpoint
+                self.clear_checkpoint();
 
-            // Populate the remaining expected states for the macro call
-            self.push_mode(LexerMode::ExpectSymbol(
-                TokenType::RPAREN,
-                TokenChannel::DEFAULT,
-            ));
-            // The handler fo arguments will push the mode for the comma, etc.
-            self.push_mode(LexerMode::MacroCallArgOrValue {
-                flags: MacroArgNameValueFlags::new(MacroArgContext::MacroCall, true),
-            });
-            // Leading insiginificant WS before the first argument
-            self.push_mode(LexerMode::WsOrCStyleCommentOnly);
-        } else {
-            // Not a macro call with arguments, rollback (which will implicitly pop the mode)
-            debug_assert!(self.checkpoint.is_some());
+                // Pop the `MaybeMacroCallArgsOrLabel` mode
+                self.pop_mode();
 
-            // Rollback to the checkpoint, which should be before any WS and comments
-            // and right after macro identifier
-            self.rollback();
+                // Populate the remaining expected states for the macro call
+                self.push_mode(LexerMode::ExpectSymbol(
+                    TokenType::RPAREN,
+                    TokenChannel::DEFAULT,
+                ));
+                // The handler fo arguments will push the mode for the comma, etc.
+                self.push_mode(LexerMode::MacroCallArgOrValue {
+                    flags: MacroArgNameValueFlags::new(MacroArgContext::MacroCall, true),
+                });
+                // Leading insiginificant WS before the first argument
+                self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+            }
+            ':' if check_macro_label => {
+                // Update the previous token, which must be the macro identifier
+                if !self
+                    .buffer
+                    .last_token_info_on_default_channel_mut()
+                    .map_or(false, |t| {
+                        if t.token_type != TokenType::MacroIdentifier {
+                            // This would mean a bug in the lexer
+                            return false;
+                        }
+
+                        t.token_type = TokenType::MacroLabel;
+                        true
+                    })
+                {
+                    // This is an internal error, we should always have a token to replace
+                    self.emit_error(ErrorKind::InternalErrorNoTokenToReplace);
+                };
+
+                // Add the COLON token on hidden channel
+                self.start_token();
+                self.cursor.advance();
+
+                self.emit_token(TokenChannel::HIDDEN, TokenType::COLON, Payload::None);
+
+                // Clear the checkpoint
+                self.clear_checkpoint();
+
+                // Pop the MaybeMacroCallArgsOrLabel mode
+                self.pop_mode();
+            }
+            _ => {
+                // Not a macro call with arguments, rollback (which will implicitly pop the mode)
+                debug_assert!(self.checkpoint.is_some());
+
+                // Rollback to the checkpoint, which should be before any WS and comments
+                // and right after macro identifier
+                self.rollback();
+            }
         }
     }
 
@@ -1850,7 +1893,7 @@ impl<'src> Lexer<'src> {
                         let mode_stack_len = self.mode_stack.len();
 
                         self.start_token();
-                        self.lex_macro_identifier();
+                        self.lex_macro_identifier(false);
 
                         // Now check whether it was a statement or a macro call
                         if self
@@ -2037,7 +2080,7 @@ impl<'src> Lexer<'src> {
                     c if is_valid_sas_name_start(c) => {
                         // We allow both macro call & stats inside macro call args, so...
                         self.start_token();
-                        self.lex_macro_identifier();
+                        self.lex_macro_identifier(false);
                     }
                     _ => {
                         // Not a macro, just a percent
@@ -2401,7 +2444,7 @@ impl<'src> Lexer<'src> {
                         self.cursor.advance();
                         self.lex_macro_string_in_str_call(mask_macro, parens_nesting_level);
                     }
-                    MacroKwType::MacroCallOrLabel => {}
+                    MacroKwType::MacroCall => {}
                 }
             }
             '\n' => {
@@ -2912,7 +2955,7 @@ impl<'src> Lexer<'src> {
                 match self.cursor.peek_next() {
                     c if is_valid_sas_name_start(c) => {
                         if allow_stat {
-                            self.lex_macro_identifier();
+                            self.lex_macro_identifier(false);
                         } else {
                             // In macro context, nested statements cause open code recursion error
                             // but it seems like they are still half-handled. I.e. they are yanked
@@ -2924,7 +2967,7 @@ impl<'src> Lexer<'src> {
                             let err_info = self
                                 .prep_error_info_at_cur_offset(ErrorKind::OpenCodeRecursionError);
 
-                            self.lex_macro_identifier();
+                            self.lex_macro_identifier(false);
 
                             if self
                                 .buffer
@@ -3999,8 +4042,8 @@ impl<'src> Lexer<'src> {
         true
     }
 
-    /// Similar to `lex_macro_any`, but allowing only macro calls and
-    /// auto-emitting error on macro statements. Use in contexts
+    /// Similar to `lex_macro_identifier`, but allowing only macro calls and
+    /// optionally auto-emitting error on macro statements. Use in contexts
     /// where only macro calls are appropriate.
     ///
     /// Performs a lookeahed to check if % starts a macro call,
@@ -4012,8 +4055,9 @@ impl<'src> Lexer<'src> {
     /// - `allow_stat_to_follow`: bool - if `false`, automatically emits an
     ///     error if a statement is encountered, without consuming the statement itself.
     ///
-    /// Returns `MacroKwType`, which will indicate if the token was a macro call,
-    /// a macro statement keyword is following (not lexed) or something else.
+    /// Returns `MacroKwType`, which will indicate which token type was lexed:
+    /// a macro call or a macro statement keyword. `MacroKwType::None` means
+    /// nothing was lexed.
     ///
     /// NOTE: If `allow_quote_call` is `false` the return will be `MacroKwType::None`!
     fn lex_macro_call(
@@ -4041,8 +4085,8 @@ impl<'src> Lexer<'src> {
             });
 
         if !is_macro_stat_tok_type(tok_type.into()) {
-            // A macro call (or technically a label, but see the docs for
-            // `lex_macro_call_stat_or_label` for the explanation)
+            // A macro call since we assume this is only called in contexts
+            // where macro labels are not possible
             if !allow_quote_call && is_macro_quote_call_tok_type(tok_type.into()) {
                 // As of today this checked for macro text expressions that
                 // are in places of identifiers. SAS emits an error in this case
@@ -4056,13 +4100,12 @@ impl<'src> Lexer<'src> {
             // which is the length of the identifier + 1 for the %
             self.cursor.advance_by(advance_by + 1);
 
-            self.dispatch_macro_call_or_stat(tok_type);
+            self.dispatch_macro_call_or_stat(tok_type, false);
 
-            return MacroKwType::MacroCallOrLabel;
+            return MacroKwType::MacroCall;
         }
 
         // Must be a macro statement
-
         if !allow_stat_to_follow {
             // This would lead to breaking SAS session with:
             // ERROR: Open code statement recursion detected.
@@ -4112,7 +4155,7 @@ impl<'src> Lexer<'src> {
         );
     }
 
-    fn lex_macro_identifier(&mut self) {
+    fn lex_macro_identifier(&mut self, allow_macro_label: bool) {
         debug_assert_eq!(self.cursor.peek(), Some('%'));
         debug_assert!(is_valid_sas_name_start(self.cursor.peek_next()));
 
@@ -4128,7 +4171,7 @@ impl<'src> Lexer<'src> {
                 (TokenTypeMacroCallOrStat::MacroIdentifier, 0)
             });
 
-        self.dispatch_macro_call_or_stat(kw_tok_type);
+        self.dispatch_macro_call_or_stat(kw_tok_type, allow_macro_label);
     }
 
     /// Performs look-ahead to disambiguate between:
@@ -4161,7 +4204,7 @@ impl<'src> Lexer<'src> {
             }
             '%' if is_valid_sas_name_start(self.cursor.peek_next()) => {
                 self.start_token();
-                self.lex_macro_identifier();
+                self.lex_macro_identifier(false);
 
                 // This may be both %do %while/until or %do %mcall_that_creates_iter_var
                 // so we need to fork on the type of the last token. For %while/until
@@ -4269,7 +4312,11 @@ impl<'src> Lexer<'src> {
     }
 
     #[allow(clippy::too_many_lines)]
-    fn dispatch_macro_call_or_stat(&mut self, kw_tok_type: TokenTypeMacroCallOrStat) {
+    fn dispatch_macro_call_or_stat(
+        &mut self,
+        kw_tok_type: TokenTypeMacroCallOrStat,
+        allow_macro_label: bool,
+    ) {
         // Emit the token for the keyword itself
 
         // We use hidden channel for the %str/%nrstr and the wrapping parens
@@ -4366,7 +4413,7 @@ impl<'src> Lexer<'src> {
             }
             // Custom macro or label
             TokenTypeMacroCallOrStat::MacroIdentifier => {
-                self.maybe_expect_macro_call_args();
+                self.maybe_expect_macro_call_args_or_label(allow_macro_label);
             }
             // No argument built-in calls
             #[allow(clippy::match_same_arms)]
@@ -4498,13 +4545,13 @@ impl<'src> Lexer<'src> {
     }
 
     /// A special helper that allows us to do a complex "parsing" look-ahead
-    /// to distinguish between an argument-less macro call and the one
-    /// with arguments.
+    /// to distinguish between an argument-less macro call, the one
+    /// with arguments or macro label (if in a context that allows them).
     ///
     /// E.g. in `"&m /*comment*/ ()suffix"` `&m /*comment*/ ()` is a macro call
     /// with arguments. Notice that there is WS & comment between the macro identifier
     /// and the opening parenthesis. It is insignificant and should be lexed as such.
-    /// Whie in `"&m /*comment*/ suffix"` `&m` is a macro call without arguments,
+    /// While in `"&m /*comment*/ suffix"` `&m` is a macro call without arguments,
     /// and ` /*comment*/ suffix` is a single token of remaing text!
     ///
     /// In reality, in SAS, this is even more complex and impossible to statically
@@ -4514,7 +4561,7 @@ impl<'src> Lexer<'src> {
     ///
     /// We obviously can't do that, so we will assume that the macro call is with arguments.
     #[inline]
-    fn maybe_expect_macro_call_args(&mut self) {
+    fn maybe_expect_macro_call_args_or_label(&mut self, allow_macro_label: bool) {
         // Checkpoint the current state
         self.checkpoint();
 
@@ -4522,7 +4569,9 @@ impl<'src> Lexer<'src> {
         // This is as usual in reverse order, first any ws/comments,
         // and then our special mode that will check for the opening parenthesis
         // and possibly rollback to the checkpoint
-        self.push_mode(LexerMode::MaybeMacroCallArgs);
+        self.push_mode(LexerMode::MaybeMacroCallArgsOrLabel {
+            check_macro_label: allow_macro_label,
+        });
         self.push_mode(LexerMode::WsOrCStyleCommentOnly);
     }
 

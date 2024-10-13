@@ -121,6 +121,7 @@ pub enum TokenType {
     // From here and on to KwmRun are the token type subset `TokenTypeMacroCallOrStat`
     // DO NOT ADD ANYTHING IN BETWEEN
     MacroIdentifier, // %macro_name
+    MacroLabel,      // %macro_label: without :. Colon is lexed as colon on hidden channel
     // Macro built in function keywords
     // Non masking versions
     KwmCmpres,        // CMPRES
@@ -361,7 +362,7 @@ pub enum TokenType {
 #[derive(PartialEq)]
 pub(super) enum MacroKwType {
     None,
-    MacroCallOrLabel,
+    MacroCall,
     MacroStat,
 }
 

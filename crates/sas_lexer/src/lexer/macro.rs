@@ -99,9 +99,9 @@ pub(super) const fn is_macro_eval_logical_op(tok_type: TokenType) -> bool {
 /// Cursor should be advanced past the % character.
 ///
 /// We are not making distinction between a label and a custom call, i.e. doesn't do a lookahead
-/// past the identifier to see if colon follows. So far it seems that SAS would
-/// always fail if a label appears in a place where we assume only a macro call
-/// can be, so this should be ok.
+/// past the identifier to see if colon follows here. Instead the logic
+/// is handled by the main lexer loop alongside disambiguation between
+/// parenthesis-less and normal macro calls
 ///
 /// Consumes the input! So if a lookeahed is necessary - pass a clone of the main
 /// cursor.

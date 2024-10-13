@@ -85,7 +85,7 @@ impl LineInfo {
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub(super) struct TokenInfo {
     /// Channel of the token.
-    channel: TokenChannel,
+    pub(super) channel: TokenChannel,
 
     /// Type of the token.
     pub(super) token_type: TokenType,
@@ -105,7 +105,7 @@ pub(super) struct TokenInfo {
     line: LineIdx,
 
     // Extra data associated with the token
-    payload: Payload,
+    pub(super) payload: Payload,
 }
 
 /// Specifies minimal initial capacity of `token_infos` & `line_infos` vectors
@@ -302,20 +302,6 @@ impl WorkTokenizedBuffer {
         self.string_literals_buffer.len() as u32
     }
 
-    pub(super) fn update_last_token(
-        &mut self,
-        channel: TokenChannel,
-        token_type: TokenType,
-        payload: Payload,
-    ) -> bool {
-        self.token_infos.last_mut().map_or(false, |t| {
-            t.channel = channel;
-            t.token_type = token_type;
-            t.payload = payload;
-            true
-        })
-    }
-
     /// Returns a checkpoint of the buffer.
     /// Use it to rollback to the last token.
     #[allow(clippy::cast_possible_truncation)]
@@ -367,9 +353,20 @@ impl WorkTokenizedBuffer {
         self.token_infos.last()
     }
 
+    pub(super) fn last_token_info_mut(&mut self) -> Option<&mut TokenInfo> {
+        self.token_infos.last_mut()
+    }
+
     pub(super) fn last_token_info_on_default_channel(&self) -> Option<&TokenInfo> {
         self.token_infos
             .iter()
+            .rev()
+            .find(|tok_info| tok_info.channel == TokenChannel::DEFAULT)
+    }
+
+    pub(super) fn last_token_info_on_default_channel_mut(&mut self) -> Option<&mut TokenInfo> {
+        self.token_infos
+            .iter_mut()
             .rev()
             .find(|tok_info| tok_info.channel == TokenChannel::DEFAULT)
     }

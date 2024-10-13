@@ -187,9 +187,14 @@ pub(crate) enum LexerMode {
     /// If not, performs rollback, so that ws/cstyle comments can be
     /// relexed in different mode.
     ///
+    /// If `check_macro_label` is true, it will also check if the next
+    /// non-ws or cstyle follower is `:`, which is a macro label. In this case
+    /// it will chang the preceeding `MacroIdentifier` token type to `MacroLabel`
+    /// in addition to lexing `;` on hidden channel.
+    ///
     /// Note - it should alwys be preceded by the `WsOrCStyleCommentOnly` mode
     /// and a checkpoint created!
-    MaybeMacroCallArgs,
+    MaybeMacroCallArgsOrLabel { check_macro_label: bool },
     /// A special mode that goes after possible macro call arg name
     /// and any trailing whitespace or cstyle comments. It is a mode
     /// that checks if the first NON-ws or cstyle follower is `=`.

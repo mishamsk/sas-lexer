@@ -325,6 +325,34 @@ fn test_string_expr_with_macro_no_escape(
         ("\"", TokenType::StringExprEnd, Payload::None, "\""),
     ]
 )]
+#[case::with_macro_and_ws_before_parens("\"%t /*c*/\n()\"",
+    vec![
+        ("\"", TokenType::StringExprStart),
+        ("%t", TokenType::MacroIdentifier),
+        (" ", TokenType::WS),
+        ("/*c*/", TokenType::CStyleComment),
+        ("\n", TokenType::WS),
+        ("(", TokenType::LPAREN),
+        (")", TokenType::RPAREN),
+        ("\"", TokenType::StringExprEnd),
+    ]
+)]
+#[case::with_macro_and_ws_follower("\"%t /*c*/\n\"",
+    vec![
+        ("\"", TokenType::StringExprStart),
+        ("%t", TokenType::MacroIdentifier),
+        (" /*c*/\n", TokenType::StringExprText),
+        ("\"", TokenType::StringExprEnd),
+    ]
+)]
+#[case::with_macro_and_ws_follower_label_like("\"%t /*c*/\n:post\"",
+    vec![
+        ("\"", TokenType::StringExprStart),
+        ("%t", TokenType::MacroIdentifier),
+        (" /*c*/\n:post", TokenType::StringExprText),
+        ("\"", TokenType::StringExprEnd),
+    ]
+)]
 #[case::with_unlexed_macro_comment("\"%* not a comment;\"",
     vec![
         ("\"%* not a comment;\"", TokenType::StringLiteral),
@@ -1191,6 +1219,31 @@ fn test_macro_let_error_recovery(
         (";", TokenType::SEMI),
     ]
 )]
+#[case::nested_macro_call("%t(%some(),2);",
+    vec![
+        ("%t", TokenType::MacroIdentifier),
+        ("(", TokenType::LPAREN),
+        ("%some", TokenType::MacroIdentifier),
+        ("(", TokenType::LPAREN),
+        (")", TokenType::RPAREN),
+        (",", TokenType::COMMA),
+        ("2", TokenType::MacroString),
+        (")", TokenType::RPAREN),
+        (";", TokenType::SEMI),
+    ]
+)]
+#[case::nested_call_label_like("%t(%some:,2);",
+    vec![
+        ("%t", TokenType::MacroIdentifier),
+        ("(", TokenType::LPAREN),
+        ("%some", TokenType::MacroIdentifier),
+        (":", TokenType::MacroString),
+        (",", TokenType::COMMA),
+        ("2", TokenType::MacroString),
+        (")", TokenType::RPAREN),
+        (";", TokenType::SEMI),
+    ]
+)]
 #[case::nested_call_with_comment("%t/*c*/(/*c*/some()/*c*/,/*c*/2/*c*/)/*c*/;",
     vec![
         ("%t", TokenType::MacroIdentifier),
@@ -1992,6 +2045,50 @@ fn test_macro_nrstr_call_error_recovery(
     #[case] expected_error: Vec<impl ErrorTestCase>,
 ) {
     assert_lexing(contents, expected_token, expected_error);
+}
+
+#[rstest]
+#[case::simple("%ml:",
+    vec![
+        ("%ml", TokenType::MacroLabel, TokenChannel::DEFAULT),
+        (":", TokenType::COLON, TokenChannel::HIDDEN),
+    ]
+)]
+#[case::simple_with_inline_ws_and_comments("%ml /*c*/\n:",
+vec![
+    ("%ml", TokenType::MacroLabel, TokenChannel::DEFAULT),
+    (" ", TokenType::WS, TokenChannel::HIDDEN),
+    ("/*c*/", TokenType::CStyleComment, TokenChannel::COMMENT),
+    ("\n", TokenType::WS, TokenChannel::HIDDEN),
+    (":", TokenType::COLON, TokenChannel::HIDDEN),
+    ]
+)]
+#[case::with_stats("run;%ml:%let a=1;",
+    vec![
+        ("run", TokenType::KwRun, TokenChannel::DEFAULT),
+        (";", TokenType::SEMI, TokenChannel::DEFAULT),
+        ("%ml", TokenType::MacroLabel, TokenChannel::DEFAULT),
+        (":", TokenType::COLON, TokenChannel::HIDDEN),
+        ("%let", TokenType::KwmLet, TokenChannel::DEFAULT),
+        (" ", TokenType::WS, TokenChannel::HIDDEN),
+        ("a", TokenType::MacroString, TokenChannel::DEFAULT),
+        ("=", TokenType::ASSIGN, TokenChannel::DEFAULT),
+        ("1", TokenType::MacroString, TokenChannel::DEFAULT),
+        (";", TokenType::SEMI, TokenChannel::DEFAULT),
+    ]
+)]
+// Cases where label should not be lexed (only macro call allowed)
+#[case::put_then_macro_call_label_like("%put %ml:;",
+    vec![
+        ("%put", TokenType::KwmPut),
+        (" ", TokenType::WS),
+        ("%ml", TokenType::MacroIdentifier),
+        (":", TokenType::MacroString),
+        (";", TokenType::SEMI),
+    ]
+)]
+fn test_macro_label(#[case] contents: &str, #[case] expected_token: Vec<impl TokenTestCase>) {
+    assert_lexing(contents, expected_token, NO_ERRORS);
 }
 
 #[rstest]
