@@ -11,13 +11,11 @@ mod tests;
 mod text;
 pub(crate) mod token_type;
 
+use bit_vec::BitVec;
 use buffer::{
     LineIdx, Payload, TokenInfo, TokenizedBuffer, WorkBufferCheckpoint, WorkTokenizedBuffer,
 };
 use channel::TokenChannel;
-use cursor::Cursor;
-#[cfg(debug_assertions)]
-use cursor::EOF_CHAR;
 use error::{ErrorInfo, ErrorKind};
 use lexer_mode::{
     LexerMode, MacroArgContext, MacroArgNameValueFlags, MacroEvalExprFlags,
@@ -89,6 +87,11 @@ struct Lexer<'src> {
     /// open code
     macro_nesting_level: u32,
 
+    /// A stack of boolean values that tracks if an non-terminated open code
+    /// statement is pending. This is used in start comments and datalines
+    /// predictions.
+    pending_stat_stack: BitVec,
+
     /// Stores the last state for debug assertions to check
     /// against infinite loops. It is the remaining input length
     /// and the mode stack.
@@ -130,6 +133,9 @@ impl<'src> Lexer<'src> {
         let mut mode_stack = Vec::with_capacity(MAX_EXPECTED_STACK_DEPTH);
         mode_stack.push(init_mode.unwrap_or_default());
 
+        // Calculate default macro nesting level which is 0, meaning we are not in a macro
+        let macro_nesting_level = macro_nesting_level.unwrap_or(0);
+
         Ok(Lexer {
             source,
             source_len,
@@ -143,7 +149,10 @@ impl<'src> Lexer<'src> {
             mode_stack,
             errors: Vec::new(),
             checkpoint: None,
-            macro_nesting_level: macro_nesting_level.unwrap_or(0),
+            macro_nesting_level,
+            // If we start in a macro, we assume that some open code statement
+            // is "pending". Why so - see comments in `dispatch_macro_call_or_stat`
+            pending_stat_stack: BitVec::from_elem(1, macro_nesting_level > 0),
         })
     }
 
@@ -248,6 +257,7 @@ impl<'src> Lexer<'src> {
         self.buffer.add_string_literal(text)
     }
 
+    // Lexer mode stack manipulation
     #[inline]
     fn push_mode(&mut self, mode: LexerMode) {
         self.mode_stack.push(mode);
@@ -268,6 +278,41 @@ impl<'src> Lexer<'src> {
                 self.push_mode(LexerMode::default());
                 LexerMode::default()
             }
+        }
+    }
+
+    // Pending stat stack manipulation
+    fn push_pending_stat(&mut self, value: bool) {
+        self.pending_stat_stack.push(value);
+    }
+
+    fn pop_pending_stat(&mut self) {
+        // Only pop if there is more than one element. Otherwise
+        // our lexer will fail on extraneous `%end` and `%mend`
+        // statements
+        if self.pending_stat_stack.len() > 1 {
+            self.pending_stat_stack.pop();
+        };
+    }
+
+    fn pending_stat(&mut self) -> bool {
+        match self.pending_stat_stack.len() {
+            0 => {
+                self.emit_error(ErrorKind::InternalErrorEmptyPendingStatStack);
+                self.pending_stat_stack.push(false);
+                false
+            }
+            i => self.pending_stat_stack.get(i - 1).unwrap_or_default(),
+        }
+    }
+
+    fn set_pending_stat(&mut self, value: bool) {
+        match self.pending_stat_stack.len() {
+            0 => {
+                self.emit_error(ErrorKind::InternalErrorEmptyPendingStatStack);
+                self.pending_stat_stack.push(value);
+            }
+            i => self.pending_stat_stack.set(i - 1, value),
         }
     }
 
@@ -416,11 +461,22 @@ impl<'src> Lexer<'src> {
 
                     self.emit_error(ErrorKind::InternalErrorInfiniteLoop);
 
-                    return Ok(LexResult {
-                        buffer: self.buffer.into_detached(self.source),
-                        errors: self.errors,
-                        max_mode_stack_depth,
-                    });
+                    #[cfg(any(feature = "opti_stats", test))]
+                    {
+                        return Ok(LexResult {
+                            buffer: self.buffer.into_detached(self.source),
+                            errors: self.errors,
+                            max_mode_stack_depth,
+                        });
+                    }
+
+                    #[cfg(not(any(feature = "opti_stats", test)))]
+                    {
+                        return Ok(LexResult {
+                            buffer: self.buffer.into_detached(self.source),
+                            errors: self.errors,
+                        });
+                    }
                 };
                 self.last_state = new_state;
             }
@@ -704,11 +760,18 @@ impl<'src> Lexer<'src> {
                 // Lex whitespace
                 self.lex_ws();
             }
-            '\'' => self.lex_single_quoted_str(),
-            '"' => self.lex_string_expression_start(true),
+            '\'' => {
+                self.lex_single_quoted_str();
+                self.set_pending_stat(true);
+            }
+            '"' => {
+                self.lex_string_expression_start(true);
+                self.set_pending_stat(true);
+            }
             ';' => {
                 self.cursor.advance();
                 self.emit_token(TokenChannel::DEFAULT, TokenType::SEMI, Payload::None);
+                self.set_pending_stat(false);
             }
             '/' => {
                 if self.cursor.peek_next() == '*' {
@@ -716,6 +779,7 @@ impl<'src> Lexer<'src> {
                 } else {
                     self.cursor.advance();
                     self.emit_token(TokenChannel::DEFAULT, TokenType::FSLASH, Payload::None);
+                    self.set_pending_stat(true);
                 }
             }
             '&' => {
@@ -724,6 +788,7 @@ impl<'src> Lexer<'src> {
                     self.cursor.eat_while(|c| c == '&');
                     self.emit_token(TokenChannel::DEFAULT, TokenType::AMP, Payload::None);
                 }
+                self.set_pending_stat(true);
             }
             '%' => {
                 match self.cursor.peek_next() {
@@ -737,19 +802,29 @@ impl<'src> Lexer<'src> {
                         // Not a macro, just a percent
                         self.cursor.advance();
                         self.emit_token(TokenChannel::DEFAULT, TokenType::PERCENT, Payload::None);
+                        self.set_pending_stat(true);
                     }
                 }
             }
             '0'..='9' => {
                 // Numeric literal
                 self.lex_numeric_literal(false);
+                self.set_pending_stat(true);
             }
             c if is_valid_sas_name_start(c) => {
                 self.lex_identifier();
+                self.set_pending_stat(true);
             }
             _ => {
                 // Something else must be a symbol or some unknown character
                 self.lex_symbols(next_char);
+                if self
+                    .buffer
+                    .last_token_info()
+                    .map_or(false, |t| t.token_type != TokenType::PredictedCommentStat)
+                {
+                    self.set_pending_stat(true);
+                };
             }
         }
     }
@@ -3624,6 +3699,13 @@ impl<'src> Lexer<'src> {
     /// https://documentation.sas.com/doc/en/pgmsascdc/9.4_3.5/mcrolref/n17rxjs5x93mghn1mdxesvg78drx.htm
     /// and
     /// https://sas.service-now.com/csm?id=kb_article_view&sysparm_article=KB0036213
+    ///
+    /// Despite the documentation, it seems that macro is not executed
+    /// in open code at all, e.g. macro calls do not run and thus do not mask
+    /// semicolons. Hence it is actually important to predict comments in open code
+    /// on lexer level, otherwise it would be pretty hard for the parser to
+    /// handle something like this: `* %mcall(doesn't mask ; semi);`. In open
+    /// code SAS will terminate comment at the first semicolon!
     fn lex_predicted_comment(&mut self) -> bool {
         // Check if we are in open code or not
         if self.macro_nesting_level > 0 {
@@ -3631,162 +3713,28 @@ impl<'src> Lexer<'src> {
             return false;
         }
 
-        // Check if the last token on default channel was a semicolon or
-        // nothing at all (start of the file)
-        match self.buffer.last_token_info_on_default_channel() {
-            Some(tok_info) if tok_info.token_type != TokenType::SEMI => return false,
-            // Either the last token was a semicolon or we are at the start of the file
-            // hence this may be a predicted comment, continue
-            _ => {}
-        };
-
-        // Checkpoint to be able to rollback
-        self.checkpoint();
-
-        // Track parens nesting, but only after macro call
-        let mut parens_nesting: Option<u32> = None;
+        // If we are mid open code statement, it can't be a comment
+        if self
+            .pending_stat_stack
+            .get(self.pending_stat_stack.len() - 1)
+            .unwrap_or(false)
+        {
+            return false;
+        }
 
         while let Some(c) = self.cursor.advance() {
             match c {
-                '(' => parens_nesting = parens_nesting.map(|pnl| pnl + 1),
-                ')' => {
-                    // If we are in parens nesting tracking mode after a macro call
-                    // start, we need to substract until we reach 0, and on 0
-                    // set to None, to stop tracking nesting.
-                    // This is to handle `* mcall_with_semi(;) still a comment;`
-                    parens_nesting =
-                        parens_nesting.and_then(|pnl| if pnl > 1 { Some(pnl - 1) } else { None });
-                }
                 '\n' => {
                     self.add_line();
                 }
-                // Despite the documentation, it seems that macro is not executed
-                // in open code, e.g. macro calls do not run and thus do not mask
-                // semicolons.
-                '%' if self.cursor.peek().is_some_and(is_valid_sas_name_start) => {
-                    // Pass a clone of the actual cursor to perform lookahead
-                    let mut la_cursor = self.cursor.clone();
 
-                    let (kw_tok_type, advance_by) = lex_macro_call_stat_or_label(&mut la_cursor)
-                        .unwrap_or_else(|err| {
-                            self.emit_error(err);
-                            (TokenTypeMacroCallOrStat::MacroIdentifier, 0)
-                        });
-
-                    // Here comes the core part of our prediction: if macro stat follows
-                    // we distinguish two cases - a statement that our heuristics thinks as
-                    // a possible follower to a genuine partial arithmetic expression and all
-                    // the rest.
-                    match kw_tok_type {
-                        TokenTypeMacroCallOrStat::KwmEnd
-                        | TokenTypeMacroCallOrStat::KwmMend
-                        | TokenTypeMacroCallOrStat::KwmElse => {
-                            // We assume the following usage possible:
-                            // ```sas
-                            // macro m; * 2 %mend;
-                            // data _null_; a = 1 %m();
-                            // ```
-                            // hence we rollback, and tell the caller "no, this is not a comment"
-                            self.rollback();
-
-                            return false;
-                        }
-                        kwm if is_macro_stat_tok_type(kwm.into()) => {
-                            // All other cases of following statements we assume this was a comment,
-                            // but missing the semicolon. Hence we emit the comment token, the
-                            // error and return
-
-                            // Clear the checkpoint
-                            self.clear_checkpoint();
-
-                            // Move our cursor back one char ('%')
-                            // SAFETY: our cursor has been advanced past the '%', so it current
-                            // byte and char offest must be > 0
-                            #[cfg(not(debug_assertions))]
-                            {
-                                self.cursor = Cursor::new_at_offset(
-                                    &self.source[self.cur_byte_offset().get() as usize - 1..],
-                                    self.cur_char_offset().get() - 1,
-                                );
-                            }
-                            #[cfg(debug_assertions)]
-                            {
-                                self.cursor = Cursor::new_at_offset(
-                                    &self.source[self.cur_byte_offset().get() as usize - 1..],
-                                    self.cur_char_offset().get() - 1,
-                                    // Restoring previous char before '%' for debugging without
-                                    // impacting the production code path is hard and not worth it.
-                                    // So far, debug assertions that rely on prev_char won't trigger
-                                    // after this code path, so we can safely ignore it
-                                    EOF_CHAR,
-                                );
-                            }
-                            // Emit the comment token without advancing the cursor, so the
-                            // statement that was found is lexed separately
-                            self.emit_token(
-                                TokenChannel::COMMENT,
-                                TokenType::PredictedCommentStat,
-                                Payload::None,
-                            );
-
-                            // Emit a warning. We are using the `Maybe` variation, since
-                            // there is no guarantee that this is an actual comment.
-                            // E.g. in the following code it is not:
-                            // ```sas
-                            // data _NULL_;
-                            // a = 1
-                            // %if 1 %then %do;
-                            // * 2
-                            // %let v=works;
-                            // %end;
-                            // ;
-                            // ```
-                            self.emit_error(ErrorKind::MaybeNotAComment);
-
-                            // Report that we lexed a token
-                            return true;
-                        }
-                        _ => {
-                            // Not a macro stat, just a macro call
-                            // Advance the actual cursor to the end of the macro call
-                            // which is the length of the identifier + 1 for the %
-                            self.cursor.advance_by(advance_by);
-
-                            // And start tracking parens
-                            parens_nesting = Some(0);
-                        }
-                    }
-                }
-                ';' if parens_nesting.unwrap_or(0) == 0 => {
+                ';' => {
                     // Found the end of the comment
-                    // Clear the checkpoint
-                    self.clear_checkpoint();
-
-                    // Emit the comment token
-                    self.emit_token(
-                        TokenChannel::COMMENT,
-                        TokenType::PredictedCommentStat,
-                        Payload::None,
-                    );
-
-                    // Report that we lexed a token
-                    return true;
+                    break;
                 }
-                _ => {
-                    // One thing we need to do, is to handle the following edge case:
-                    // `* %mcall_no_args bla...`. We'll get `parens_nesting == Some(0)`
-                    // when we get here, but since this means it is a parens-less macro
-                    // call, we should stop tracking nesting!
-                    if parens_nesting.is_some_and(|pnl| pnl == 0) {
-                        parens_nesting = None;
-                    }
-                }
+                _ => {}
             }
         }
-
-        // EOF reached without a closing semicolon, which is fine
-        // Clear the checkpoint
-        self.clear_checkpoint();
 
         // Emit the comment token
         self.emit_token(
@@ -4439,13 +4387,20 @@ impl<'src> Lexer<'src> {
                 // are lexed on hidden channel
                 self.push_mode(LexerMode::WsOrCStyleCommentOnly);
             }
-            TokenTypeMacroCallOrStat::KwmEnd
-            | TokenTypeMacroCallOrStat::KwmReturn
+            TokenTypeMacroCallOrStat::KwmReturn
             | TokenTypeMacroCallOrStat::KwmRun
             | TokenTypeMacroCallOrStat::KwmSysmstoreclear => {
                 // Almost super easy, just expect the closing semi
                 self.push_mode(LexerMode::ExpectSemiOrEOF);
                 self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+            }
+            TokenTypeMacroCallOrStat::KwmEnd => {
+                // Like the previous once, just expect the closing semi
+                self.push_mode(LexerMode::ExpectSemiOrEOF);
+                self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+
+                // But also pop the pending stat value
+                self.pop_pending_stat();
             }
             TokenTypeMacroCallOrStat::KwmPut | TokenTypeMacroCallOrStat::KwmSysexec => {
                 // These we just lex as macro text expressions until the semi
@@ -4457,7 +4412,6 @@ impl<'src> Lexer<'src> {
             | TokenTypeMacroCallOrStat::KwmDisplay
             | TokenTypeMacroCallOrStat::KwmGoto
             | TokenTypeMacroCallOrStat::KwmInput
-            | TokenTypeMacroCallOrStat::KwmMend
             | TokenTypeMacroCallOrStat::KwmSymdel
             | TokenTypeMacroCallOrStat::KwmSyslput
             | TokenTypeMacroCallOrStat::KwmSysrput
@@ -4466,16 +4420,44 @@ impl<'src> Lexer<'src> {
                 self.push_mode(LexerMode::ExpectSemiOrEOF);
                 self.push_mode(LexerMode::MacroStatOptionsTextExpr);
                 self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+            }
+            TokenTypeMacroCallOrStat::KwmMend => {
+                // These we just lex as macro stat opts text expressions until the semi
+                self.push_mode(LexerMode::ExpectSemiOrEOF);
+                self.push_mode(LexerMode::MacroStatOptionsTextExpr);
+                self.push_mode(LexerMode::WsOrCStyleCommentOnly);
 
                 // For %mend we also need to pop the macro nesting level
-                if kw_tok_type == TokenTypeMacroCallOrStat::KwmMend {
-                    self.macro_nesting_level = self.macro_nesting_level.saturating_sub(1);
-                }
+                self.macro_nesting_level = self.macro_nesting_level.saturating_sub(1);
+
+                // And also pop the pending stat value
+                self.pop_pending_stat();
             }
             TokenTypeMacroCallOrStat::KwmDo => {
                 // First skip WS and comments, then put lexer into do dispatch mode
                 self.push_mode(LexerMode::MacroDo);
                 self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+
+                // Also we need to push the current pending stat value to the stack.
+                // This is done to handle the code like this:
+                // ```sas
+                // data;
+                // a = 1
+                // %if &condition %do;
+                //     * 42;
+                // %end;
+                // %else %do;
+                //     * 2;
+                // %end;
+                //```
+                // What happens here is that in both %do branches we have the tail of
+                // the statement. But we do not want the first one `* 42;` to modify
+                // the pending statement status for the second one, or otherwise we
+                // would predict that that the second `* 2;` is a comment.
+                // So we push the current pending stat value to the stack and pop it
+                // when we are done with the %do statement (%end).
+                let cur_pending_stat = self.pending_stat();
+                self.push_pending_stat(cur_pending_stat);
             }
             TokenTypeMacroCallOrStat::KwmTo | TokenTypeMacroCallOrStat::KwmBy => {
                 self.push_mode(LexerMode::ExpectSemiOrEOF);
@@ -4535,6 +4517,33 @@ impl<'src> Lexer<'src> {
 
                 // Increment the macro nesting level
                 self.macro_nesting_level += 1;
+
+                // Also we need to push the current pending stat value to the stack.
+                //
+                // Unlike the %do statement, for the macro definitions we assume that
+                // there is some pending stat to begin with. This is because we can't
+                // really know how this macro will be used, it may generate something
+                // that's inline in an open code statement, or it may generate full
+                // statements. This can only be resolved by the parser (or to be
+                // more accurate interpreter).
+                //
+                // What this heuristic means in real-life, is that in a code like the
+                // following:
+                // ```sas
+                // macro m();
+                // * header comment. SAS doesn't recommend this btw...;
+                // data _null_;
+                //     put "Hello, world!";
+                // run;
+                // %mend;
+                //
+                // %m();
+                //```
+                // We will assume that the top comment is a continuation of some
+                // pending statement, and not a standalone comment. As of now
+                // start comments are not predicted inside macro definitions anyway,
+                // so this will only really affect the datalines prediction heuristics.
+                self.push_pending_stat(true);
             } // TODO!!!!!! PLACEHOLDER - should be exhaustive
             _ => {
                 self.push_mode(LexerMode::ExpectSemiOrEOF);

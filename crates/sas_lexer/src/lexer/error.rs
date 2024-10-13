@@ -80,8 +80,7 @@ pub enum ErrorKind {
     // chances of false-positives
     // Codes 4001-4999. Make sure to preserve
     // the existing codes & the range. The latter is used in classification impl
-    #[strum(message = "Predicted SAS base comment may be a part of an arithmetic expression.")]
-    MaybeNotAComment = 4001,
+    // CURENTLY UNUSED
     // Internal errors. Codes 9001-9999. Make sure to preserve
     // the existing codes & the range. The latter is used in classification impl
     #[strum(message = "No checkpoint to rollback")]
@@ -89,7 +88,7 @@ pub enum ErrorKind {
     #[strum(message = "No token text")]
     InternalErrorNoTokenText = 9002,
     #[strum(message = "Internal out of bounds request")]
-    InternalErrorOutOfBounds = 9009,
+    InternalErrorOutOfBounds = 9003,
     #[strum(message = "Empty mode stack")]
     InternalErrorEmptyModeStack = 9004,
     #[strum(message = "No token to replace")]
@@ -100,6 +99,8 @@ pub enum ErrorKind {
     InternalErrorUnexpectedModeStack = 9007,
     #[strum(message = "Infinite loop detected")]
     InternalErrorInfiniteLoop = 9008,
+    #[strum(message = "Empty pending stat stack")]
+    InternalErrorEmptyPendingStatStack = 9009,
 }
 
 impl ErrorKind {

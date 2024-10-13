@@ -131,7 +131,7 @@ const STR_LIT_CAPACITY_DIVISOR: usize = 20;
 /// It is not used as a public API, but is used internally by the lexer.
 /// The public API uses `TokenizedBuffer` instead.
 #[derive(Debug, Clone)]
-pub(crate) struct WorkTokenizedBuffer {
+pub(super) struct WorkTokenizedBuffer {
     line_infos: Vec<LineInfo>,
     token_infos: Vec<TokenInfo>,
     /// Stores unescaped string literals as a single continous string

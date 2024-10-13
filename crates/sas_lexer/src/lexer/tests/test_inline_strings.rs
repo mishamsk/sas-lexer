@@ -3738,7 +3738,7 @@ fn test_macro_rare_stats(#[case] contents: &str, #[case] expected_token: Vec<imp
 }
 
 #[rstest]
-// No error cases
+// No error, open code cases
 #[case::first_line_simple("*--comment--;%do;",
     vec![
         ("*--comment--;", TokenType::PredictedCommentStat),
@@ -3755,9 +3755,13 @@ vec![
     ],
     NO_ERRORS,
 )]
-#[case::first_line_with_macro("*c&mv.%mc(;,arg=some(;));",
+#[case::first_line_with_macro("*c&mv.%mc(;);%do;",
     vec![
-        ("*c&mv.%mc(;,arg=some(;));", TokenType::PredictedCommentStat),
+        ("*c&mv.%mc(;", TokenType::PredictedCommentStat),
+        (")", TokenType::RPAREN),
+        (";", TokenType::SEMI),
+        ("%do", TokenType::KwmDo),
+        (";", TokenType::SEMI),
     ],
     NO_ERRORS,
 )]
@@ -3769,9 +3773,9 @@ vec![
     ],
     NO_ERRORS,
 )]
-#[case::first_line_macro_and_unbalanced_parens("*--s)(%mc(;)(--;%do;",
+#[case::first_line_macro_and_unbalanced_parens("*--s)(%mc(;%do;",
     vec![
-        ("*--s)(%mc(;)(--;", TokenType::PredictedCommentStat),
+        ("*--s)(%mc(;", TokenType::PredictedCommentStat),
         ("%do", TokenType::KwmDo),
         (";", TokenType::SEMI),
     ],
@@ -3793,11 +3797,11 @@ vec![
     ],
     NO_ERRORS,
 )]
-#[case::after_stat_with_macro("data;*c&mv.%mc(;,arg=some(;));",
+#[case::after_stat_with_macro("data;*c&mv.%mc(;",
     vec![
         ("data", TokenType::KwData),
         (";", TokenType::SEMI),
-        ("*c&mv.%mc(;,arg=some(;));", TokenType::PredictedCommentStat),
+        ("*c&mv.%mc(;", TokenType::PredictedCommentStat),
     ],
     NO_ERRORS,
 )]
@@ -3813,10 +3817,17 @@ vec![
     ],
     NO_ERRORS,
 )]
-// Three following stats that we "allow" for * to be recognized as math op
-// This one also test multi-line rollback
-#[case::do_end_not_comment("%do;\n\t* /*c*/ 2 %end;",
+#[case::commented_macro_stat("*put this is comment;",
     vec![
+        ("*put this is comment;", TokenType::PredictedCommentStat),
+    ],
+    NO_ERRORS,
+)]
+// Cases of non-comments
+#[case::do_end_not_comment("a %do;\n\t* /*c*/ 2 %end;",
+    vec![
+        ("a", TokenType::Identifier, Payload::None),
+        (" ", TokenType::WS, Payload::None),
         ("%do", TokenType::KwmDo, Payload::None),
         (";", TokenType::SEMI, Payload::None),
         ("\n\t", TokenType::WS, Payload::None),
@@ -3831,8 +3842,92 @@ vec![
     ],
     NO_ERRORS,
 )]
-#[case::before_mend_not_comment("* /*c*/ 2 %mend;",
+// Tricky ones. Here we have branching, but we are "lucky" and
+// there is another statement after the first, hence we correctly
+// predict the last comment
+#[case::arithmetic_with_macro_branching_1(
+    "a = 1\n%if 1 %do;* 42;%end;%else %do;* 2;%end;b=1;*comment;",
     vec![
+        ("a", TokenType::Identifier, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("=", TokenType::ASSIGN, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("1", TokenType::IntegerLiteral, Payload::Integer(1)),
+        ("\n", TokenType::WS, Payload::None),
+        ("%if", TokenType::KwmIf, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("1", TokenType::IntegerLiteral, Payload::Integer(1)),
+        (" ", TokenType::WS, Payload::None),
+        ("%do", TokenType::KwmDo, Payload::None),
+        (";", TokenType::SEMI, Payload::None),
+        ("*", TokenType::STAR, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("42", TokenType::IntegerLiteral, Payload::Integer(42)),
+        (";", TokenType::SEMI, Payload::None),
+        ("%end", TokenType::KwmEnd, Payload::None),
+        (";", TokenType::SEMI, Payload::None),
+        ("%else", TokenType::KwmElse, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("%do", TokenType::KwmDo, Payload::None),
+        (";", TokenType::SEMI, Payload::None),
+        ("*", TokenType::STAR, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("2", TokenType::IntegerLiteral, Payload::Integer(2)),
+        (";", TokenType::SEMI, Payload::None),
+        ("%end", TokenType::KwmEnd, Payload::None),
+        (";", TokenType::SEMI, Payload::None),
+        ("b", TokenType::Identifier, Payload::None),
+        ("=", TokenType::ASSIGN, Payload::None),
+        ("1", TokenType::IntegerLiteral, Payload::Integer(1)),
+        (";", TokenType::SEMI, Payload::None),
+        ("*comment;", TokenType::PredictedCommentStat, Payload::None),
+    ],
+    NO_ERRORS,
+)]
+// Here we will not predict the last comment, as the terminating `;` is
+// inside the macro branch...
+#[case::arithmetic_with_macro_branching_2(
+    "a = 1\n%if 1 %do;* 42;*in-branch-comment;%end;*we_fail_here_comment;",
+    vec![
+        ("a", TokenType::Identifier, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("=", TokenType::ASSIGN, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("1", TokenType::IntegerLiteral, Payload::Integer(1)),
+        ("\n", TokenType::WS, Payload::None),
+        ("%if", TokenType::KwmIf, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("1", TokenType::IntegerLiteral, Payload::Integer(1)),
+        (" ", TokenType::WS, Payload::None),
+        ("%do", TokenType::KwmDo, Payload::None),
+        (";", TokenType::SEMI, Payload::None),
+        ("*", TokenType::STAR, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("42", TokenType::IntegerLiteral, Payload::Integer(42)),
+        (";", TokenType::SEMI, Payload::None),
+        ("*in-branch-comment;", TokenType::PredictedCommentStat, Payload::None),
+        ("%end", TokenType::KwmEnd, Payload::None),
+        (";", TokenType::SEMI, Payload::None),
+        ("*", TokenType::STAR, Payload::None),
+        ("we_fail_here_comment", TokenType::Identifier, Payload::None),
+        (";", TokenType::SEMI, Payload::None),
+    ],
+    NO_ERRORS,
+)]
+// And inside macro definitions we never predict comments
+#[case::before_mend_not_comment("a = 1\n%macro m; * /*c*/ 2 %mend;",
+    vec![
+        ("a", TokenType::Identifier, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("=", TokenType::ASSIGN, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("1", TokenType::IntegerLiteral, Payload::Integer(1)),
+        ("\n", TokenType::WS, Payload::None),
+        ("%macro", TokenType::KwmMacro, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("m", TokenType::Identifier, Payload::None),
+        (";", TokenType::SEMI, Payload::None),
+        (" ", TokenType::WS, Payload::None),
         ("*", TokenType::STAR, Payload::None),
         (" ", TokenType::WS, Payload::None),
         ("/*c*/", TokenType::CStyleComment, Payload::None),
@@ -3843,33 +3938,6 @@ vec![
         (";", TokenType::SEMI, Payload::None),
     ],
     NO_ERRORS,
-)]
-#[case::before_else_not_comment("* /*c*/ 2 %else",
-    vec![
-        ("*", TokenType::STAR, Payload::None),
-        (" ", TokenType::WS, Payload::None),
-        ("/*c*/", TokenType::CStyleComment, Payload::None),
-        (" ", TokenType::WS, Payload::None),
-        ("2", TokenType::IntegerLiteral, Payload::Integer(2)),
-        (" ", TokenType::WS, Payload::None),
-        ("%else", TokenType::KwmElse, Payload::None),
-    ],
-    NO_ERRORS,
-)]
-// Error cases. We "predict" a comment before %let and all other stats
-// so we recover missing semicolon + emit a warning
-#[case::before_let_stat("* /*c*/ 2 %let v=;",
-    vec![
-        ("* /*c*/ 2 ", TokenType::PredictedCommentStat),
-        ("%let", TokenType::KwmLet),
-        (" ", TokenType::WS),
-        ("v", TokenType::MacroString),
-        ("=", TokenType::ASSIGN),
-        (";", TokenType::SEMI),
-    ],
-    vec![
-        (ErrorKind::MaybeNotAComment, 10)
-    ]
 )]
 fn test_comment_prediction(
     #[case] contents: &str,
