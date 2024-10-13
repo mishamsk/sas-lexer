@@ -149,10 +149,11 @@ tasks:
       - cp target/release/sas-lexer tmpdir/
       # Checkout the given SHA
       - git checkout {{.SHA}}
+      # This will ensure we rebuild the project back at HEAD
+      - defer: cargo build --release
       - defer: git checkout -
       # Build the given SHA
       - cargo build --release
-      - defer: cargo build --release
       # Compare the performance of the current build with the given SHA
       - hyperfine -w 10 "tmpdir/sas-lexer lex {{.SAS_LEX_SAMPLES}}" "target/release/sas-lexer lex {{.SAS_LEX_SAMPLES}}"
       - hyperfine -w 5 "tmpdir/sas-lexer lex {{.PERF_LARGE_SAMPLE}}" "target/release/sas-lexer lex {{.PERF_LARGE_SAMPLE}}"
