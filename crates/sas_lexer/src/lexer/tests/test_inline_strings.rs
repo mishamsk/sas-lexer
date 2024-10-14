@@ -3817,9 +3817,23 @@ vec![
     ],
     NO_ERRORS,
 )]
-#[case::commented_macro_stat("*put this is comment;",
+#[case::commented_macro_stat("*%put this is comment;",
     vec![
-        ("*put this is comment;", TokenType::PredictedCommentStat),
+        ("*%put this is comment;", TokenType::PredictedCommentStat),
+    ],
+    NO_ERRORS,
+)]
+#[case::simple_comment_in_macro("%macro m();*comment;%mend;",
+    vec![
+        ("%macro", TokenType::KwmMacro),
+        (" ", TokenType::WS),
+        ("m", TokenType::Identifier),
+        ("(", TokenType::LPAREN),
+        (")", TokenType::RPAREN),
+        (";", TokenType::SEMI),
+        ("*comment;", TokenType::PredictedCommentStat),
+        ("%mend", TokenType::KwmMend),
+        (";", TokenType::SEMI),
     ],
     NO_ERRORS,
 )]
@@ -3914,7 +3928,41 @@ vec![
     ],
     NO_ERRORS,
 )]
-// And inside macro definitions we never predict comments
+// And inside macro definitions we never predict comments with macro code before semi
+#[case::mixed_in_macro_def("a = 1\n%macro m; *%mc(); *com; *%let\na=1; %mend;",
+    vec![
+        ("a", TokenType::Identifier, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("=", TokenType::ASSIGN, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("1", TokenType::IntegerLiteral, Payload::Integer(1)),
+        ("\n", TokenType::WS, Payload::None),
+        ("%macro", TokenType::KwmMacro, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("m", TokenType::Identifier, Payload::None),
+        (";", TokenType::SEMI, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("*", TokenType::STAR, Payload::None),
+        ("%mc", TokenType::MacroIdentifier, Payload::None),
+        ("(", TokenType::LPAREN, Payload::None),
+        (")", TokenType::RPAREN, Payload::None),
+        (";", TokenType::SEMI, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("*com;", TokenType::PredictedCommentStat, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("*", TokenType::STAR, Payload::None),
+        ("%let", TokenType::KwmLet, Payload::None),
+        ("\n", TokenType::WS, Payload::None),
+        ("a", TokenType::MacroString, Payload::None),
+        ("=", TokenType::ASSIGN, Payload::None),
+        ("1", TokenType::MacroString, Payload::None),
+        (";", TokenType::SEMI, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("%mend", TokenType::KwmMend, Payload::None),
+        (";", TokenType::SEMI, Payload::None),
+    ],
+    NO_ERRORS,
+)]
 #[case::before_mend_not_comment("a = 1\n%macro m; * /*c*/ 2 %mend;",
     vec![
         ("a", TokenType::Identifier, Payload::None),

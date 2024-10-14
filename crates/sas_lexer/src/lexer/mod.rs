@@ -87,9 +87,9 @@ struct Lexer<'src> {
     /// open code
     macro_nesting_level: u32,
 
-    /// A stack of boolean values that tracks if an non-terminated open code
-    /// statement is pending. This is used in start comments and datalines
-    /// predictions.
+    /// A stack of boolean values that tracks if an open code statement
+    /// started but is not yet terminated by semi.
+    /// This is used in start comments and datalines predictions.
     pending_stat_stack: BitVec,
 
     /// Stores the last state for debug assertions to check
@@ -150,9 +150,7 @@ impl<'src> Lexer<'src> {
             errors: Vec::new(),
             checkpoint: None,
             macro_nesting_level,
-            // If we start in a macro, we assume that some open code statement
-            // is "pending". Why so - see comments in `dispatch_macro_call_or_stat`
-            pending_stat_stack: BitVec::from_elem(1, macro_nesting_level > 0),
+            pending_stat_stack: BitVec::from_elem(1, false),
         })
     }
 
@@ -3688,9 +3686,23 @@ impl<'src> Lexer<'src> {
         }
     }
 
-    /// Lexes a predicted comment statement in open code.
+    /// Lexes a predicted comment statement in open and macro code.
     ///
-    /// We only predict for open code, since within macro definitions
+    /// We only predict two types of start comments:
+    ///
+    /// 1) Open code
+    ///
+    /// Despite the documentation, it seems that macro is not executed
+    /// in open code at all, e.g. macro calls do not run and thus do not mask
+    /// semicolons. Hence it is actually important to predict comments in open code
+    /// on lexer level, otherwise it would be pretty hard for the parser to
+    /// handle something like this: `* %mcall(doesn't mask ; semi);`. In open
+    /// code SAS will terminate comment at the first semicolon!
+    ///
+    /// 2) Within macro definitions without nested macro code
+    ///
+    /// This means that `* comment;` inside a macro definition will be predicted,
+    /// but `* %let this will execute;` will not. This is because
     /// SAS behaves differently and all macro is actually executed which leads
     /// to various unexpected things => the downstream parser should properly
     /// parse comment statements within macro definitions.
@@ -3699,35 +3711,67 @@ impl<'src> Lexer<'src> {
     /// https://documentation.sas.com/doc/en/pgmsascdc/9.4_3.5/mcrolref/n17rxjs5x93mghn1mdxesvg78drx.htm
     /// and
     /// https://sas.service-now.com/csm?id=kb_article_view&sysparm_article=KB0036213
-    ///
-    /// Despite the documentation, it seems that macro is not executed
-    /// in open code at all, e.g. macro calls do not run and thus do not mask
-    /// semicolons. Hence it is actually important to predict comments in open code
-    /// on lexer level, otherwise it would be pretty hard for the parser to
-    /// handle something like this: `* %mcall(doesn't mask ; semi);`. In open
-    /// code SAS will terminate comment at the first semicolon!
     fn lex_predicted_comment(&mut self) -> bool {
-        // Check if we are in open code or not
-        if self.macro_nesting_level > 0 {
-            // We are in a macro definition, so we do not predict comments
+        // If we are mid open code statement, it can't be a comment
+        if self.pending_stat() {
             return false;
         }
 
-        // If we are mid open code statement, it can't be a comment
-        if self
-            .pending_stat_stack
-            .get(self.pending_stat_stack.len() - 1)
-            .unwrap_or(false)
-        {
-            return false;
+        // Check if we are in open code or not
+        if self.macro_nesting_level == 0 {
+            // Non-macro code - easy
+            while let Some(c) = self.cursor.advance() {
+                match c {
+                    '\n' => {
+                        self.add_line();
+                    }
+                    ';' => {
+                        // Found the end of the comment
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+
+            // Emit the comment token
+            self.emit_token(
+                TokenChannel::COMMENT,
+                TokenType::PredictedCommentStat,
+                Payload::None,
+            );
+
+            // Report that we lexed a token
+            return true;
         }
+
+        // We are in a macro definition, this is harder. We need to checkpoint
+        // start consuming the comment, but rollback if we hit any macro code
+        // Checkpoint to be able to rollback
+        self.checkpoint();
 
         while let Some(c) = self.cursor.advance() {
             match c {
                 '\n' => {
                     self.add_line();
                 }
+                '%' if self.cursor.peek().is_some_and(is_valid_sas_name_start) => {
+                    // Ok, we hit a macro call or a macro stat. Rollback and return
+                    // We assume the following usage possible:
+                    // ```sas
+                    // macro m; * 2 %mend;
+                    // data _null_; a = 1 %m();
+                    // ```
+                    // hence we rollback, and tell the caller "no, this is not a comment".
+                    //
+                    // Even if this is a semi-legit, non-recommended start comment, like:
+                    // ```sas
+                    // %macro m; *let a=b; comment tail; %mend;
+                    // ```
+                    // we still defer to the parser to handle it.
+                    self.rollback();
 
+                    return false;
+                }
                 ';' => {
                     // Found the end of the comment
                     break;
@@ -3735,6 +3779,10 @@ impl<'src> Lexer<'src> {
                 _ => {}
             }
         }
+
+        // EOF/semi reached
+        // Clear the checkpoint
+        self.clear_checkpoint();
 
         // Emit the comment token
         self.emit_token(
@@ -4521,7 +4569,7 @@ impl<'src> Lexer<'src> {
                 // Also we need to push the current pending stat value to the stack.
                 //
                 // Unlike the %do statement, for the macro definitions we assume that
-                // there is some pending stat to begin with. This is because we can't
+                // there is no pending stat to begin with. This is because we can't
                 // really know how this macro will be used, it may generate something
                 // that's inline in an open code statement, or it may generate full
                 // statements. This can only be resolved by the parser (or to be
@@ -4531,19 +4579,16 @@ impl<'src> Lexer<'src> {
                 // following:
                 // ```sas
                 // macro m();
-                // * header comment. SAS doesn't recommend this btw...;
-                // data _null_;
-                //     put "Hello, world!";
-                // run;
+                // * 2;
                 // %mend;
                 //
-                // %m();
+                // data _null_;
+                //     a = %m()
+                // run;
                 //```
-                // We will assume that the top comment is a continuation of some
-                // pending statement, and not a standalone comment. As of now
-                // start comments are not predicted inside macro definitions anyway,
-                // so this will only really affect the datalines prediction heuristics.
-                self.push_pending_stat(true);
+                // We will assume that the `* 2;` is a comment, and not a part of the
+                // assignment statement. But this should be exceedingly rare in real-life
+                self.push_pending_stat(false);
             } // TODO!!!!!! PLACEHOLDER - should be exhaustive
             _ => {
                 self.push_mode(LexerMode::ExpectSemiOrEOF);
