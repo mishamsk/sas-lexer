@@ -390,7 +390,7 @@ impl WorkTokenizedBuffer {
 }
 
 /// A checkpoint of the buffer.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub(super) struct WorkBufferCheckpoint {
     line_count: usize,
     token_count: usize,

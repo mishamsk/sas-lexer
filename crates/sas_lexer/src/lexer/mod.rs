@@ -154,6 +154,7 @@ impl<'src> Lexer<'src> {
         })
     }
 
+    #[allow(clippy::print_stdout)]
     #[cfg(debug_assertions)]
     fn dump_lexer_state_to_console(&self) {
         println!("Infinite loop detected! Lexer data:");
@@ -437,7 +438,7 @@ impl<'src> Lexer<'src> {
 
     /// Main lexing loop, responsible for driving the lexing forwards
     /// as well as finalizing it with a mandatroy EOF roken.
-    fn lex(mut self) -> Result<LexResult, ErrorKind> {
+    fn lex(mut self) -> LexResult {
         #[cfg(any(feature = "opti_stats", test))]
         let mut max_mode_stack_depth = 0usize;
 
@@ -449,6 +450,7 @@ impl<'src> Lexer<'src> {
                 max_mode_stack_depth = max_mode_stack_depth.max(self.mode_stack.len());
             }
 
+            #[allow(clippy::print_stdout)]
             #[cfg(debug_assertions)]
             {
                 let new_state = (self.cursor.remaining_len(), self.mode_stack.clone());
@@ -461,19 +463,19 @@ impl<'src> Lexer<'src> {
 
                     #[cfg(any(feature = "opti_stats", test))]
                     {
-                        return Ok(LexResult {
+                        return LexResult {
                             buffer: self.buffer.into_detached(self.source),
                             errors: self.errors,
                             max_mode_stack_depth,
-                        });
+                        };
                     }
 
                     #[cfg(not(any(feature = "opti_stats", test)))]
                     {
-                        return Ok(LexResult {
+                        return LexResult {
                             buffer: self.buffer.into_detached(self.source),
                             errors: self.errors,
-                        });
+                        };
                     }
                 };
                 self.last_state = new_state;
@@ -484,19 +486,19 @@ impl<'src> Lexer<'src> {
 
         #[cfg(any(feature = "opti_stats", test))]
         {
-            Ok(LexResult {
+            LexResult {
                 buffer: self.buffer.into_detached(self.source),
                 errors: self.errors,
                 max_mode_stack_depth,
-            })
+            }
         }
 
         #[cfg(not(any(feature = "opti_stats", test)))]
         {
-            Ok(LexResult {
+            LexResult {
                 buffer: self.buffer.into_detached(self.source),
                 errors: self.errors,
-            })
+            }
         }
     }
 
@@ -3708,9 +3710,9 @@ impl<'src> Lexer<'src> {
     /// parse comment statements within macro definitions.
     ///
     /// More on the topic in official SAS documentation:
-    /// https://documentation.sas.com/doc/en/pgmsascdc/9.4_3.5/mcrolref/n17rxjs5x93mghn1mdxesvg78drx.htm
+    /// <https://documentation.sas.com/doc/en/pgmsascdc/9.4_3.5/mcrolref/n17rxjs5x93mghn1mdxesvg78drx.htm>
     /// and
-    /// https://sas.service-now.com/csm?id=kb_article_view&sysparm_article=KB0036213
+    /// <https://sas.service-now.com/csm?id=kb_article_view&sysparm_article=KB0036213>
     fn lex_predicted_comment(&mut self) -> bool {
         // If we are mid open code statement, it can't be a comment
         if self.pending_stat() {
@@ -4912,5 +4914,5 @@ impl<'src> Lexer<'src> {
 /// ```
 pub fn lex_program<S: AsRef<str>>(source: &S) -> Result<LexResult, ErrorKind> {
     let lexer = Lexer::new(source.as_ref(), None, None)?;
-    lexer.lex()
+    Ok(lexer.lex())
 }
