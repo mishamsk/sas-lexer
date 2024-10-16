@@ -147,6 +147,18 @@ fn test_single_comment_ws(#[case] contents: &str, #[case] expected_token: impl T
     "%*;after",
     vec![("%*;", TokenType::MacroComment), ("after", TokenType::Identifier)]
 )]
+#[case::macro_comment_with_single_quoted_literal_masking_semi(
+    "%*';' 'shouldn''t terminate;';",
+    vec![("%*';' 'shouldn''t terminate;';", TokenType::MacroComment)]
+)]
+#[case::macro_comment_with_double_quoted_literal_masking_semi(
+    "%*\";\" \"shouldn\"\"t terminate;\";",
+    vec![("%*\";\" \"shouldn\"\"t terminate;\";", TokenType::MacroComment)]
+)]
+#[case::macro_comment_quoted_literal_quotes_handling(
+    "%* '\"' \"'\";",
+    vec![("%* '\"' \"'\";", TokenType::MacroComment)]
+)]
 #[case::cstyle_double_comment(
     "%put /* nestest /* comment */  yes*/;",
     vec![

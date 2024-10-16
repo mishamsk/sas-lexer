@@ -28,7 +28,7 @@ use r#macro::{
     is_macro_percent, is_macro_quote_call_tok_type, is_macro_stat, is_macro_stat_tok_type,
     lex_macro_call_stat_or_label,
 };
-use sas_lang::is_valid_sas_name_start;
+use sas_lang::{is_valid_sas_name_start, StringLiteralQuote};
 use std::{cmp::min, num::NonZeroUsize};
 use text::{ByteOffset, CharOffset};
 use token_type::{
@@ -4121,26 +4121,41 @@ impl<'src> Lexer<'src> {
         self.cursor.advance();
         self.cursor.advance();
 
-        // And now simply eat until first semi and semi too
-        loop {
-            if let Some(c) = self.cursor.advance() {
-                if c == ';' {
-                    break;
-                }
+        // eat until first semi and semi too.
+        // However, macro comments kind-a lex single/double quoted
+        // string literals and semi is masked within them, so we need
+        // some additional logic to handle this
+        let mut cur_quote: Option<StringLiteralQuote> = None;
 
-                if c == '\n' {
+        while let Some(c) = self.cursor.advance() {
+            match c {
+                ';' if cur_quote.is_none() => break,
+                '\n' => {
                     self.add_line();
                 }
-            } else {
-                // EOF reached without a closing comment
-                // Emit an error token and return
-                self.emit_token(
-                    TokenChannel::COMMENT,
-                    TokenType::MacroComment,
-                    Payload::None,
-                );
-                self.emit_error(ErrorKind::UnterminatedComment);
-                return;
+                '\'' if cur_quote.is_none() => {
+                    // Start of a single quote string
+                    cur_quote = Some(StringLiteralQuote::Single);
+                }
+                '\'' if cur_quote
+                    .as_ref()
+                    .is_some_and(StringLiteralQuote::is_single) =>
+                {
+                    // End of a single quote string
+                    cur_quote = None;
+                }
+                '"' if cur_quote.is_none() => {
+                    // Start of a double quote string
+                    cur_quote = Some(StringLiteralQuote::Double);
+                }
+                '"' if cur_quote
+                    .as_ref()
+                    .is_some_and(StringLiteralQuote::is_double) =>
+                {
+                    // End of a double quote string
+                    cur_quote = None;
+                }
+                _ => {}
             }
         }
 
