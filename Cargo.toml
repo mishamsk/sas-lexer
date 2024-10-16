@@ -51,3 +51,12 @@ indexing_slicing = "deny"
 
 [profile.release]
 debug = true
+codegen-units = 3
+lto = "thin"
+
+# use release-like profile for all dependencies
+[profile.dev.package."*"]
+inherits = "release"
+debug = true
+incremental = true
+codegen-units = 3
