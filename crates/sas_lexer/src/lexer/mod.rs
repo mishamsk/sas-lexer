@@ -3361,7 +3361,7 @@ impl<'src> Lexer<'src> {
         let pending_ident_len = pending_ident.len();
 
         if !is_ascii || pending_ident_len > MAX_KEYWORDS_LEN {
-            // Easy case - not ASCII or longer than any of the keeywords, just emit the identifier token
+            // Easy case - not ASCII or longer than any of the keywords, just emit the identifier token
             self.emit_token(TokenChannel::DEFAULT, TokenType::Identifier, Payload::None);
             return;
         }
@@ -3461,8 +3461,8 @@ impl<'src> Lexer<'src> {
         }
 
         // So, datalines are pretty insane beast. First, we use heuristic to determine
-        // if it may be the start of the datalines (must preceeded by `;` on default channel),
-        // then we need to peek forward to find a `;`. Only of we find it, we can be sure
+        // if it may be the start of the datalines (must be preceeded by `;` on default channel),
+        // then we need to peek forward to find a `;`. Only if we find it, we can be sure
         // that this is indeed a datalines start token.
         if let Some(tok_info) = self.buffer.last_token_info_on_default_channel() {
             if tok_info.token_type != TokenType::SEMI {
@@ -3483,8 +3483,8 @@ impl<'src> Lexer<'src> {
             }
         }
 
-        // Few! Now we now that this is indeed a datalines! TBH technically we do not
-        // as in SAS, it is context sensitive and will only trigger inside a data step
+        // Few! Now we now that this is indeed a datalines! TBH technically we do not know...
+        // In SAS, it is context sensitive and will only trigger inside a data step
         // but otherwise it is theoretically possible to have smth. like `datalines;` in
         // a macro...but I refuse to support this madness. Hopefully no such code exists
 
@@ -3492,7 +3492,7 @@ impl<'src> Lexer<'src> {
         // Seemed too complicated to allow looping in the lexer for the sake of
         // of this very special language construct
 
-        // Now advance to the semi-colon for real before emitting the token the datalines start token
+        // Now advance to the semi-colon for real before emitting the datalines start token
         loop {
             // Have to do the loop to track line changes
             match self.cursor.advance() {
@@ -3534,7 +3534,7 @@ impl<'src> Lexer<'src> {
                     }
 
                     if self.cursor.as_str().get(..ending_len).unwrap_or("") == ending {
-                        // Found the ending. Do not consume as it will be the separate token
+                        // Found the ending. Do not consume as it will be a separate token
                         break;
                     }
 

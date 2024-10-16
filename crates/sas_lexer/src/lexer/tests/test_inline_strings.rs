@@ -526,19 +526,43 @@ fn test_datalines(#[values("", ";", ";\n\t/*comment*/  ")] prefix: &str, #[case]
     }
 }
 
-#[test]
-fn test_not_datalines() {
-    let source = "input datalines4;";
-    assert_lexing(
-        source,
-        vec![
+#[rstest]
+#[case::simple("input datalines4;",
+    vec![
             ("input", TokenType::KwInput),
             (" ", TokenType::WS),
             ("datalines4", TokenType::Identifier),
             (";", TokenType::SEMI),
-        ],
-        NO_ERRORS,
-    );
+    ]
+)]
+#[case::after_macro("input %if &m %then %do; datalines $ %end; dept $;",
+    vec![
+            ("input", TokenType::KwInput),
+            (" ", TokenType::WS),
+            ("%if", TokenType::KwmIf),
+            (" ", TokenType::WS),
+            ("&m", TokenType::MacroVarExpr),
+            (" ", TokenType::WS),
+            ("%then", TokenType::KwmThen),
+            (" ", TokenType::WS),
+            ("%do", TokenType::KwmDo),
+            (";", TokenType::SEMI),
+            (" ", TokenType::WS),
+            ("datalines", TokenType::Identifier),
+            (" ", TokenType::WS),
+            ("$", TokenType::DOLLAR),
+            (" ", TokenType::WS),
+            ("%end", TokenType::KwmEnd),
+            (";", TokenType::SEMI),
+            (" ", TokenType::WS),
+            ("dept", TokenType::Identifier),
+            (" ", TokenType::WS),
+            ("$", TokenType::DOLLAR),
+            (";", TokenType::SEMI),
+    ]
+)]
+fn test_not_datalines(#[case] contents: &str, #[case] expected_token: Vec<impl TokenTestCase>) {
+    assert_lexing(contents, expected_token, NO_ERRORS);
 }
 
 #[rstest]
