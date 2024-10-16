@@ -3988,10 +3988,14 @@ impl<'src> Lexer<'src> {
                 self.emit_token(TokenChannel::DEFAULT, TokenType::QUESTION, Payload::None);
             }
             _ => {
-                // Unknown something, consume the character, emit an unknown token, push error
+                // All other characters. This can be arbitrary things. For example `x` statement
+                // reads the following as a plain string to execute on the host and thus can
+                // have anything. There are also proc ds2, python, iml, execute in sql and many
+                // others that accept other language => we can't reasonably restrict anything.
+
+                // consume the character, emit a catch all token
                 self.cursor.advance();
-                self.emit_token(TokenChannel::HIDDEN, TokenType::UNKNOWN, Payload::None);
-                self.emit_error(ErrorKind::UnexpectedCharacter);
+                self.emit_token(TokenChannel::HIDDEN, TokenType::CatchAll, Payload::None);
             }
         }
     }

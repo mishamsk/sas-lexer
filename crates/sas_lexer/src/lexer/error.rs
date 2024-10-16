@@ -20,8 +20,6 @@ pub enum ErrorKind {
     InvalidNumericLiteral = 1004,
     #[strum(message = "Missing `x` at the end of a hex numeric literal")]
     UnterminatedHexNumericLiteral = 1005,
-    #[strum(message = "Unexpected character")]
-    UnexpectedCharacter = 1006,
     #[strum(message = "Missing expected character: ')'")]
     MissingExpectedRParen = 1007,
     #[strum(message = "Missing expected character: '='")]

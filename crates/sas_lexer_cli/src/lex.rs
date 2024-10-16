@@ -4,10 +4,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use sas_lexer::{
-    error::{ErrorInfo, ErrorKind},
-    lex_program, LexResult, TokenizedBuffer,
-};
+use sas_lexer::{error::ErrorInfo, lex_program, LexResult, TokenizedBuffer};
 
 use crate::print::{print_errors, print_tokens};
 
@@ -75,15 +72,12 @@ pub(super) fn lex_and_print(source: &String, print_config: LexPrintConfig) -> Op
     ) {
         Some((tok_buffer, errors, lex_duration, _)) => {
             let total_tokens = tok_buffer.token_count();
-            let (c_int, c_unknown, c_user) =
+            let (c_int, c_user) =
                 errors
                     .iter()
-                    .fold((0, 0, 0), |(c_int, c_unknown, c_user), e| {
-                        match e.error_kind() {
-                            e if e.is_internal() => (c_int + 1, c_unknown, c_user),
-                            ErrorKind::UnexpectedCharacter => (c_int, c_unknown + 1, c_user),
-                            _ => (c_int, c_unknown, c_user + 1),
-                        }
+                    .fold((0, 0), |(c_int, c_user), e| match e.error_kind() {
+                        e if e.is_internal() => (c_int + 1, c_user),
+                        _ => (c_int, c_user + 1),
                     });
 
             let mut gen_tok_vec_duration = Duration::default();
@@ -117,10 +111,6 @@ pub(super) fn lex_and_print(source: &String, print_config: LexPrintConfig) -> Op
                 if errors.is_empty() {
                     if c_int > 0 {
                         println!("Internal errors: {c_int}");
-                    }
-
-                    if c_unknown > 0 {
-                        println!("Unknown characters: {c_unknown}");
                     }
 
                     if c_user > 0 {

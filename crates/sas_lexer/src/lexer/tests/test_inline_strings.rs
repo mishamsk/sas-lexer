@@ -621,9 +621,9 @@ fn test_keywords_followed_by_unicode(
         mangled_keyword.as_str(),
         vec![
             (keyword, keyword_tok, TokenChannel::DEFAULT),
-            ("🔥", TokenType::UNKNOWN, TokenChannel::HIDDEN),
+            ("🔥", TokenType::CatchAll, TokenChannel::HIDDEN),
         ],
-        vec![ErrorKind::UnexpectedCharacter],
+        NO_ERRORS,
     );
 }
 
@@ -632,12 +632,12 @@ fn test_keywords_followed_by_unicode(
 #[case::underscore("_myvar",vec![TokenType::Identifier], NO_ERRORS)]
 #[case::unicode("тест",vec![TokenType::Identifier], NO_ERRORS)]
 #[case::with_num("_myvar9", vec![TokenType::Identifier], NO_ERRORS)]
-#[case::err_copy("_myvar©",
+#[case::followed_by_copy_sign("_myvar©",
     vec![
         ("_myvar", TokenType::Identifier, TokenChannel::DEFAULT),
-        ("©", TokenType::UNKNOWN, TokenChannel::HIDDEN)
+        ("©", TokenType::CatchAll, TokenChannel::HIDDEN)
         ],
-    vec![ErrorKind::UnexpectedCharacter]
+    NO_ERRORS
 )]
 #[case::num_start("9_9myvar",
     vec![
@@ -2883,13 +2883,13 @@ fn test_macro_eval_empty_logical_operand(
         vec![
             ("%eval", TokenType::KwmEval),
             ("(", TokenType::LPAREN),
-            ("#", TokenType::UNKNOWN),
+            ("#", TokenType::CatchAll),
             (")", TokenType::RPAREN),
         ],
         vec![
             ("%sysevalf", TokenType::KwmSysevalf),
             ("(", TokenType::LPAREN),
-            ("#", TokenType::UNKNOWN),
+            ("#", TokenType::CatchAll),
             (",", TokenType::COMMA),
             ("ceil", TokenType::MacroString),
             (")", TokenType::RPAREN),
@@ -2899,7 +2899,7 @@ fn test_macro_eval_empty_logical_operand(
             ("(", TokenType::LPAREN),
             ("a", TokenType::MacroString),
             (",", TokenType::COMMA),
-            ("#", TokenType::UNKNOWN),
+            ("#", TokenType::CatchAll),
             (")", TokenType::RPAREN),
         ],
         vec![
@@ -2907,7 +2907,7 @@ fn test_macro_eval_empty_logical_operand(
             ("(", TokenType::LPAREN),
             ("a", TokenType::MacroString),
             (",", TokenType::COMMA),
-            ("#", TokenType::UNKNOWN),
+            ("#", TokenType::CatchAll),
             (",", TokenType::COMMA),
             ("=", TokenType::MacroString),
             (")", TokenType::RPAREN),
@@ -2917,7 +2917,7 @@ fn test_macro_eval_empty_logical_operand(
             ("(", TokenType::LPAREN),
             ("a", TokenType::MacroString),
             (",", TokenType::COMMA),
-            ("#", TokenType::UNKNOWN),
+            ("#", TokenType::CatchAll),
             (")", TokenType::RPAREN),
         ],
         vec![
@@ -2925,7 +2925,7 @@ fn test_macro_eval_empty_logical_operand(
             ("(", TokenType::LPAREN),
             ("a", TokenType::MacroString),
             (",", TokenType::COMMA),
-            ("#", TokenType::UNKNOWN),
+            ("#", TokenType::CatchAll),
             (",", TokenType::COMMA),
             ("=", TokenType::MacroString),
             (")", TokenType::RPAREN),
@@ -2935,7 +2935,7 @@ fn test_macro_eval_empty_logical_operand(
             ("(", TokenType::LPAREN),
             ("a", TokenType::MacroString),
             (",", TokenType::COMMA),
-            ("#", TokenType::UNKNOWN),
+            ("#", TokenType::CatchAll),
             (")", TokenType::RPAREN),
         ],
         vec![
@@ -2943,7 +2943,7 @@ fn test_macro_eval_empty_logical_operand(
             ("(", TokenType::LPAREN),
             ("a", TokenType::MacroString),
             (",", TokenType::COMMA),
-            ("#", TokenType::UNKNOWN),
+            ("#", TokenType::CatchAll),
             (",", TokenType::COMMA),
             ("=", TokenType::MacroString),
             (")", TokenType::RPAREN),
@@ -2953,7 +2953,7 @@ fn test_macro_eval_empty_logical_operand(
             ("(", TokenType::LPAREN),
             ("a", TokenType::MacroString),
             (",", TokenType::COMMA),
-            ("#", TokenType::UNKNOWN),
+            ("#", TokenType::CatchAll),
             (")", TokenType::RPAREN),
         ],
         vec![
@@ -2961,7 +2961,7 @@ fn test_macro_eval_empty_logical_operand(
             ("(", TokenType::LPAREN),
             ("a", TokenType::MacroString),
             (",", TokenType::COMMA),
-            ("#", TokenType::UNKNOWN),
+            ("#", TokenType::CatchAll),
             (",", TokenType::COMMA),
             ("=", TokenType::MacroString),
             (")", TokenType::RPAREN),
@@ -2973,7 +2973,7 @@ fn test_macro_eval_empty_logical_operand(
             ("(", TokenType::LPAREN),
             ("a", TokenType::MacroString),
             (",", TokenType::COMMA),
-            ("#", TokenType::UNKNOWN),
+            ("#", TokenType::CatchAll),
             (")", TokenType::RPAREN),
         ],
         vec![
@@ -2981,9 +2981,9 @@ fn test_macro_eval_empty_logical_operand(
             ("(", TokenType::LPAREN),
             ("a", TokenType::MacroString),
             (",", TokenType::COMMA),
-            ("#", TokenType::UNKNOWN),
+            ("#", TokenType::CatchAll),
             (",", TokenType::COMMA),
-            ("#", TokenType::UNKNOWN),
+            ("#", TokenType::CatchAll),
             (")", TokenType::RPAREN),
         ],
         vec![
@@ -2991,13 +2991,13 @@ fn test_macro_eval_empty_logical_operand(
             (" ", TokenType::WS),
             ("i", TokenType::MacroString),
             ("=", TokenType::ASSIGN),
-            ("#", TokenType::UNKNOWN),
+            ("#", TokenType::CatchAll),
             ("%to", TokenType::KwmTo),
             (" ", TokenType::WS),
-            ("#", TokenType::UNKNOWN),
+            ("#", TokenType::CatchAll),
             ("%by", TokenType::KwmBy),
             (" ", TokenType::WS),
-            ("#", TokenType::UNKNOWN),
+            ("#", TokenType::CatchAll),
             (";", TokenType::SEMI),
         ],
         vec![
@@ -3005,10 +3005,10 @@ fn test_macro_eval_empty_logical_operand(
             (" ", TokenType::WS),
             ("i", TokenType::MacroString),
             ("=", TokenType::ASSIGN),
-            ("#", TokenType::UNKNOWN),
+            ("#", TokenType::CatchAll),
             ("%to", TokenType::KwmTo),
             (" ", TokenType::WS),
-            ("#", TokenType::UNKNOWN),
+            ("#", TokenType::CatchAll),
             (";", TokenType::SEMI),
         ],
         vec![
@@ -3016,7 +3016,7 @@ fn test_macro_eval_empty_logical_operand(
             (" ", TokenType::WS),
             ("%until", TokenType::KwmUntil),
             ("(", TokenType::LPAREN),
-            ("#", TokenType::UNKNOWN),
+            ("#", TokenType::CatchAll),
             (")", TokenType::RPAREN),
             (";", TokenType::SEMI),
         ],
@@ -3025,14 +3025,14 @@ fn test_macro_eval_empty_logical_operand(
             (" ", TokenType::WS),
             ("%WhIle", TokenType::KwmWhile),
             ("(", TokenType::LPAREN),
-            ("#", TokenType::UNKNOWN),
+            ("#", TokenType::CatchAll),
             (")", TokenType::RPAREN),
             (";", TokenType::SEMI),
         ],
         vec![
             ("%if", TokenType::KwmIf),
             (" ", TokenType::WS),
-            ("#", TokenType::UNKNOWN),
+            ("#", TokenType::CatchAll),
             ("%tHeN", TokenType::KwmThen),
         ],
     )]
@@ -3058,7 +3058,7 @@ fn test_macro_eval_empty_logical_operand(
         // LHS missing
         vec![
             ("", TokenType::MacroStringEmpty, Payload::None),
-            ("#", TokenType::UNKNOWN, Payload::None),
+            ("#", TokenType::CatchAll, Payload::None),
             (" ", TokenType::WS, Payload::None),
             ("1", TokenType::IntegerLiteral, Payload::Integer(1)),
         ],
@@ -3066,29 +3066,29 @@ fn test_macro_eval_empty_logical_operand(
         vec![
             ("1", TokenType::IntegerLiteral, Payload::Integer(1)),
             (" ", TokenType::WS, Payload::None),
-            ("#", TokenType::UNKNOWN, Payload::None),
+            ("#", TokenType::CatchAll, Payload::None),
             ("", TokenType::MacroStringEmpty, Payload::None),
         ],
         // Both missing
         vec![
             ("", TokenType::MacroStringEmpty, Payload::None),
-            ("#", TokenType::UNKNOWN, Payload::None),
+            ("#", TokenType::CatchAll, Payload::None),
             ("", TokenType::MacroStringEmpty, Payload::None),
         ],
         // Two ops consecutive
         vec![
             ("", TokenType::MacroStringEmpty, Payload::None),
-            ("#", TokenType::UNKNOWN, Payload::None),
+            ("#", TokenType::CatchAll, Payload::None),
             (" ", TokenType::WS, Payload::None),
             ("", TokenType::MacroStringEmpty, Payload::None),
-            ("#", TokenType::UNKNOWN, Payload::None),
+            ("#", TokenType::CatchAll, Payload::None),
             ("", TokenType::MacroStringEmpty, Payload::None),
         ],
         // Parentheses
         vec![
             ("(", TokenType::LPAREN, Payload::None),
             ("", TokenType::MacroStringEmpty, Payload::None),
-            ("#", TokenType::UNKNOWN, Payload::None),
+            ("#", TokenType::CatchAll, Payload::None),
             (" ", TokenType::WS, Payload::None),
             ("1", TokenType::IntegerLiteral, Payload::Integer(1)),
             (")", TokenType::RPAREN, Payload::None),
@@ -3096,26 +3096,26 @@ fn test_macro_eval_empty_logical_operand(
             ("(", TokenType::LPAREN, Payload::None),
             ("1", TokenType::IntegerLiteral, Payload::Integer(1)),
             (" ", TokenType::WS, Payload::None),
-            ("#", TokenType::UNKNOWN, Payload::None),
+            ("#", TokenType::CatchAll, Payload::None),
             ("", TokenType::MacroStringEmpty, Payload::None),
             (")", TokenType::RPAREN, Payload::None),
             ("and", TokenType::KwAND, Payload::None),
             ("(", TokenType::LPAREN, Payload::None),
             ("", TokenType::MacroStringEmpty, Payload::None),
-            ("#", TokenType::UNKNOWN, Payload::None),
+            ("#", TokenType::CatchAll, Payload::None),
             ("", TokenType::MacroStringEmpty, Payload::None),
             (")", TokenType::RPAREN, Payload::None),
         ],
         // No parentheses, split with logical
         vec![
             ("", TokenType::MacroStringEmpty, Payload::None),
-            ("#", TokenType::UNKNOWN, Payload::None),
+            ("#", TokenType::CatchAll, Payload::None),
             (" ", TokenType::WS, Payload::None),
             ("", TokenType::MacroStringEmpty, Payload::None),
             ("and", TokenType::KwAND, Payload::None),
             (" ", TokenType::WS, Payload::None),
             ("", TokenType::MacroStringEmpty, Payload::None),
-            ("#", TokenType::UNKNOWN, Payload::None),
+            ("#", TokenType::CatchAll, Payload::None),
             ("", TokenType::MacroStringEmpty, Payload::None),
         ],
     )]
@@ -3128,11 +3128,11 @@ fn test_macro_eval_empty_logical_operand(
         .map(|(snip, tok_type, payload)| {
             (
                 match tok_type {
-                    TokenType::UNKNOWN => op_str,
+                    TokenType::CatchAll => op_str,
                     _ => *snip,
                 },
                 match tok_type {
-                    TokenType::UNKNOWN => op_tok,
+                    TokenType::CatchAll => op_tok,
                     _ => *tok_type,
                 },
                 *payload,
@@ -3143,7 +3143,7 @@ fn test_macro_eval_empty_logical_operand(
     let all_expected_tokens = template
         .iter()
         .flat_map(|(snip, tok_type)| match tok_type {
-            TokenType::UNKNOWN => {
+            TokenType::CatchAll => {
                 // Placeholder, here comes the expression
                 expr_expected_tokens.clone()
             }

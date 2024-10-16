@@ -37,7 +37,7 @@ use serde_repr::Serialize_repr;
 #[repr(u16)]
 pub enum TokenType {
     EOF,
-    UNKNOWN,
+    CatchAll,
     WS,
     SEMI,       // ';'
     AMP,        // '&'+

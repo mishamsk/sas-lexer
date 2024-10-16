@@ -860,7 +860,7 @@ mod tests {
         let line1 = buffer.add_line(ByteOffset::default(), CharOffset::default());
         let token1 = buffer.add_token(
             TokenChannel::DEFAULT,
-            TokenType::UNKNOWN,
+            TokenType::CatchAll,
             ByteOffset::default(),
             CharOffset::default(),
             line1,
@@ -869,7 +869,7 @@ mod tests {
         let line2 = buffer.add_line(ByteOffset::new(14), CharOffset::new(14));
         let token2 = buffer.add_token(
             TokenChannel::DEFAULT,
-            TokenType::UNKNOWN,
+            TokenType::CatchAll,
             ByteOffset::new(15),
             CharOffset::new(15),
             line2,
@@ -980,7 +980,7 @@ mod tests {
         let line = work_buf.add_line(ByteOffset::default(), CharOffset::default());
         let token = work_buf.add_token(
             TokenChannel::DEFAULT,
-            TokenType::UNKNOWN,
+            TokenType::CatchAll,
             ByteOffset::default(),
             CharOffset::default(),
             line,
@@ -1001,7 +1001,7 @@ mod tests {
 
         assert_eq!(
             buf.get_token_type(token).expect("wrong token"),
-            TokenType::UNKNOWN
+            TokenType::CatchAll
         );
         assert_eq!(
             buf.get_token_channel(token).expect("wrong token"),
