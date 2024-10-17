@@ -3189,6 +3189,31 @@ fn test_macro_eval_empty_logical_operand(
     );
 }
 
+/// A collection of hand-picked corner case test cases based on real-world examples
+#[rstest]
+#[case::empty_parens_in_logical_expr("%eval((&mv) ne ())",
+    vec![
+        ("%eval", TokenType::KwmEval),
+        ("(", TokenType::LPAREN),
+        ("(", TokenType::LPAREN),
+        ("&mv", TokenType::MacroVarExpr),
+        (")", TokenType::RPAREN),
+        (" ", TokenType::WS),
+        ("ne", TokenType::KwNE),
+        (" ", TokenType::WS),
+        ("(", TokenType::LPAREN),
+        ("", TokenType::MacroStringEmpty),
+        (")", TokenType::RPAREN),
+        (")", TokenType::RPAREN),
+    ]
+)]
+fn test_macro_eval_selected_cases(
+    #[case] contents: &str,
+    #[case] expected_tokens: Vec<impl TokenTestCase>,
+) {
+    assert_lexing(contents, expected_tokens, NO_ERRORS);
+}
+
 #[rstest]
 #[case::do_to_no_by("%do i=1 %to 2  ;",
     vec![

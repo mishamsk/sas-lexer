@@ -11,9 +11,9 @@ use serde_repr::Serialize_repr;
 /// predicates rely on integer values of the variants that
 /// are generated automatically from the order.
 ///
-/// Naming also is also important. Namely all non-macro keywords
+/// Naming is also important. Namely all non-macro keywords
 /// must be preceeded with `Kw` and macro keywords are all start
-/// with `Kwm`. These is used to autogenerate static hash maps
+/// with `Kwm`. These are used to autogenerate static hash maps
 /// for keywords and other downstream codegen outside of this crate
 #[derive(
     Debug,

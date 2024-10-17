@@ -1338,34 +1338,25 @@ impl<'src> Lexer<'src> {
                 ..
             }) = self.buffer.last_token_info_on_default_channel()
             {
-                // is we have a preceedning logical operator, we should emit empty string
+                // if we have a preceedning logical operator, we should emit empty string
                 // no matter the next token type
-                if is_macro_eval_logical_op(prev_tok_type) {
-                    // TODO: emit SAS error on missing operand for IN/#
-                    self.emit_empty_macro_string_token();
-                } else if matches!(
-                    prev_tok_type,
-                    // These are all possible "starts", tokens preceeding
-                    // the start of an evaluated logical macro subexpression.
-                    // See: https://documentation.sas.com/doc/en/pgmsascdc/9.4_3.5/mcrolref/n1alyfc9f4qrten10sd5qz5e1w5q.htm#p17exjo2c9f5e3n19jqgng0ho42u
-                    TokenType::LPAREN
-                        | TokenType::ASSIGN
-                        | TokenType::KwmIf
-                        | TokenType::KwmTo
-                        | TokenType::KwmBy
-                        | TokenType::COMMA
-                        | TokenType::KwAND
-                        | TokenType::KwOR
-                ) {
-                    // if we are at the start of expression, or start of parenthesized subexpression
-                    // the logic is more involved since if no operand is given in reality SAS will emit
-                    // an error about character operand found in eval context.
-                    // It doesn't allow bare empty condition.
-
-                    if expr_end {
-                        self.emit_error(ErrorKind::CharExpressionInEvalContext);
-                    }
-
+                if is_macro_eval_logical_op(prev_tok_type)
+                    // or if we are at the start of expression, or start of parenthesized subexpression
+                    || matches!(
+                        prev_tok_type,
+                        // These are all possible "starts", tokens preceeding
+                        // the start of an evaluated logical macro subexpression.
+                        // See: https://documentation.sas.com/doc/en/pgmsascdc/9.4_3.5/mcrolref/n1alyfc9f4qrten10sd5qz5e1w5q.htm#p17exjo2c9f5e3n19jqgng0ho42u
+                        TokenType::LPAREN
+                            | TokenType::ASSIGN
+                            | TokenType::KwmIf
+                            | TokenType::KwmTo
+                            | TokenType::KwmBy
+                            | TokenType::COMMA
+                            | TokenType::KwAND
+                            | TokenType::KwOR
+                    )
+                {
                     self.emit_empty_macro_string_token();
                 }
             }

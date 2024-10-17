@@ -32,36 +32,31 @@ pub enum ErrorKind {
     MissingExpectedFSlash = 1011,
     #[strum(message = "Missing expected character: ';' or end of file")]
     MissingExpectedSemiOrEOF = 1012,
-    #[strum(
-        message = "ERROR: A character operand was found in the %EVAL function or %IF \
-                            condition where a numeric operand is required."
-    )]
-    CharExpressionInEvalContext = 1013,
     #[strum(message = "ERROR 180-322: Statement is not valid or it is used out of proper order.")]
-    InvalidOrOutOfOrderStatement = 1014,
+    InvalidOrOutOfOrderStatement = 1013,
     #[strum(message = "ERROR: Expecting a variable name after %LET.")]
-    InvalidMacroLetVarName = 1015,
+    InvalidMacroLetVarName = 1014,
     #[strum(message = "ERROR: The macro variable name is either all blank or missing.")]
-    InvalidMacroLocalGlobalReadonlyVarName = 1016,
+    InvalidMacroLocalGlobalReadonlyVarName = 1015,
     #[strum(message = "ERROR: Unrecognized keyword on %LOCAL statement.")]
-    MissingMacroLocalReadonlyKw = 1017,
+    MissingMacroLocalReadonlyKw = 1016,
     #[strum(message = "ERROR: Unrecognized keyword on %GLOBAL statement.")]
-    MissingMacroGlobalReadonlyKw = 1018,
+    MissingMacroGlobalReadonlyKw = 1017,
     #[strum(message = "ERROR: Invalid macro name.  \
                         It should be a valid SAS identifier no longer than 32 characters.\
                         \nERROR: A dummy macro will be compiled.")]
-    InvalidMacroDefName = 1019,
+    InvalidMacroDefName = 1018,
     #[strum(message = "ERROR: Invalid macro parameter name. \
                         It should be a valid SAS identifier no longer than 32 characters.\
                         \nERROR: A dummy macro will be compiled.")]
-    InvalidMacroDefArgName = 1020,
+    InvalidMacroDefArgName = 1019,
     #[strum(
         message = "ERROR: An unexpected semicolon occurred in the %DO statement.\n\
                         ERROR: A dummy macro will be compiled."
     )]
-    UnexpectedSemiInDoLoop = 1021,
+    UnexpectedSemiInDoLoop = 1020,
     #[strum(message = "ERROR: Open code statement recursion detected.")]
-    OpenCodeRecursionError = 1022,
+    OpenCodeRecursionError = 1021,
     // Token buffer API call user initiated errors.
     // Codes 2001-2999. Make sure to preserve
     // the existing codes & the range. The latter is used in classification impl
