@@ -231,12 +231,45 @@ fn test_string_literal_with_escape(#[case] contents: &str, #[values('\'', '"')] 
 }
 
 #[rstest]
+#[case::single_no_commas("'534153'", Some("SAS"), NO_ERRORS)]
+#[case::single_commas("'53,41,53'", Some("SAS"), NO_ERRORS)]
+#[case::err_single_not_even("'53,41,5'", None, vec![ErrorKind::InvalidHexStringConstant])]
+#[case::err_single_spurious_chars("'53,4_,53'", None, vec![ErrorKind::InvalidHexStringConstant])]
+#[case::double_no_commas("\"534153\"", Some("SAS"), NO_ERRORS)]
+#[case::double_commas("\"53,41,53\"", Some("SAS"), NO_ERRORS)]
+#[case::err_double_not_even("\"53,41,5\"", None, vec![ErrorKind::InvalidHexStringConstant])]
+#[case::err_double_spurious_chars("\"53,4_,53\"", None, vec![ErrorKind::InvalidHexStringConstant])]
+fn test_hex_string_literal(
+    #[case] contents: &str,
+    #[case] payload: Option<&str>,
+    #[values('x', 'X')] suffix: char,
+    #[case] expected_errors: Vec<impl ErrorTestCase>,
+) {
+    if let Some(payload) = payload {
+        assert_lexing(
+            format!("{contents}{suffix}").as_str(),
+            vec![(
+                TokenType::HexStringLiteral,
+                Payload::StringLiteral(0, payload.len() as u32),
+                payload,
+            )],
+            expected_errors,
+        );
+    } else {
+        assert_lexing(
+            format!("{contents}{suffix}").as_str(),
+            vec![(TokenType::HexStringLiteral)],
+            expected_errors,
+        );
+    };
+}
+
+#[rstest]
 #[case::bit_testing("1", "b", TokenType::BitTestingLiteral)]
 #[case::date("4may2022", "d", TokenType::DateLiteral)]
 #[case::datetime("01may2021:12:30", "dt", TokenType::DateTimeLiteral)]
 #[case::name("unicode 🙏 col", "n", TokenType::NameLiteral)]
 #[case::time("00:42", "t", TokenType::TimeLiteral)]
-#[case::hex("FF", "x", TokenType::HexStringLiteral)]
 fn test_non_string_literals(
     #[case] contents: &str,
     #[case] suffix: &str,

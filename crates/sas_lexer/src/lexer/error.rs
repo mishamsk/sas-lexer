@@ -57,6 +57,8 @@ pub enum ErrorKind {
     UnexpectedSemiInDoLoop = 1020,
     #[strum(message = "ERROR: Open code statement recursion detected.")]
     OpenCodeRecursionError = 1021,
+    #[strum(message = "Invalid hex string constant.")]
+    InvalidHexStringConstant = 1022,
     // Token buffer API call user initiated errors.
     // Codes 2001-2999. Make sure to preserve
     // the existing codes & the range. The latter is used in classification impl

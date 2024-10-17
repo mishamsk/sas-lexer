@@ -2,6 +2,7 @@ pub(crate) mod buffer;
 pub(crate) mod channel;
 mod cursor;
 pub mod error;
+mod hex;
 mod lexer_mode;
 mod r#macro;
 mod numeric;
@@ -17,6 +18,7 @@ use buffer::{
 };
 use channel::TokenChannel;
 use error::{ErrorInfo, ErrorKind};
+use hex::parse_sas_hex_string;
 use lexer_mode::{
     LexerMode, MacroArgContext, MacroArgNameValueFlags, MacroEvalExprFlags,
     MacroEvalNextArgumentMode, MacroEvalNumericMode,
@@ -235,7 +237,7 @@ impl<'src> Lexer<'src> {
             })
     }
 
-    fn add_string_literal(
+    fn add_string_literal_from_src(
         &mut self,
         start_byte_offset: ByteOffset,
         end_byte_offset: Option<ByteOffset>,
@@ -445,7 +447,7 @@ impl<'src> Lexer<'src> {
         while let Some(next_char) = self.cursor.peek() {
             self.lex_token(next_char);
 
-            #[cfg(feature = "opti_stats")]
+            #[cfg(any(feature = "opti_stats", test))]
             {
                 max_mode_stack_depth = max_mode_stack_depth.max(self.mode_stack.len());
             }
@@ -2648,7 +2650,7 @@ impl<'src> Lexer<'src> {
 
                         // First, store the literal section before the escape percent
                         let (new_start, new_end) =
-                            self.add_string_literal(last_lit_end_byte_offset, None);
+                            self.add_string_literal_from_src(last_lit_end_byte_offset, None);
                         lit_start_idx = min(lit_start_idx, new_start);
                         lit_end_idx = new_end;
 
@@ -2825,7 +2827,7 @@ impl<'src> Lexer<'src> {
 
                             // First, store the literal section before the escaped quote
                             let (new_start, new_end) =
-                                self.add_string_literal(last_lit_end_byte_offset, None);
+                                self.add_string_literal_from_src(last_lit_end_byte_offset, None);
                             lit_start_idx = min(lit_start_idx, new_start);
                             lit_end_idx = new_end;
 
@@ -2869,14 +2871,42 @@ impl<'src> Lexer<'src> {
         // Now check if this is a single quoted string or one of the other literals
         let tok_type = self.resolve_string_literal_ending();
 
-        let payload = self.resolve_string_literal_payload(
-            lit_start_idx,
-            lit_end_idx,
-            last_lit_end_byte_offset,
-            str_text_end_byte_offset,
-        );
+        let (payload, error) = match tok_type {
+            TokenType::HexStringLiteral => {
+                // Try parsing the hex string
+                let parsed_value = parse_sas_hex_string(self.pending_token_text());
+
+                match parsed_value {
+                    Ok(value) => {
+                        let (lit_start_idx, lit_end_idx) = self.buffer.add_string_literal(value);
+
+                        (
+                            Some(Payload::StringLiteral(lit_start_idx, lit_end_idx)),
+                            None,
+                        )
+                    }
+                    // Remember the error and revert to a regular string literal logic
+                    Err(e) => (None, Some(e)),
+                }
+            }
+            _ => (None, None),
+        };
+
+        let payload = payload.unwrap_or_else(|| {
+            self.resolve_string_literal_payload(
+                lit_start_idx,
+                lit_end_idx,
+                last_lit_end_byte_offset,
+                str_text_end_byte_offset,
+            )
+        });
 
         self.emit_token(TokenChannel::DEFAULT, tok_type, payload);
+
+        if let Some(e) = error {
+            // Emit the error after the token to properly attribute it to the token
+            self.emit_error(e);
+        }
     }
 
     /// A helper called from single quoted strings and double quoted string
@@ -2906,8 +2936,8 @@ impl<'src> Lexer<'src> {
             Payload::None
         } else {
             // Make sure we've added the trailing literal section
-            let (_, final_end) =
-                self.add_string_literal(last_lit_end_byte_offset, str_text_end_byte_offset);
+            let (_, final_end) = self
+                .add_string_literal_from_src(last_lit_end_byte_offset, str_text_end_byte_offset);
 
             Payload::StringLiteral(lit_start_idx, final_end)
         }
@@ -3127,7 +3157,7 @@ impl<'src> Lexer<'src> {
 
                         // First, store the literal section before the escaped quote
                         let (new_start, new_end) =
-                            self.add_string_literal(last_lit_end_byte_offset, None);
+                            self.add_string_literal_from_src(last_lit_end_byte_offset, None);
                         lit_start_idx = min(lit_start_idx, new_start);
                         lit_end_idx = new_end;
 
@@ -3209,7 +3239,7 @@ impl<'src> Lexer<'src> {
         self.pop_mode();
     }
 
-    fn lex_double_quoted_literal(&mut self, payload: Payload) {
+    fn lex_double_quoted_literal(&mut self, mut payload: Payload) {
         debug_assert_eq!(self.cursor.peek(), Some('"'));
 
         // This is a regular literal. We need to consume the char, figure
@@ -3218,6 +3248,40 @@ impl<'src> Lexer<'src> {
         self.cursor.advance();
 
         let tok_type = self.resolve_string_literal_ending();
+
+        if matches!(tok_type, TokenType::HexStringLiteral) {
+            // Try parsing the hex string. In order to get the full string slice for parsing
+            // we actually need to move one byte back from the current token position, because the
+            // opening quote has been lexed as part of the previous token we'll replace below.
+            // Thus we can't use `pending_token_text` here.
+
+            let full_token_text = self
+                .source
+                .get(
+                    // Logically we know it can't overflow, but doing a safe sub just in case
+                    usize::from(self.cur_token_byte_offset).saturating_sub(1)
+                        ..self.cur_byte_offset().into(),
+                )
+                .unwrap_or_else(|| {
+                    // This is an internal error, we should always have a token text
+                    self.emit_error(ErrorKind::InternalErrorNoTokenText);
+                    ""
+                });
+
+            let parsed_value = parse_sas_hex_string(full_token_text);
+
+            match parsed_value {
+                Ok(value) => {
+                    let (lit_start_idx, lit_end_idx) = self.buffer.add_string_literal(value);
+
+                    payload = Payload::StringLiteral(lit_start_idx, lit_end_idx);
+                }
+                // Here we can immediately emit the error, as the last token will be the correct one
+                Err(e) => {
+                    self.emit_error(e);
+                }
+            }
+        }
 
         self.update_last_token(TokenChannel::DEFAULT, tok_type, payload);
         self.pop_mode();
