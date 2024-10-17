@@ -1838,40 +1838,25 @@ fn test_macro_call_arg_disambiguation(#[case] expected_tokens: Vec<(&str, TokenT
         ("/*c*/", TokenType::CStyleComment, TokenChannel::COMMENT),
         (" post", TokenType::MacroString, TokenChannel::DEFAULT),
         (")", TokenType::RPAREN, TokenChannel::HIDDEN),
-        ]
+    ]
 )]
-fn test_macro_str_call(#[case] contents: &str, #[case] expected_token: Vec<impl TokenTestCase>) {
-    assert_lexing(contents, expected_token, NO_ERRORS);
-}
-
-#[rstest]
 #[case::macro_stat_inside("%str( %let v=1;);",
     vec![
         ("%str", TokenType::KwmStr, TokenChannel::HIDDEN),
         ("(", TokenType::LPAREN, TokenChannel::HIDDEN),
         (" ", TokenType::MacroString, TokenChannel::DEFAULT),
-        // Recovered from missing hence empty string
-        ("", TokenType::RPAREN, TokenChannel::HIDDEN),
         ("%let", TokenType::KwmLet, TokenChannel::DEFAULT),
         (" ", TokenType::WS, TokenChannel::HIDDEN),
         ("v", TokenType::MacroString, TokenChannel::DEFAULT),
         ("=", TokenType::ASSIGN, TokenChannel::DEFAULT),
         ("1", TokenType::MacroString, TokenChannel::DEFAULT),
         (";", TokenType::SEMI, TokenChannel::DEFAULT),
-        (")", TokenType::RPAREN, TokenChannel::DEFAULT),
+        (")", TokenType::RPAREN, TokenChannel::HIDDEN),
         (";", TokenType::SEMI, TokenChannel::DEFAULT),
-        ],
-    vec![
-        (ErrorKind::OpenCodeRecursionError, 6),
-        (ErrorKind::MissingExpectedRParen, 6)
-        ]
+    ]
 )]
-fn test_macro_str_call_error_recovery(
-    #[case] contents: &str,
-    #[case] expected_token: Vec<impl TokenTestCase>,
-    #[case] expected_error: Vec<impl ErrorTestCase>,
-) {
-    assert_lexing(contents, expected_token, expected_error);
+fn test_macro_str_call(#[case] contents: &str, #[case] expected_token: Vec<impl TokenTestCase>) {
+    assert_lexing(contents, expected_token, NO_ERRORS);
 }
 
 #[rstest]

@@ -2496,21 +2496,27 @@ impl<'src> Lexer<'src> {
                     return;
                 }
 
-                match self.lex_macro_call(true, false) {
-                    MacroKwType::MacroStat => {
-                        // Hit a following macro statement => pop mode and exit.
-                        // Error has already been emitted by the `lex_macro_call`
-                        self.pop_mode();
+                // Otherwise similar to other macro calls with caveats
+                match self.cursor.peek_next() {
+                    // Macro comments do not seems to lex as comments inside `%str` calls
+                    c if is_valid_sas_name_start(c) => {
+                        // We allow both macro call & stats inside macro call args, so...
+                        // One difference with other macro calls though, is that %str()
+                        // will efectivaly execute before the embedded statement, hence
+                        // the inner statement itself may not be correct really.
+                        // E.g. `%str( %let v=1;);` fails with:
+                        // `ERROR: Symbolic variable name V1 must contain only letters,
+                        // digits, and underscores.`. But we do not handle this really,
+                        // as we output str-quoted macro strings as the same `MacroString`
+                        // token type and not a special "quoted" version.
+                        self.start_token();
+                        self.lex_macro_identifier(false);
                     }
-                    MacroKwType::None => {
-                        // Just a percent, consume and continue lexing the string
-                        // We could have not consumed it and let the
-                        // string lexing handle it, but this way we
-                        // we avoid one extra check
+                    _ => {
+                        // Not a macro, just a percent
                         self.cursor.advance();
                         self.lex_macro_string_in_str_call(mask_macro, parens_nesting_level);
                     }
-                    MacroKwType::MacroCall => {}
                 }
             }
             '\n' => {
@@ -4633,8 +4639,8 @@ impl<'src> Lexer<'src> {
 
         // Push the mode to check if this is a call with parameters.
         // This is as usual in reverse order, first any ws/comments,
-        // and then our special mode that will check for the opening parenthesis
-        // and possibly rollback to the checkpoint
+        // and then our special mode that will check for the opening parenthesis,
+        // colon and possibly rollback to the checkpoint
         self.push_mode(LexerMode::MaybeMacroCallArgsOrLabel {
             check_macro_label: allow_macro_label,
         });
@@ -4773,15 +4779,15 @@ impl<'src> Lexer<'src> {
         self.push_mode(LexerMode::WsOrCStyleCommentOnly);
     }
 
-    /// A helper to populate the expected states for a couple builints
-    /// that allows named arguments. The only built-in that does so.
+    /// A helper to populate the expected states for a couple of builints
+    /// allowing named arguments.
     #[inline]
     fn expect_builtin_macro_call_named_args(&mut self) {
         self.push_mode(LexerMode::ExpectSymbol(
             TokenType::RPAREN,
             TokenChannel::DEFAULT,
         ));
-        // The handler fo arguments will push the mode for the comma, etc.
+        // The handler for arguments will push the mode for the comma, etc.
         self.push_mode(LexerMode::MacroCallArgOrValue {
             flags: MacroArgNameValueFlags::new(MacroArgContext::MacroCall, true),
         });
