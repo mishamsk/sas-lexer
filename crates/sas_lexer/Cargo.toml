@@ -25,6 +25,7 @@ lexical = { version = "7.0.2", default-features = false, features = [
     "format",
 ] }
 bit-vec = "0.8.0"
+encoding = "0.2.33"
 
 [dev-dependencies]
 criterion = { workspace = true, features = ["html_reports"] }

@@ -1,5 +1,8 @@
 use super::error::ErrorKind;
 
+use encoding::all::ISO_8859_1;
+use encoding::{DecoderTrap, Encoding};
+
 /// Parses a SAS hex string literal into an actual string.
 ///
 /// `pending_token_text` should be the entire text including quotes and trailing 'x'.
@@ -10,7 +13,7 @@ use super::error::ErrorKind;
 ///
 /// # Returns
 ///
-/// A decoded string (always using Unicode, no locale).
+/// A decoded string (always using ISO_8859_1, no locale).
 pub(super) fn parse_sas_hex_string(pending_token_text: &str) -> Result<String, ErrorKind> {
     debug_assert!(
         pending_token_text.starts_with(|c| c == '\'' || c == '"')
@@ -37,5 +40,7 @@ pub(super) fn parse_sas_hex_string(pending_token_text: &str) -> Result<String, E
 
     let bytes = bytes_result?;
 
-    String::from_utf8(bytes).map_err(|_| ErrorKind::InvalidHexStringConstant)
+    ISO_8859_1
+        .decode(bytes.as_ref(), DecoderTrap::Strict)
+        .map_err(|_| ErrorKind::InvalidHexStringConstant)
 }
