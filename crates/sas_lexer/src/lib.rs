@@ -1,3 +1,5 @@
+#![feature(vec_push_within_capacity)]
+
 mod lexer;
 
 pub use lexer::buffer::{Payload, ResolvedTokenInfo, TokenIdx, TokenizedBuffer};

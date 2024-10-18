@@ -36,7 +36,7 @@ pub(super) struct NumericParserResult {
     pub(super) error: Option<ErrorKind>,
 }
 
-fn _try_parse_integer(byte_view: &[u8]) -> Option<NumericParserResult> {
+fn try_parse_integer(byte_view: &[u8]) -> Option<NumericParserResult> {
     match parse_partial_with_options::<u64, _, SAS_DECIMAL>(byte_view, &SAS_PARSE_INT_OPTIONS) {
         Ok((value, len)) => {
             // If len is 0, it means that the number was not parsed
@@ -51,7 +51,7 @@ fn _try_parse_integer(byte_view: &[u8]) -> Option<NumericParserResult> {
     }
 }
 
-fn _try_parse_float(byte_view: &[u8]) -> Option<NumericParserResult> {
+fn try_parse_float(byte_view: &[u8]) -> Option<NumericParserResult> {
     match parse_partial_with_options::<f64, _, SAS_DECIMAL>(byte_view, &SAS_PARSE_FLOAT_OPTIONS) {
         Ok((value, len)) => {
             // For floats, it is important whether it
@@ -133,13 +133,13 @@ pub(super) fn try_parse_decimal(
     let byte_view = source.as_bytes();
 
     let int_result = if try_integer {
-        _try_parse_integer(byte_view)
+        try_parse_integer(byte_view)
     } else {
         None
     };
 
     let float_result = if try_float {
-        _try_parse_float(byte_view)
+        try_parse_float(byte_view)
     } else {
         None
     };

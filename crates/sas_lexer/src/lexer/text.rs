@@ -1,6 +1,6 @@
 use std::ops::{Add, Sub};
 
-/// Various text-related types
+// Various text-related types
 
 /// A byte offset in the input text. We limit the input text to 4GB => 32 bits
 ///

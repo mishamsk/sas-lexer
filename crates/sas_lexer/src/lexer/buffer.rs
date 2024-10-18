@@ -112,7 +112,7 @@ pub(super) struct TokenInfo {
 const MIN_CAPACITY: usize = 4;
 
 /// Heursitic for determining an optimal initial capactiy for `line_infos` vector
-const LINE_INFO_CAPACITY_DIVISOR: usize = 40;
+const LINE_INFO_CAPACITY_DIVISOR: usize = 20;
 
 /// Heursitic for determining an optimal initial capactiy for `token_infos` vector
 const TOKEN_INFO_CAPACITY_DIVISOR: usize = 3;
@@ -260,14 +260,19 @@ impl WorkTokenizedBuffer {
             );
         }
 
-        self.token_infos.push(TokenInfo {
+        if let Err(value) = self.token_infos.push_within_capacity(TokenInfo {
             channel,
             token_type,
             byte_offset,
             start,
             line,
             payload,
-        });
+        }) {
+            self.token_infos.reserve(self.token_infos.capacity() / 5);
+
+            // Retry the push
+            self.token_infos.push(value);
+        };
 
         // theoretically number of tokens may be larger than text size,
         // even though it is checked to be no more than u32 bytes.
