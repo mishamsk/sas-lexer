@@ -1,5 +1,6 @@
 use core::f64;
 
+use std::collections::HashSet;
 use std::fs::metadata;
 
 use std::{fs, path::PathBuf};
@@ -20,6 +21,8 @@ pub(super) fn gen_stats_for_console(samples: &PathBuf) {
 
     let total_files = all_files.len();
     let mut files_with_errors = 0usize;
+    let mut file_name_with_most_unique_tokens = None;
+    let mut most_unique_tokens = 0usize;
 
     let mut file_bytes = Vec::with_capacity(total_files);
     let mut file_readable = Vec::with_capacity(total_files);
@@ -67,6 +70,19 @@ pub(super) fn gen_stats_for_console(samples: &PathBuf) {
                 match safe_lex(&contents, false, false) {
                     Some((tok_buffer, errors, dur, stack_depth)) => {
                         token_count = Some(tok_buffer.token_count());
+
+                        let unique_token_count = tok_buffer
+                            .into_iter()
+                            .map(|t| tok_buffer.get_token_type(t).unwrap() as u32)
+                            .collect::<HashSet<_>>()
+                            .len();
+
+                        if unique_token_count > most_unique_tokens {
+                            most_unique_tokens = unique_token_count;
+                            file_name_with_most_unique_tokens =
+                                Some(entry_path.display().to_string());
+                        }
+
                         error_count = Some(errors.len());
                         code_error_count = Some(
                             errors
@@ -184,6 +200,10 @@ pub(super) fn gen_stats_for_console(samples: &PathBuf) {
             .unwrap(),
         tavg = file_lex_token_throughput.into_iter().sum::<f64>() / total_lexed as f64,
     );
+
+    if let Some(file_name) = file_name_with_most_unique_tokens {
+        println!("File with most unique tokens: {file_name} ({most_unique_tokens} unique tokens)",);
+    }
 
     // Error statistics
     let error_rate = files_with_errors as f64 / total_files as f64 * 100.0;
