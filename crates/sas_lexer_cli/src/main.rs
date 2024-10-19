@@ -40,6 +40,7 @@ enum Commands {
         file_name: bool,
 
         /// Print totals for token and error counts to the console.
+        /// Implies `-f` (print file name).
         #[arg(short)]
         totals: bool,
 
@@ -48,13 +49,11 @@ enum Commands {
         durations: bool,
 
         /// Print the tokens to the console.
-        /// If a folder is provided, only totals are printed.
         /// Implies `-f` (print file name).
         #[arg(long)]
         print_tokens: bool,
 
         /// Print errors if errors were found.
-        /// If a folder is provided, only totals are printed.
         /// Implies `-f` (print file name), but if `--print-tokens` is not
         /// set then only files with errors are printed.
         #[arg(long)]
@@ -121,10 +120,10 @@ fn main() -> io::Result<()> {
                                     &contents,
                                     LexPrintConfig {
                                         print_file_name: *print_file_name,
-                                        print_tokens: false,
-                                        print_token_totals: *print_totals && *print_tokens,
-                                        print_errors: false,
-                                        print_error_totals: *print_totals && *print_errors,
+                                        print_tokens: *print_tokens,
+                                        print_token_totals: *print_totals,
+                                        print_errors: *print_errors,
+                                        print_error_totals: *print_totals,
                                         print_lex_return_errors: *print_errors,
                                         print_stack_unwind_errors: *print_errors,
                                         context_lines: *context_lines,
