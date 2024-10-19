@@ -3614,6 +3614,38 @@ fn test_macro_special_builtins(
     assert_lexing(contents, expected_token, NO_ERRORS);
 }
 
+// %sysfunc/qsysfunc cases
+#[rstest]
+#[case::sysfunc_simple_no_args("%SYSfunc(today())",
+    vec![
+        ("%SYSfunc", TokenType::KwmSysfunc),
+        ("(", TokenType::LPAREN),
+        ("today", TokenType::MacroString),
+        ("(", TokenType::LPAREN),
+        ("", TokenType::MacroStringEmpty),
+        (")", TokenType::RPAREN),
+        (")", TokenType::RPAREN),
+    ], NO_ERRORS
+)]
+#[case::qsysfunc_simple_no_args("%qSYSfunc(today())",
+    vec![
+        ("%qSYSfunc", TokenType::KwmQSysfunc),
+        ("(", TokenType::LPAREN),
+        ("today", TokenType::MacroString),
+        ("(", TokenType::LPAREN),
+        ("", TokenType::MacroStringEmpty),
+        (")", TokenType::RPAREN),
+        (")", TokenType::RPAREN),
+    ], NO_ERRORS
+)]
+fn test_macro_sysfunc(
+    #[case] contents: &str,
+    #[case] expected_token: Vec<impl TokenTestCase>,
+    #[case] expected_errors: Vec<impl ErrorTestCase>,
+) {
+    assert_lexing(contents, expected_token, expected_errors);
+}
+
 /// A collection of non-exhaustive tests for rare macro stats.
 /// %window is handled only in file test, too long to include here.
 #[rstest]

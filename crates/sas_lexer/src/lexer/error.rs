@@ -59,6 +59,10 @@ pub enum ErrorKind {
     OpenCodeRecursionError = 1021,
     #[strum(message = "Invalid hex string constant.")]
     InvalidHexStringConstant = 1022,
+    #[strum(
+        message = "ERROR: Function name missing in %SYSFUNC or %QSYSFUNC macro function reference."
+    )]
+    MissingSysfuncFuncName = 1023,
     // Token buffer API call user initiated errors.
     // Codes 2001-2999. Make sure to preserve
     // the existing codes & the range. The latter is used in classification impl

@@ -534,6 +534,7 @@ impl<'src> Lexer<'src> {
                 | LexerMode::MaybeMacroCallArgAssign { .. }
                 | LexerMode::MacroCallArgOrValue { .. }
                 | LexerMode::MaybeMacroDefArgs
+                | LexerMode::MaybeOptionalMacroArgValue
                 | LexerMode::MacroDefArg
                 | LexerMode::MacroDefNextArgOrDefaultValue
                 | LexerMode::MacroSemiTerminatedTextExpr
@@ -563,7 +564,7 @@ impl<'src> Lexer<'src> {
                     // This may happen if we have unbalanced `"` or `'` as the last character
                     self.handle_unterminated_str_expr(Payload::None);
                 }
-                LexerMode::MacroVarNameExpr(_, err) => {
+                LexerMode::MacroNameExpr(_, err) => {
                     // This may happen if we have %let without a variable name in the end or similar
                     if let Some(err) = err {
                         self.emit_error(err);
@@ -655,6 +656,9 @@ impl<'src> Lexer<'src> {
             LexerMode::MaybeMacroCallArgAssign { flags } => {
                 self.lex_maybe_macro_call_arg_assign(next_char, flags);
             }
+            LexerMode::MaybeOptionalMacroArgValue => {
+                self.lex_maybe_optional_macro_call_arg_value(next_char);
+            }
             LexerMode::MacroCallArgOrValue { flags } => {
                 self.dispatch_macro_call_arg_or_value(next_char, flags);
             }
@@ -676,7 +680,7 @@ impl<'src> Lexer<'src> {
             LexerMode::MacroLocalGlobal { is_local } => {
                 self.dispatch_macro_local_global(next_char, is_local);
             }
-            LexerMode::MacroVarNameExpr(found_name, err) => {
+            LexerMode::MacroNameExpr(found_name, err) => {
                 self.dispatch_macro_name_expr(next_char, !found_name, err);
             }
             LexerMode::MacroSemiTerminatedTextExpr => {
@@ -831,6 +835,7 @@ impl<'src> Lexer<'src> {
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     fn dispatch_mode_macro_eval(
         &mut self,
         next_char: char,
@@ -918,22 +923,38 @@ impl<'src> Lexer<'src> {
                 self.pop_mode();
 
                 // Now push modes for the next argument
-                if macro_eval_flags.followed_by_expr() {
-                    self.push_mode(LexerMode::MacroEval {
-                        macro_eval_flags: MacroEvalExprFlags::new(
-                            MacroEvalNumericMode::Integer,
-                            MacroEvalNextArgumentMode::None,
-                            false,
-                            false,
-                        ),
-                        pnl: 0,
-                    });
-                } else {
-                    self.push_mode(LexerMode::MacroCallValue {
-                        flags: MacroArgNameValueFlags::new(MacroArgContext::BuiltInMacro, true),
-                        pnl: 0,
-                    });
+                match macro_eval_flags.follow_arg_mode() {
+                    MacroEvalNextArgumentMode::None => {}
+                    MacroEvalNextArgumentMode::SingleEvalExpr => {
+                        self.push_mode(LexerMode::MacroEval {
+                            macro_eval_flags: MacroEvalExprFlags::new(
+                                macro_eval_flags.numeric_mode(),
+                                MacroEvalNextArgumentMode::None,
+                                false,
+                                false,
+                            ),
+                            pnl: 0,
+                        });
+                    }
+                    MacroEvalNextArgumentMode::EvalExpr => {
+                        self.push_mode(LexerMode::MacroEval {
+                            macro_eval_flags: MacroEvalExprFlags::new(
+                                macro_eval_flags.numeric_mode(),
+                                MacroEvalNextArgumentMode::EvalExpr,
+                                false,
+                                false,
+                            ),
+                            pnl: 0,
+                        });
+                    }
+                    MacroEvalNextArgumentMode::MacroArg => {
+                        self.push_mode(LexerMode::MacroCallValue {
+                            flags: MacroArgNameValueFlags::new(MacroArgContext::BuiltInMacro, true),
+                            pnl: 0,
+                        });
+                    }
                 }
+
                 self.cursor.advance();
                 self.emit_token(TokenChannel::DEFAULT, TokenType::COMMA, Payload::None);
                 // Leading insiginificant WS before the next argument
@@ -1372,7 +1393,7 @@ impl<'src> Lexer<'src> {
         err: Option<ErrorKind>,
     ) {
         debug_assert!(
-            matches!(self.mode(), LexerMode::MacroVarNameExpr(f, e) if f != first_token && e == err)
+            matches!(self.mode(), LexerMode::MacroNameExpr(f, e) if f != first_token && e == err)
         );
 
         self.start_token();
@@ -1395,7 +1416,7 @@ impl<'src> Lexer<'src> {
         let start_mode_index = self.mode_stack.len() - 1;
 
         let update_mode = |lexer: &mut Lexer| {
-            if let Some(LexerMode::MacroVarNameExpr(found_name, _)) =
+            if let Some(LexerMode::MacroNameExpr(found_name, _)) =
                 lexer.mode_stack.get_mut(start_mode_index)
             {
                 *found_name = true;
@@ -1854,6 +1875,32 @@ impl<'src> Lexer<'src> {
 
             // In this case any WS before the value is significant
             self.push_mode(LexerMode::MacroCallValue { flags, pnl: 0 });
+        }
+    }
+
+    /// Checks next char for `,` and either emits the token with
+    /// the necessary following modes for exactly one macro argument
+    /// or does nothing.
+    #[inline]
+    fn lex_maybe_optional_macro_call_arg_value(&mut self, next_char: char) {
+        debug_assert!(matches!(self.mode(), LexerMode::MaybeOptionalMacroArgValue));
+
+        // Pop this mode no matter what
+        self.pop_mode();
+
+        if next_char == ',' {
+            // Add the token
+            self.start_token();
+            self.cursor.advance();
+
+            self.emit_token(TokenChannel::DEFAULT, TokenType::COMMA, Payload::None);
+
+            self.push_mode(LexerMode::MacroCallValue {
+                flags: MacroArgNameValueFlags::new(MacroArgContext::BuiltInMacro, false),
+                pnl: 0,
+            });
+            // Leading insiginificant WS before the argument
+            self.push_mode(LexerMode::WsOrCStyleCommentOnly);
         }
     }
 
@@ -4309,7 +4356,7 @@ impl<'src> Lexer<'src> {
                     self.push_mode(LexerMode::WsOrCStyleCommentOnly);
                     // Note the difference from below. We aready lexed one part of the var name expr,
                     // so we pass `true` and do not pass error, since it won't ever be emitted anyway
-                    self.push_mode(LexerMode::MacroVarNameExpr(true, None));
+                    self.push_mode(LexerMode::MacroNameExpr(true, None));
                 }
             }
             _ => {
@@ -4329,7 +4376,7 @@ impl<'src> Lexer<'src> {
                     TokenChannel::DEFAULT,
                 ));
                 self.push_mode(LexerMode::WsOrCStyleCommentOnly);
-                self.push_mode(LexerMode::MacroVarNameExpr(
+                self.push_mode(LexerMode::MacroNameExpr(
                     false,
                     Some(ErrorKind::UnexpectedSemiInDoLoop),
                 ));
@@ -4371,7 +4418,7 @@ impl<'src> Lexer<'src> {
                 // States are pushed in reverse order
                 self.expect_macro_let_stat(ErrorKind::InvalidMacroLocalGlobalReadonlyVarName);
 
-                self.push_mode(LexerMode::MacroVarNameExpr(
+                self.push_mode(LexerMode::MacroNameExpr(
                     false,
                     Some(if is_local {
                         ErrorKind::MissingMacroLocalReadonlyKw
@@ -4494,11 +4541,9 @@ impl<'src> Lexer<'src> {
                 self.maybe_expect_macro_call_args_or_label(allow_macro_label);
             }
             // No argument built-in calls
-            #[allow(clippy::match_same_arms)]
             TokenTypeMacroCallOrStat::KwmSysmexecdepth => {}
-            // TODO!!!!!! PLACEHOLDER - should be exhaustive
-            _ if !is_macro_stat_tok_type(kw_tok_type.into()) => {
-                self.expect_builtin_macro_call_args();
+            TokenTypeMacroCallOrStat::KwmSysfunc | TokenTypeMacroCallOrStat::KwmQSysfunc => {
+                self.expect_sysfunc_macro_call_args();
             }
             // Macro statements
             TokenTypeMacroCallOrStat::KwmInclude
@@ -4790,7 +4835,7 @@ impl<'src> Lexer<'src> {
                 if is_scan {
                     MacroEvalNextArgumentMode::MacroArg
                 } else {
-                    MacroEvalNextArgumentMode::EvalExpr
+                    MacroEvalNextArgumentMode::SingleEvalExpr
                 },
                 false,
                 false,
@@ -4865,6 +4910,64 @@ impl<'src> Lexer<'src> {
         self.push_mode(LexerMode::WsOrCStyleCommentOnly);
     }
 
+    /// A helper to populate the expected states for the %[q]sysfunc call.
+    /// It starts with a mandatory name text expression (similat to `%let`
+    /// var name expression), then mandatory arguments in parens.
+    ///
+    /// The inner function arguments are evaluated in `sysevalf` mode
+    /// contextually - when the requested base function expects numeric.
+    /// Since we do not want to maintain a full list of all functions
+    /// that expect numeric arguments, we always lex as eval expr.
+    ///
+    /// And then an optional comma + format is allowed.
+    #[inline]
+    fn expect_sysfunc_macro_call_args(&mut self) {
+        // Outer closing parenthesis
+        self.push_mode(LexerMode::ExpectSymbol(
+            TokenType::RPAREN,
+            TokenChannel::DEFAULT,
+        ));
+        self.push_mode(LexerMode::MaybeOptionalMacroArgValue);
+        // Leading insiginificant WS before the last argument
+        self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+        // Inner closing parenthesis
+        self.push_mode(LexerMode::ExpectSymbol(
+            TokenType::RPAREN,
+            TokenChannel::DEFAULT,
+        ));
+        // The handler for arguments will push the mode for the comma, etc.
+        self.push_mode(LexerMode::MacroEval {
+            macro_eval_flags: MacroEvalExprFlags::new(
+                MacroEvalNumericMode::Float,
+                MacroEvalNextArgumentMode::EvalExpr,
+                false,
+                false,
+            ),
+            pnl: 0,
+        });
+        // Leading insiginificant WS before the first argument
+        self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+        // Inner openinig parenthesis
+        self.push_mode(LexerMode::ExpectSymbol(
+            TokenType::LPAREN,
+            TokenChannel::DEFAULT,
+        ));
+        // Function name
+        self.push_mode(LexerMode::MacroNameExpr(
+            false,
+            Some(ErrorKind::MissingSysfuncFuncName),
+        ));
+        // Leading insiginificant WS before the function name
+        self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+        // Outer openinig parenthesis
+        self.push_mode(LexerMode::ExpectSymbol(
+            TokenType::LPAREN,
+            TokenChannel::DEFAULT,
+        ));
+        // Leading insiginificant WS before opening parenthesis
+        self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+    }
+
     /// A helper to populate the expected states for the [%do] %until/%while statements
     /// starting at the opening parenthesis. It is similar to %eval and
     /// followed by expected semicolon or EOF.
@@ -4913,7 +5016,7 @@ impl<'src> Lexer<'src> {
             TokenChannel::DEFAULT,
         ));
         self.push_mode(LexerMode::WsOrCStyleCommentOnly);
-        self.push_mode(LexerMode::MacroVarNameExpr(false, Some(err_type)));
+        self.push_mode(LexerMode::MacroNameExpr(false, Some(err_type)));
         self.push_mode(LexerMode::WsOrCStyleCommentOnly);
     }
 
@@ -4931,7 +5034,7 @@ impl<'src> Lexer<'src> {
             TokenChannel::DEFAULT,
         ));
         self.push_mode(LexerMode::WsOrCStyleCommentOnly);
-        self.push_mode(LexerMode::MacroVarNameExpr(
+        self.push_mode(LexerMode::MacroNameExpr(
             false,
             Some(ErrorKind::InvalidOrOutOfOrderStatement),
         ));

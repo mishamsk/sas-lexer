@@ -11,21 +11,41 @@ pub(super) enum MacroEvalNumericMode {
     Float,
 }
 
-/// Macro arithmetic/logical expressions may be in maro call
-/// argument position (e.g. in `%scan`) or not (e.g. in `%if`).
-/// And in argument position, they may be followed by a regular
-/// macro argument (e.g. in `%scan`) or another expression (e.g. in `%SUBSTR`).
+/// Macro arithmetic/logical expressions may be in macro call
+/// argument position (e.g. in `%scan`) or in statements (e.g. in `%if`).
+///
+/// In argument position, they may be followed by:
+/// - a regular macro argument (e.g. in `%scan`)
+/// - another expression (e.g. in `%SUBSTR`).
+/// - unlimited number of expressions (specifically for arguments
+///     of functions called via `%sysfunc`)
+///
 /// `None` implies that `,` is lexed as a macro string while
 /// for other cases it is lexed as a terminator.
-///
-/// Luckily, if expression is followed by another expression, the
-/// later one is always the last argument, so we do not need to define
-/// an arbitrary depth of this.
 #[derive(Debug, Clone, Copy)]
+#[repr(u8)]
 pub(super) enum MacroEvalNextArgumentMode {
+    /// This expression is not followed by another expression
     None,
+    /// This expression is followed by a single eval expression
+    SingleEvalExpr,
+    /// This expression is part of arbitrary number of expressions
     EvalExpr,
+    /// This expression is followed by a regular macro argument
     MacroArg,
+}
+
+const SINGLE_EVAL_EXPR: u8 = MacroEvalNextArgumentMode::SingleEvalExpr as u8;
+const EVAL_EXPR: u8 = MacroEvalNextArgumentMode::EvalExpr as u8;
+const MACRO_ARG: u8 = MacroEvalNextArgumentMode::MacroArg as u8;
+
+const fn macro_eval_next_arg_mode_from_u8(val: u8) -> MacroEvalNextArgumentMode {
+    match val {
+        SINGLE_EVAL_EXPR => MacroEvalNextArgumentMode::SingleEvalExpr,
+        EVAL_EXPR => MacroEvalNextArgumentMode::EvalExpr,
+        MACRO_ARG => MacroEvalNextArgumentMode::MacroArg,
+        _ => MacroEvalNextArgumentMode::None,
+    }
 }
 
 /// Packed flags for macro eval expressions (arithmetic/logical)
@@ -47,7 +67,8 @@ impl MacroEvalExprFlags {
     const TERMINATE_ON_COMMA_MASK: u8 = 0b0000_0010;
     const TERMINATE_ON_STAT_MASK: u8 = 0b0000_0100;
     const TERMINATE_ON_SEMI_MASK: u8 = 0b0000_1000;
-    const FOLLOWED_BY_EXPR_MASK: u8 = 0b0001_0000;
+    // Shift must be >= last significant bit in masks
+    const NEXT_ARG_SHIFT: u8 = 4;
 
     pub(super) const fn new(
         numeric_mode: MacroEvalNumericMode,
@@ -59,15 +80,9 @@ impl MacroEvalExprFlags {
         if matches!(numeric_mode, MacroEvalNumericMode::Float) {
             bits |= Self::FLOAT_MODE_MASK;
         }
-        match next_argument_mode {
-            MacroEvalNextArgumentMode::None => {}
-            MacroEvalNextArgumentMode::EvalExpr => {
-                bits |= Self::TERMINATE_ON_COMMA_MASK;
-                bits |= Self::FOLLOWED_BY_EXPR_MASK;
-            }
-            MacroEvalNextArgumentMode::MacroArg => {
-                bits |= Self::TERMINATE_ON_COMMA_MASK;
-            }
+
+        if !matches!(next_argument_mode, MacroEvalNextArgumentMode::None) {
+            bits |= Self::TERMINATE_ON_COMMA_MASK;
         }
         if terminate_on_stat {
             bits |= Self::TERMINATE_ON_STAT_MASK;
@@ -75,11 +90,21 @@ impl MacroEvalExprFlags {
         if terminate_on_semi {
             bits |= Self::TERMINATE_ON_SEMI_MASK;
         }
+        bits |= (next_argument_mode as u8) << Self::NEXT_ARG_SHIFT;
+
         Self(bits)
     }
 
     pub(super) const fn float_mode(self) -> bool {
         self.0 & Self::FLOAT_MODE_MASK != 0
+    }
+
+    pub(super) const fn numeric_mode(self) -> MacroEvalNumericMode {
+        if self.0 & Self::FLOAT_MODE_MASK != 0 {
+            MacroEvalNumericMode::Float
+        } else {
+            MacroEvalNumericMode::Integer
+        }
     }
 
     pub(super) const fn terminate_on_comma(self) -> bool {
@@ -94,8 +119,8 @@ impl MacroEvalExprFlags {
         self.0 & Self::TERMINATE_ON_SEMI_MASK != 0
     }
 
-    pub(super) const fn followed_by_expr(self) -> bool {
-        self.0 & Self::FOLLOWED_BY_EXPR_MASK != 0
+    pub(super) const fn follow_arg_mode(self) -> MacroEvalNextArgumentMode {
+        macro_eval_next_arg_mode_from_u8(self.0 >> Self::NEXT_ARG_SHIFT)
     }
 }
 
@@ -253,6 +278,10 @@ pub(crate) enum LexerMode {
         /// terminators.
         pnl: u32,
     },
+    /// A mode to check for an optional trailing argument in a macro call.
+    /// As of today used only for `%sysfunc` where the last argument may
+    /// or may not be present.
+    MaybeOptionalMacroArgValue,
     /// The state for lexing inside an %str/%nrstr call. I.e. in `%str(-->1+1<--)`.
     MacroStrQuotedExpr {
         /// Boolean flag indicates if % and & are masked, i.e. this is %nrstr.
@@ -285,12 +314,12 @@ pub(crate) enum LexerMode {
         /// Boolean flag indicates if this is a local or global statement.
         is_local: bool,
     },
-    /// Mode for lexing right after `%let`/`%local`/`%global`/`%do`, where
-    /// we expect a variable name expression. Boolean flag indicates if we
-    /// have found at least one token of the variable name.
-    /// `ErrorKind` is used to supply relevant error message, if any is
+    /// Mode for lexing right after `%let`/`%local`/`%global`/`%do`,
+    /// as well as `%sysfunc` where we expect a valid SAS name expression.
+    /// Boolean flag indicates if we have found at least one token of the
+    /// name. `ErrorKind` is used to supply relevant error message, if any is
     /// emitted by SAS if no name is found.
-    MacroVarNameExpr(bool, Option<ErrorKind>),
+    MacroNameExpr(bool, Option<ErrorKind>),
     /// Mode for lexing unrestricted macro text expressions terminated by semi.
     /// These are used for `%let` initializations, `%put`, etc.
     MacroSemiTerminatedTextExpr,
@@ -307,18 +336,42 @@ mod tests {
     use strum::IntoEnumIterator;
 
     #[test]
+    fn test_macro_eval_next_argument_mode() {
+        assert!(matches!(
+            macro_eval_next_arg_mode_from_u8(MacroEvalNextArgumentMode::None as u8),
+            MacroEvalNextArgumentMode::None
+        ));
+        assert!(matches!(
+            macro_eval_next_arg_mode_from_u8(MacroEvalNextArgumentMode::SingleEvalExpr as u8),
+            MacroEvalNextArgumentMode::SingleEvalExpr
+        ));
+        assert!(matches!(
+            macro_eval_next_arg_mode_from_u8(MacroEvalNextArgumentMode::EvalExpr as u8),
+            MacroEvalNextArgumentMode::EvalExpr
+        ));
+        assert!(matches!(
+            macro_eval_next_arg_mode_from_u8(MacroEvalNextArgumentMode::MacroArg as u8),
+            MacroEvalNextArgumentMode::MacroArg
+        ));
+    }
+
+    #[test]
     fn test_macro_eval_expr_flags() {
         let flags = MacroEvalExprFlags::new(
             MacroEvalNumericMode::Float,
-            MacroEvalNextArgumentMode::EvalExpr,
+            MacroEvalNextArgumentMode::SingleEvalExpr,
             true,
             true,
         );
         assert!(flags.float_mode());
+        assert!(matches!(flags.numeric_mode(), MacroEvalNumericMode::Float));
         assert!(flags.terminate_on_comma());
         assert!(flags.terminate_on_stat());
         assert!(flags.terminate_on_semi());
-        assert!(flags.followed_by_expr());
+        assert!(matches!(
+            flags.follow_arg_mode(),
+            MacroEvalNextArgumentMode::SingleEvalExpr
+        ));
 
         let flags = MacroEvalExprFlags::new(
             MacroEvalNumericMode::Integer,
@@ -327,10 +380,17 @@ mod tests {
             false,
         );
         assert!(!flags.float_mode());
+        assert!(matches!(
+            flags.numeric_mode(),
+            MacroEvalNumericMode::Integer
+        ));
         assert!(!flags.terminate_on_comma());
         assert!(!flags.terminate_on_stat());
         assert!(!flags.terminate_on_semi());
-        assert!(!flags.followed_by_expr());
+        assert!(matches!(
+            flags.follow_arg_mode(),
+            MacroEvalNextArgumentMode::None
+        ));
 
         let flags = MacroEvalExprFlags::new(
             MacroEvalNumericMode::Integer,
@@ -339,10 +399,33 @@ mod tests {
             true,
         );
         assert!(!flags.float_mode());
+        assert!(matches!(
+            flags.numeric_mode(),
+            MacroEvalNumericMode::Integer
+        ));
         assert!(flags.terminate_on_comma());
         assert!(!flags.terminate_on_stat());
         assert!(flags.terminate_on_semi());
-        assert!(!flags.followed_by_expr());
+        assert!(matches!(
+            flags.follow_arg_mode(),
+            MacroEvalNextArgumentMode::MacroArg
+        ));
+
+        let flags = MacroEvalExprFlags::new(
+            MacroEvalNumericMode::Float,
+            MacroEvalNextArgumentMode::EvalExpr,
+            true,
+            false,
+        );
+        assert!(flags.float_mode());
+        assert!(matches!(flags.numeric_mode(), MacroEvalNumericMode::Float));
+        assert!(flags.terminate_on_comma());
+        assert!(flags.terminate_on_stat());
+        assert!(!flags.terminate_on_semi());
+        assert!(matches!(
+            flags.follow_arg_mode(),
+            MacroEvalNextArgumentMode::EvalExpr
+        ));
     }
 
     #[test]
