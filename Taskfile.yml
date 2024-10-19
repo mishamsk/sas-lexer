@@ -98,9 +98,19 @@ tasks:
       - Cargo.toml
       - Cargo.lock
     generates:
-      - target/**/*.*
+      - target/release/*.*
     cmds:
       - cargo build --release
+
+  build:stats_polars:
+    sources:
+      - crates/**/*.*
+      - Cargo.toml
+      - Cargo.lock
+    generates:
+      - target/with_polars/*.*
+    cmds:
+      - cargo build -r --features polars --package sas_lexer_cli --target-dir target/with_polars
 
   build:dev:
     sources:
@@ -111,7 +121,7 @@ tasks:
       - pyproject.toml
       - uv.lock
     generates:
-      - target/**/*.*
+      - target/debug/*.*
     cmds:
       - cargo build
       - maturin develop --uv -r
