@@ -1,10 +1,11 @@
+use polars::prelude::*;
 use std::ffi::OsStr;
 use std::fs::metadata;
 
 use std::{fs, path::PathBuf};
 
 use indicatif::{ProgressBar, ProgressStyle};
-use polars::prelude::*;
+
 use sas_lexer::{
     error::{ErrorInfo, ErrorKind},
     Payload, ResolvedTokenInfo,
@@ -17,6 +18,7 @@ use crate::{
     print::{get_string_literal, get_token_raw_text},
 };
 
+/// Debug function to print the schema of a DataFrame
 fn _print_schema(df_name: &str, df: &mut LazyFrame) {
     println!("{} DataFrame schema:", df_name);
     for col in df.collect_schema().unwrap().iter_fields() {
@@ -24,7 +26,7 @@ fn _print_schema(df_name: &str, df: &mut LazyFrame) {
     }
 }
 
-fn write_to_disk(df: &LazyFrame, path: &PathBuf) -> PolarsResult<()> {
+fn write_df_to_disk(df: &LazyFrame, path: &PathBuf) -> PolarsResult<()> {
     let file = fs::File::create(path)?;
     let file_name = path.file_name().map(OsStr::to_string_lossy).unwrap();
     let mut df = df.clone().collect()?;
@@ -194,7 +196,7 @@ fn create_token_df(
 }
 
 #[allow(clippy::cast_possible_truncation)]
-fn gen_stats_inner(
+pub(super) fn gen_stats_with_polars(
     output: &Option<PathBuf>,
     samples: &PathBuf,
     error_context_lines: usize,
@@ -352,10 +354,10 @@ fn gen_stats_inner(
         // Write to parquet
         println!("Writing to parquet...");
 
-        write_to_disk(&sources_df, &output_path.join("sources.parquet"))?;
-        write_to_disk(&all_tokens_df, &output_path.join("tokens.parquet"))?;
-        write_to_disk(&all_errors_df, &output_path.join("errors.parquet"))?;
-        write_to_disk(&error_dict_df, &output_path.join("error_dict.parquet"))?;
+        write_df_to_disk(&sources_df, &output_path.join("sources.parquet"))?;
+        write_df_to_disk(&all_tokens_df, &output_path.join("tokens.parquet"))?;
+        write_df_to_disk(&all_errors_df, &output_path.join("errors.parquet"))?;
+        write_df_to_disk(&error_dict_df, &output_path.join("error_dict.parquet"))?;
     }
 
     println!("Calculating token statistics...");
@@ -518,10 +520,4 @@ fn gen_stats_inner(
     println!("{error_report}");
 
     Ok(())
-}
-
-pub(super) fn gen_stats(output: &Option<PathBuf>, samples: &PathBuf, error_context_lines: usize) {
-    if let Err(err) = gen_stats_inner(output, samples, error_context_lines) {
-        eprintln!("Failed to generate stats: {err:?}");
-    }
 }

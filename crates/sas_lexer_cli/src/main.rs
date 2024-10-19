@@ -65,11 +65,13 @@ enum Commands {
     Stats {
         /// Path to put the resulting stat tabls to. If not provided
         /// only the summary report on console is produced
+        #[cfg(feature = "polars")]
         #[arg(short, long)]
         output: Option<PathBuf>,
 
         /// Number of lines around an error to store as context.
         /// If not provided, defaults to 1.
+        #[cfg(feature = "polars")]
         #[arg(short = 'C', long)]
         error_context_lines: Option<usize>,
 
@@ -214,10 +216,18 @@ fn main() -> io::Result<()> {
             grammar_file_path: grammar,
         } => write_tokens_file(grammar)?,
         Commands::Stats {
-            output,
             samples,
+            #[cfg(feature = "polars")]
+            output,
+            #[cfg(feature = "polars")]
             error_context_lines,
-        } => gen_stats(output, samples, error_context_lines.unwrap_or(1)),
+        } => gen_stats(
+            samples,
+            #[cfg(feature = "polars")]
+            output,
+            #[cfg(feature = "polars")]
+            error_context_lines.unwrap_or(1),
+        ),
     }
 
     Ok(())

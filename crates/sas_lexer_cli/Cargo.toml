@@ -22,7 +22,10 @@ polars = { version = "0.43.1", features = [
     "parquet",
     "fmt",
     "round_series",
-] }
+], optional = true }
 indicatif = "0.17.8"
 
 [dev-dependencies]
+
+[features]
+polars = ["dep:polars"]
