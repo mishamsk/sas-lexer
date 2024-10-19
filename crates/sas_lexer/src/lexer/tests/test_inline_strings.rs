@@ -3638,6 +3638,22 @@ fn test_macro_special_builtins(
         (")", TokenType::RPAREN),
     ], NO_ERRORS
 )]
+#[case::sysfunc_simple_with_args_no_fromat("%sysfunc \n\t(index \n\t(&op., ar🔥))",
+    vec![
+        ("%sysfunc", TokenType::KwmSysfunc),
+        (" \n\t", TokenType::WS),
+        ("(", TokenType::LPAREN),
+        ("index", TokenType::MacroString),
+        (" \n\t", TokenType::WS),
+        ("(", TokenType::LPAREN),
+        ("&op.", TokenType::MacroVarExpr),
+        (",", TokenType::COMMA),
+        (" ", TokenType::WS),
+        ("ar🔥", TokenType::MacroString),
+        (")", TokenType::RPAREN),
+        (")", TokenType::RPAREN),
+    ], NO_ERRORS
+)]
 fn test_macro_sysfunc(
     #[case] contents: &str,
     #[case] expected_token: Vec<impl TokenTestCase>,

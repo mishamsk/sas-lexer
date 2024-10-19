@@ -38,7 +38,7 @@ use token_type::{
 };
 use unicode_ident::{is_xid_continue, is_xid_start};
 
-const MAX_EXPECTED_STACK_DEPTH: usize = 20;
+const MAX_EXPECTED_STACK_DEPTH: usize = 40;
 
 const BOM: char = '\u{feff}';
 
@@ -4952,6 +4952,8 @@ impl<'src> Lexer<'src> {
             TokenType::LPAREN,
             TokenChannel::DEFAULT,
         ));
+        // Leading insiginificant WS before opening parenthesis
+        self.push_mode(LexerMode::WsOrCStyleCommentOnly);
         // Function name
         self.push_mode(LexerMode::MacroNameExpr(
             false,
