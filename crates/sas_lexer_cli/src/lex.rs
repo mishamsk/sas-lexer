@@ -56,21 +56,48 @@ pub(super) struct LexDurations {
 }
 
 pub(super) struct LexPrintConfig {
+    pub(super) print_file_name: bool,
     pub(super) print_tokens: bool,
     pub(super) print_token_totals: bool,
     pub(super) print_errors: bool,
     pub(super) print_error_totals: bool,
     pub(super) print_lex_return_errors: bool,
     pub(super) print_stack_unwind_errors: bool,
+    pub(super) context_lines: Option<usize>,
 }
 
-pub(super) fn lex_and_print(source: &String, print_config: LexPrintConfig) -> Option<LexDurations> {
+pub(super) fn lex_and_print(
+    source: &String,
+    print_config: LexPrintConfig,
+    file_name: Option<String>,
+) -> Option<LexDurations> {
+    let source_str = if let Some(file_name) = file_name {
+        format!("file: {file_name}")
+    } else {
+        "from stdin".to_string()
+    };
+
+    if print_config.print_file_name {
+        println!("Lexing {source_str}");
+    }
+
     match safe_lex(
         source,
         print_config.print_lex_return_errors,
         print_config.print_stack_unwind_errors,
     ) {
         Some((tok_buffer, errors, lex_duration, _)) => {
+            // If file name printing weren't directly requested but any of the
+            // other print options are enabled and conditions meant, print the file name
+            if !print_config.print_file_name
+                && (print_config.print_tokens
+                    || print_config.print_token_totals
+                    || ((print_config.print_errors || print_config.print_error_totals)
+                        && !errors.is_empty()))
+            {
+                println!("Lexing {source_str}");
+            }
+
             let total_tokens = tok_buffer.token_count();
             let (c_int, c_user) =
                 errors
@@ -99,7 +126,14 @@ pub(super) fn lex_and_print(source: &String, print_config: LexPrintConfig) -> Op
 
                 if print_config.print_errors && !errors.is_empty() {
                     writeln!(lock, "Errors:").unwrap();
-                    print_errors(&mut lock, &errors, &tokens, string_literals_buffer, source);
+                    print_errors(
+                        &mut lock,
+                        &errors,
+                        &tokens,
+                        string_literals_buffer,
+                        source,
+                        print_config.context_lines,
+                    );
                 }
             }
 
@@ -107,17 +141,13 @@ pub(super) fn lex_and_print(source: &String, print_config: LexPrintConfig) -> Op
                 println!("Done! Found {total_tokens} tokens.");
             }
 
-            if print_config.print_error_totals {
-                if errors.is_empty() {
-                    if c_int > 0 {
-                        println!("Internal errors: {c_int}");
-                    }
+            if print_config.print_error_totals && !errors.is_empty() {
+                if c_int > 0 {
+                    println!("Internal errors: {c_int}");
+                }
 
-                    if c_user > 0 {
-                        println!("User errors: {c_user}");
-                    }
-                } else {
-                    println!("No errors found!");
+                if c_user > 0 {
+                    println!("User errors: {c_user}");
                 }
             }
 
@@ -126,6 +156,14 @@ pub(super) fn lex_and_print(source: &String, print_config: LexPrintConfig) -> Op
                 gen_tok_vec_duration,
             })
         }
-        None => None,
+        None => {
+            if !print_config.print_file_name
+                && (print_config.print_lex_return_errors || print_config.print_stack_unwind_errors)
+            {
+                println!("During lexing {source_str}");
+            }
+
+            None
+        }
     }
 }

@@ -32,6 +32,14 @@ pub(crate) fn get_string_literal(string_literals_buffer: &str, start: u32, stop:
         .to_string()
 }
 
+pub(crate) fn get_error_context(error: &ErrorInfo, source: &str, context_lines: usize) -> String {
+    source
+        .lines()
+        .skip((error.on_line() as usize).saturating_sub(context_lines))
+        .take(context_lines * 2)
+        .collect::<String>()
+}
+
 #[must_use]
 pub(crate) fn token_to_string(
     token: &ResolvedTokenInfo,
@@ -80,6 +88,7 @@ pub(crate) fn error_to_string(
     tokens: &[ResolvedTokenInfo],
     string_literals_buffer: &str,
     source: &str,
+    context_lines: Option<usize>,
 ) -> String {
     let error_kind = error.error_kind();
     let at_byte_offset = error.at_byte_offset();
@@ -98,10 +107,18 @@ pub(crate) fn error_to_string(
         None => "<no last token>".to_string(),
     };
 
-    format!(
-        "{error_kind:?} at byte offset {at_byte_offset}, char offset {at_char_offset}, \
+    if let Some(context_lines) = context_lines {
+        let context = get_error_context(error, source, context_lines);
+        format!(
+            "{error_kind:?} at byte offset {at_byte_offset}, char offset {at_char_offset}, \
+            L{on_line}:C{at_column}. Last token: {last_token_str}.\nContext:\n{context}\n"
+        )
+    } else {
+        format!(
+            "{error_kind:?} at byte offset {at_byte_offset}, char offset {at_char_offset}, \
         L{on_line}:C{at_column}. Last token: {last_token_str}"
-    )
+        )
+    }
 }
 
 pub(crate) fn print_tokens(
@@ -126,12 +143,13 @@ pub(crate) fn print_errors(
     tokens: &[ResolvedTokenInfo],
     string_literals_buffer: &str,
     source: &str,
+    context_lines: Option<usize>,
 ) {
     for error in errors {
         writeln!(
             dst,
             "{}",
-            error_to_string(error, tokens, string_literals_buffer, source)
+            error_to_string(error, tokens, string_literals_buffer, source, context_lines)
         )
         .unwrap();
     }

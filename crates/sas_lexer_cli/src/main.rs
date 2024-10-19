@@ -47,13 +47,23 @@ enum Commands {
         #[arg(short)]
         durations: bool,
 
-        /// Print the tokens to the console. Ignored if a folder is provided.
+        /// Print the tokens to the console.
+        /// If a folder is provided, only totals are printed.
+        /// Implies `-f` (print file name).
         #[arg(long)]
         print_tokens: bool,
 
-        /// Print errors if errors were found. Ignored if a folder is provided.
+        /// Print errors if errors were found.
+        /// If a folder is provided, only totals are printed.
+        /// Implies `-f` (print file name), but if `--print-tokens` is not
+        /// set then only files with errors are printed.
         #[arg(long)]
         print_errors: bool,
+
+        /// Number of lines around an error to print as context.
+        /// If not provided, nothing is printed.
+        #[arg(short)]
+        context_lines: Option<usize>,
     },
     /// Generate ANTLR .tokens file
     Gen {
@@ -93,6 +103,7 @@ fn main() -> io::Result<()> {
             durations: print_durations,
             print_tokens,
             print_errors,
+            context_lines,
         } => {
             let start = Instant::now();
 
@@ -105,21 +116,20 @@ fn main() -> io::Result<()> {
                         let entry_path = entry.path();
                         if entry_path.extension().and_then(|ext| ext.to_str()) == Some("sas") {
                             if let Ok(contents) = fs::read_to_string(entry_path) {
-                                if *print_file_name {
-                                    println!("Lexing file: {}", entry_path.display());
-                                }
-
                                 // Never print tokens or errors if a folder is provided
                                 if let Some(durations) = lex_and_print(
                                     &contents,
                                     LexPrintConfig {
+                                        print_file_name: *print_file_name,
                                         print_tokens: false,
                                         print_token_totals: *print_totals && *print_tokens,
                                         print_errors: false,
                                         print_error_totals: *print_totals && *print_errors,
                                         print_lex_return_errors: *print_errors,
                                         print_stack_unwind_errors: *print_errors,
+                                        context_lines: *context_lines,
                                     },
+                                    Some(entry_path.display().to_string()),
                                 ) {
                                     total_lex_duration += durations.lex_duration;
                                     total_gen_tok_vec_duration += durations.gen_tok_vec_duration;
@@ -146,22 +156,19 @@ fn main() -> io::Result<()> {
                         );
                     }
                 } else if let Ok(contents) = fs::read_to_string(source_path) {
-                    let file_path_str = source_path.to_str().unwrap_or("<invalid path>");
-
-                    if *print_file_name {
-                        println!("Lexing file: {file_path_str}");
-                    }
-
                     if let Some(dur) = lex_and_print(
                         &contents,
                         LexPrintConfig {
+                            print_file_name: *print_file_name,
                             print_tokens: *print_tokens,
                             print_token_totals: *print_totals,
                             print_errors: *print_errors,
                             print_error_totals: *print_totals,
                             print_lex_return_errors: *print_errors,
                             print_stack_unwind_errors: *print_errors,
+                            context_lines: *context_lines,
                         },
+                        Some(source_path.display().to_string()),
                     ) {
                         let total_time = start.elapsed();
 
@@ -191,17 +198,19 @@ fn main() -> io::Result<()> {
                 loop {
                     match io::stdin().read_line(&mut buffer) {
                         Ok(0) => {
-                            println!("Lexing from stdin...");
                             lex_and_print(
                                 &buffer,
                                 LexPrintConfig {
+                                    print_file_name: *print_file_name,
                                     print_tokens: *print_tokens,
                                     print_token_totals: *print_totals,
                                     print_errors: *print_errors,
                                     print_error_totals: *print_totals,
                                     print_lex_return_errors: *print_errors,
                                     print_stack_unwind_errors: *print_errors,
+                                    context_lines: *context_lines,
                                 },
+                                None,
                             );
 
                             buffer.clear();

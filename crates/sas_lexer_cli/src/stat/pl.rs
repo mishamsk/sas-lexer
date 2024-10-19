@@ -15,7 +15,7 @@ use walkdir::WalkDir;
 
 use crate::{
     lex::safe_lex,
-    print::{get_string_literal, get_token_raw_text},
+    print::{get_error_context, get_string_literal, get_token_raw_text},
 };
 
 /// Debug function to print the schema of a DataFrame
@@ -89,13 +89,7 @@ fn create_error_df(
         at_column.push(error.at_column());
 
         last_token.push(error.last_token().map(|idx| idx.get()));
-        context.push(
-            source
-                .lines()
-                .skip((error.on_line() as usize).saturating_sub(context_lines))
-                .take(context_lines * 2)
-                .collect::<String>(),
-        );
+        context.push(get_error_context(&error, source, context_lines));
     }
 
     let df = DataFrame::new(vec![
