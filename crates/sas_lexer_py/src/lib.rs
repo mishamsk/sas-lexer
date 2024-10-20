@@ -5,7 +5,8 @@ use pyo3::{
 };
 use sas_lexer::{lex_program, LexResult};
 
-/// TODO
+use serde_bytes::Bytes;
+
 #[pyfunction]
 fn lex_program_from_str<'py>(
     py: Python<'py>,
@@ -13,13 +14,17 @@ fn lex_program_from_str<'py>(
 ) -> PyResult<Bound<'py, PyBytes>> {
     let src: &str = src.extract()?;
 
-    let LexResult { buffer, .. } =
+    let LexResult { buffer, errors, .. } =
         lex_program(&src).map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
 
     let tok_vec = buffer.into_resolved_token_vec();
 
-    let data = rmp_serde::encode::to_vec(&tok_vec)
-        .map_err(|e| PyRuntimeError::new_err(format!("Failed to serialize to msgpack: {e}")))?;
+    let data = rmp_serde::encode::to_vec(&(
+        tok_vec,
+        errors,
+        Bytes::new(buffer.string_literals_buffer().as_bytes()),
+    ))
+    .map_err(|e| PyRuntimeError::new_err(format!("Failed to serialize to msgpack: {e}")))?;
 
     Ok(PyBytes::new_bound(py, &data))
 }

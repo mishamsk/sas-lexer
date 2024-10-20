@@ -4,8 +4,14 @@ use std::fmt::Display;
 use strum::IntoStaticStr;
 use strum::{EnumIter, EnumMessage};
 
+#[cfg(feature = "serde")]
+use serde::Serialize;
+#[cfg(feature = "serde")]
+use serde_repr::Serialize_repr;
+
 #[derive(Debug, PartialEq, Eq, Clone, Copy, EnumIter, EnumMessage)]
 #[cfg_attr(test, derive(IntoStaticStr))]
+#[cfg_attr(feature = "serde", derive(Serialize_repr))]
 #[repr(u16)]
 pub enum ErrorKind {
     // Source code errors. Codes 1001-1999. Make sure to preserve
@@ -126,6 +132,7 @@ impl Display for ErrorKind {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
 pub struct ErrorInfo {
     error_kind: ErrorKind,
     at_byte_offset: u32,

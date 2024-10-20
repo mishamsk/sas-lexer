@@ -13,6 +13,8 @@ use super::text::CharOffset;
 
 /// A token index, used to get actual token data via the tokenized buffer.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
+#[repr(transparent)]
 pub struct TokenIdx(u32);
 
 impl TokenIdx {
