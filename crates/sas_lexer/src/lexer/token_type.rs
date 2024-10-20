@@ -118,10 +118,10 @@ pub enum TokenType {
     MacroVarExpr,     // &&mvar&another. etc.
     MacroString,      // %let var = macro_string;
     MacroStringEmpty, // implicit empty macro string in logical expr `%eval(= rhs)`
+    MacroLabel,       // %macro_label: without :. Colon is lexed as colon on hidden channel
     // From here and on to KwmRun are the token type subset `TokenTypeMacroCallOrStat`
     // DO NOT ADD ANYTHING IN BETWEEN
     MacroIdentifier, // %macro_name
-    MacroLabel,      // %macro_label: without :. Colon is lexed as colon on hidden channel
     // Macro built in function keywords
     // Non masking versions
     KwmCmpres,        // CMPRES

@@ -4716,11 +4716,9 @@ impl<'src> Lexer<'src> {
                 // We will assume that the `* 2;` is a comment, and not a part of the
                 // assignment statement. But this should be exceedingly rare in real-life
                 self.push_pending_stat(false);
-            } // TODO!!!!!! PLACEHOLDER - should be exhaustive
-            _ => {
-                self.push_mode(LexerMode::ExpectSemiOrEOF);
-                self.push_mode(LexerMode::MacroSemiTerminatedTextExpr);
-                self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+            }
+            TokenTypeMacroCallOrStat::KwmSyscall => {
+                self.expect_syscall_call_and_args();
             }
         }
     }
@@ -5039,6 +5037,50 @@ impl<'src> Lexer<'src> {
         self.push_mode(LexerMode::MacroNameExpr(
             false,
             Some(ErrorKind::InvalidOrOutOfOrderStatement),
+        ));
+        self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+    }
+
+    /// A helper to populate the expected states for the `%syscall` statement.
+    /// It is somewhat similar to the `%sysfunc` call in that it is followed
+    /// by a mandatory name text expression (call routine name). And
+    /// then by a mandatory parentesized arguments. Despite the docs saying
+    /// parens are optional, even argument-less `CALL STREAMREWIND` fails
+    /// when no parens are present.
+    ///
+    /// The arguments are evaluated with the same caveats as in the `%sysfunc`,
+    /// see above for more details.
+    #[inline]
+    fn expect_syscall_call_and_args(&mut self) {
+        self.push_mode(LexerMode::ExpectSemiOrEOF);
+        self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+        // Outer closing parenthesis
+        self.push_mode(LexerMode::ExpectSymbol(
+            TokenType::RPAREN,
+            TokenChannel::DEFAULT,
+        ));
+        // The handler for arguments will push the mode for the comma, etc.
+        self.push_mode(LexerMode::MacroEval {
+            macro_eval_flags: MacroEvalExprFlags::new(
+                MacroEvalNumericMode::Float,
+                MacroEvalNextArgumentMode::EvalExpr,
+                false,
+                false,
+            ),
+            pnl: 0,
+        });
+        // Leading insiginificant WS before the first argument
+        self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+        // Outer openinig parenthesis
+        self.push_mode(LexerMode::ExpectSymbol(
+            TokenType::LPAREN,
+            TokenChannel::DEFAULT,
+        ));
+        // Leading insiginificant WS before opening parenthesis
+        self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+        self.push_mode(LexerMode::MacroNameExpr(
+            false,
+            Some(ErrorKind::MissingSyscallRoutineName),
         ));
         self.push_mode(LexerMode::WsOrCStyleCommentOnly);
     }

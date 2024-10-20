@@ -3861,6 +3861,54 @@ fn test_macro_sysfunc(
         (";", TokenType::SEMI),
     ]
 )]
+// %syscall cases
+#[case::syscall_no_args(
+    "%sysCALL\t STREAMREWIND()\n;",
+    vec![
+        ("%sysCALL", TokenType::KwmSyscall),
+        ("\t ", TokenType::WS),
+        ("STREAMREWIND", TokenType::MacroString),
+        ("(", TokenType::LPAREN),
+        ("", TokenType::MacroStringEmpty),
+        (")", TokenType::RPAREN),
+        ("\n", TokenType::WS),
+        (";", TokenType::SEMI),
+    ]
+)]
+#[case::syscall_with_stuff(
+    "%syscall catx/*c*/(&d, var, ne, %mc(/*c*/), \"%inner()\");",
+    vec![
+        ("%syscall", TokenType::KwmSyscall),
+        (" ", TokenType::WS),
+        ("catx", TokenType::MacroString),
+        ("/*c*/", TokenType::CStyleComment),
+        ("(", TokenType::LPAREN),
+        ("&d", TokenType::MacroVarExpr),
+        (",", TokenType::COMMA),
+        (" ", TokenType::WS),
+        ("var", TokenType::MacroString),
+        (",", TokenType::COMMA),
+        (" ", TokenType::WS),
+        ("", TokenType::MacroStringEmpty),
+        ("ne", TokenType::KwNE),
+        ("", TokenType::MacroStringEmpty),
+        (",", TokenType::COMMA),
+        (" ", TokenType::WS),
+        ("%mc", TokenType::MacroIdentifier),
+        ("(", TokenType::LPAREN),
+        ("/*c*/", TokenType::CStyleComment),
+        (")", TokenType::RPAREN),
+        (",", TokenType::COMMA),
+        (" ", TokenType::WS),
+        ("\"", TokenType::StringExprStart),
+        ("%inner", TokenType::MacroIdentifier),
+        ("(", TokenType::LPAREN),
+        (")", TokenType::RPAREN),
+        ("\"", TokenType::StringExprEnd),
+        (")", TokenType::RPAREN),
+        (";", TokenType::SEMI),
+    ]
+)]
 fn test_macro_rare_stats(#[case] contents: &str, #[case] expected_token: Vec<impl TokenTestCase>) {
     assert_lexing(contents, expected_token, NO_ERRORS);
 }

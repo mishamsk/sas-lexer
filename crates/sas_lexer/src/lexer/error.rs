@@ -69,6 +69,8 @@ pub enum ErrorKind {
         message = "ERROR: Function name missing in %SYSFUNC or %QSYSFUNC macro function reference."
     )]
     MissingSysfuncFuncName = 1023,
+    #[strum(message = "ERROR: CALL routine name missing in %SYSCALL macro statement.")]
+    MissingSyscallRoutineName = 1024,
     // Token buffer API call user initiated errors.
     // Codes 2001-2999. Make sure to preserve
     // the existing codes & the range. The latter is used in classification impl

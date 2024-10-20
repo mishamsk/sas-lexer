@@ -217,7 +217,7 @@ pub(crate) enum LexerMode {
     /// it will chang the preceeding `MacroIdentifier` token type to `MacroLabel`
     /// in addition to lexing `;` on hidden channel.
     ///
-    /// Note - it should alwys be preceded by the `WsOrCStyleCommentOnly` mode
+    /// Note - it should always be preceded by the `WsOrCStyleCommentOnly` mode
     /// and a checkpoint created!
     MaybeMacroCallArgsOrLabel { check_macro_label: bool },
     /// A special mode that goes after possible macro call arg name
