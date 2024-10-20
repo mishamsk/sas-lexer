@@ -442,6 +442,10 @@ pub struct ResolvedTokenInfo {
     pub end_column: u32,
 
     /// Extra data associated with the token.
+    ///
+    /// Note that the range in the string literal buffer that
+    /// `Payload::StringLiteral` holds is a byte offset range, not
+    /// a char offset range.
     pub payload: Payload,
 }
 
@@ -769,8 +773,7 @@ impl TokenizedBuffer {
             .ok_or(ErrorKind::StringLiteralOutOfBounds)
     }
 
-    /// Returns a vector of `ResolvedAntlrTokenInfo` that can be used
-    /// by a downstream ANTLR parser.
+    /// Returns a vector of `ResolvedTokenInfo`
     #[must_use]
     #[allow(clippy::indexing_slicing)]
     pub fn into_resolved_token_vec(&self) -> Vec<ResolvedTokenInfo> {
