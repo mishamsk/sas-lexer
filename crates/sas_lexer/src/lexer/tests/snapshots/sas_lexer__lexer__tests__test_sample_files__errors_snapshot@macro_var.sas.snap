@@ -1,7 +1,0 @@
----
-source: crates/sas_lexer/src/lexer/tests/test_sample_files.rs
-expression: error_strins
----
-- "UnknownCharacter('9') at byte offset 9, char offset 9, L3:C2. Last token: [@5,8:9=\"9\",<UNKNOWN>,L3:C1-L3:C2,chl=<D>,pl=\"<None>\"]"
-- "UnknownCharacter('9') at byte offset 86, char offset 86, L13:C8. Last token: [@33,85:86=\"9\",<UNKNOWN>,L13:C7-L13:C8,chl=<D>,pl=\"<None>\"]"
-- "UnknownCharacter('9') at byte offset 96, char offset 96, L14:C9. Last token: [@37,95:96=\"9\",<UNKNOWN>,L14:C8-L14:C9,chl=<D>,pl=\"<None>\"]"

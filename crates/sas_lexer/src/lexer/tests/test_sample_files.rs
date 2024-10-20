@@ -18,7 +18,11 @@ macro_rules! set_snapshot_suffix {
 fn test_snapshots(#[files("src/lexer/tests/samples/**/*.sas")] path: PathBuf) {
     // Compute the absolute path of the prefix
 
-    let prefix = fs::canonicalize("src/lexer/tests/samples/").unwrap();
+    let prefix = fs::canonicalize(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/lexer/tests/samples/"
+    ))
+    .unwrap();
 
     let snap_name = path.strip_prefix(&prefix).unwrap();
     let snap_name_str = snap_name
