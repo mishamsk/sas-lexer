@@ -324,11 +324,10 @@ pub(super) fn gen_stats_with_polars(
     println!("Generating sources DataFrame...");
 
     let lex_duration = file_lex_duration
-        .iter()
-        .map(|d| d.map(|d| d.as_millis() as f64))
+        .into_iter()
+        .map(|d| d.map(|d| d.as_secs_f64()))
         .collect::<Float64Chunked>()
-        .into_series()
-        .cast(&DataType::Duration(TimeUnit::Milliseconds))?;
+        .into_series();
 
     let sources_df = df!(
         "file_id" => file_ids,
