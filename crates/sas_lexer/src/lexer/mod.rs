@@ -4554,13 +4554,14 @@ impl<'src> Lexer<'src> {
             | TokenTypeMacroCallOrStat::KwmSymLocal
             | TokenTypeMacroCallOrStat::KwmSysget
             | TokenTypeMacroCallOrStat::KwmSysmacexec
-            | TokenTypeMacroCallOrStat::KwmSysmacexist
-            | TokenTypeMacroCallOrStat::KwmVerify
-            | TokenTypeMacroCallOrStat::KwmKVerify => {
+            | TokenTypeMacroCallOrStat::KwmSysmacexist => {
                 self.expect_builtin_macro_call_args();
             }
             // The special built-in beast, that allows named arguments
-            TokenTypeMacroCallOrStat::KwmCompstor | TokenTypeMacroCallOrStat::KwmValidchs => {
+            TokenTypeMacroCallOrStat::KwmCompstor
+            | TokenTypeMacroCallOrStat::KwmValidchs
+            | TokenTypeMacroCallOrStat::KwmVerify
+            | TokenTypeMacroCallOrStat::KwmKVerify => {
                 self.expect_builtin_macro_call_named_args();
             }
             // Custom macro or label

@@ -3574,9 +3574,7 @@ fn test_macro_simple_builtins(
         TokenType::KwmSymLocal,
         TokenType::KwmSysget,
         TokenType::KwmSysmacexec,
-        TokenType::KwmSysmacexist,
-        TokenType::KwmVerify,
-        TokenType::KwmKVerify
+        TokenType::KwmSysmacexist
     )]
     tok_type: TokenType,
     #[case] inner_expr_tokens: Vec<(&str, TokenType)>,
@@ -3609,7 +3607,7 @@ fn test_macro_simple_builtins(
 }
 
 #[rstest]
-// One of the two built-ins that has named args
+// One of the 3 built-ins that has named args
 #[case::validchs("%VALIDchs(dsnm=sashelp.class, encoding=utf-8)",
     vec![
         ("%VALIDchs", TokenType::KwmValidchs),
@@ -3632,6 +3630,32 @@ fn test_macro_simple_builtins(
         ("PATHNAME", TokenType::MacroString),
         ("=", TokenType::ASSIGN),
         ("lib", TokenType::MacroString),
+        (")", TokenType::RPAREN),
+    ]
+)]
+// This is not entirely valid. SAS will lex the argument name in verify
+// but in reality fail... but we are checking the lexer here, so...
+#[case::compstor("%VERify(source=&name,&all)",
+    vec![
+        ("%VERify", TokenType::KwmVerify),
+        ("(", TokenType::LPAREN),
+        ("source", TokenType::MacroString),
+        ("=", TokenType::ASSIGN),
+        ("&name", TokenType::MacroVarExpr),
+        (",", TokenType::COMMA),
+        ("&all", TokenType::MacroVarExpr),
+        (")", TokenType::RPAREN),
+    ]
+)]
+#[case::compstor("%kVERify(source=&name,&all)",
+    vec![
+        ("%kVERify", TokenType::KwmKVerify),
+        ("(", TokenType::LPAREN),
+        ("source", TokenType::MacroString),
+        ("=", TokenType::ASSIGN),
+        ("&name", TokenType::MacroVarExpr),
+        (",", TokenType::COMMA),
+        ("&all", TokenType::MacroVarExpr),
         (")", TokenType::RPAREN),
     ]
 )]
