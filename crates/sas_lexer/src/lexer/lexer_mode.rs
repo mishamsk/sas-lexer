@@ -51,14 +51,20 @@ const fn macro_eval_next_arg_mode_from_u8(val: u8) -> MacroEvalNextArgumentMode 
 /// Packed flags for macro eval expressions (arithmetic/logical)
 ///
 /// The following flags are packed into a single byte:
-/// - Float mode (enabled in `%sysevalf`)
-/// - Terminate on comma (enabled where eval context is for a macro call
-///     argument)
+/// - Fnumeric_mode: integer or loat mode (enabled in `%sysevalf` and contexts
+///     that use float arithmetic - sysfunc, syscall)
+/// - Next argument mode: None, SingleEvalExpr, EvalExpr, MacroArg
+///     see enum for explanation
+/// - Terminate on comma (enabled automatically based on follower argument
+///     type)
 /// - Terminate on statement (enabled for expr after `%if`, `%to`, etc.)
 /// - Terminate on semicolon (enabled for expr after `%if`, `%by`, etc.)
 ///     `%if` is there despite semi being a session error, because
 ///     SAS will behave this way when trying to recover from error.
-/// - Followed by another expression (enabled for first expr in `%SUBSTR`)
+/// - Parens mask comma. In contexts with multiple expressions, comma
+///    is not a terminator inside parens, except for`%sysevalf` which
+///   is a special case. Note that semi is never masked, unlike regular
+///  macro arguments.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct MacroEvalExprFlags(u8);
 
@@ -67,14 +73,16 @@ impl MacroEvalExprFlags {
     const TERMINATE_ON_COMMA_MASK: u8 = 0b0000_0010;
     const TERMINATE_ON_STAT_MASK: u8 = 0b0000_0100;
     const TERMINATE_ON_SEMI_MASK: u8 = 0b0000_1000;
+    const PARENS_MASK_COMMA_MASK: u8 = 0b0001_0000;
     // Shift must be >= last significant bit in masks
-    const NEXT_ARG_SHIFT: u8 = 4;
+    const NEXT_ARG_SHIFT: u8 = 5;
 
     pub(super) const fn new(
         numeric_mode: MacroEvalNumericMode,
         next_argument_mode: MacroEvalNextArgumentMode,
         terminate_on_stat: bool,
         terminate_on_semi: bool,
+        parens_mask_comma: bool,
     ) -> Self {
         let mut bits = 0;
         if matches!(numeric_mode, MacroEvalNumericMode::Float) {
@@ -89,6 +97,9 @@ impl MacroEvalExprFlags {
         }
         if terminate_on_semi {
             bits |= Self::TERMINATE_ON_SEMI_MASK;
+        }
+        if parens_mask_comma {
+            bits |= Self::PARENS_MASK_COMMA_MASK;
         }
         bits |= (next_argument_mode as u8) << Self::NEXT_ARG_SHIFT;
 
@@ -117,6 +128,10 @@ impl MacroEvalExprFlags {
 
     pub(super) const fn terminate_on_semi(self) -> bool {
         self.0 & Self::TERMINATE_ON_SEMI_MASK != 0
+    }
+
+    pub(super) const fn parens_mask_comma(self) -> bool {
+        self.0 & Self::PARENS_MASK_COMMA_MASK != 0
     }
 
     pub(super) const fn follow_arg_mode(self) -> MacroEvalNextArgumentMode {
@@ -362,12 +377,14 @@ mod tests {
             MacroEvalNextArgumentMode::SingleEvalExpr,
             true,
             true,
+            false,
         );
         assert!(flags.float_mode());
         assert!(matches!(flags.numeric_mode(), MacroEvalNumericMode::Float));
         assert!(flags.terminate_on_comma());
         assert!(flags.terminate_on_stat());
         assert!(flags.terminate_on_semi());
+        assert!(!flags.parens_mask_comma());
         assert!(matches!(
             flags.follow_arg_mode(),
             MacroEvalNextArgumentMode::SingleEvalExpr
@@ -378,6 +395,7 @@ mod tests {
             MacroEvalNextArgumentMode::None,
             false,
             false,
+            true,
         );
         assert!(!flags.float_mode());
         assert!(matches!(
@@ -387,6 +405,7 @@ mod tests {
         assert!(!flags.terminate_on_comma());
         assert!(!flags.terminate_on_stat());
         assert!(!flags.terminate_on_semi());
+        assert!(flags.parens_mask_comma());
         assert!(matches!(
             flags.follow_arg_mode(),
             MacroEvalNextArgumentMode::None
@@ -397,6 +416,7 @@ mod tests {
             MacroEvalNextArgumentMode::MacroArg,
             false,
             true,
+            false,
         );
         assert!(!flags.float_mode());
         assert!(matches!(
@@ -406,6 +426,7 @@ mod tests {
         assert!(flags.terminate_on_comma());
         assert!(!flags.terminate_on_stat());
         assert!(flags.terminate_on_semi());
+        assert!(!flags.parens_mask_comma());
         assert!(matches!(
             flags.follow_arg_mode(),
             MacroEvalNextArgumentMode::MacroArg
@@ -416,12 +437,14 @@ mod tests {
             MacroEvalNextArgumentMode::EvalExpr,
             true,
             false,
+            true,
         );
         assert!(flags.float_mode());
         assert!(matches!(flags.numeric_mode(), MacroEvalNumericMode::Float));
         assert!(flags.terminate_on_comma());
         assert!(flags.terminate_on_stat());
         assert!(!flags.terminate_on_semi());
+        assert!(flags.parens_mask_comma());
         assert!(matches!(
             flags.follow_arg_mode(),
             MacroEvalNextArgumentMode::EvalExpr

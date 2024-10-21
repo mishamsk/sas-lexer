@@ -850,6 +850,9 @@ impl<'src> Lexer<'src> {
 
         self.start_token();
 
+        let terminate_on_comma = macro_eval_flags.terminate_on_comma()
+            && (parens_nesting_level == 0 || !macro_eval_flags.parens_mask_comma());
+
         // Dispatch the "big" categories
         match next_char {
             '\'' => self.lex_single_quoted_str(),
@@ -906,7 +909,10 @@ impl<'src> Lexer<'src> {
                             // We could have not consumed it and let the
                             // string lexing handle it, but this way we
                             // we avoid one extra check
-                            self.lex_macro_string_in_macro_eval_context(macro_eval_flags);
+                            self.lex_macro_string_in_macro_eval_context(
+                                macro_eval_flags,
+                                terminate_on_comma,
+                            );
                         }
                     }
                     MacroKwType::MacroCall => {}
@@ -917,7 +923,7 @@ impl<'src> Lexer<'src> {
                 self.maybe_emit_empty_macro_string_in_eval(None);
                 self.pop_mode();
             }
-            ',' if macro_eval_flags.terminate_on_comma() => {
+            ',' if terminate_on_comma => {
                 // Found the end of the expression, pop the mode and return
                 self.maybe_emit_empty_macro_string_in_eval(None);
                 self.pop_mode();
@@ -932,6 +938,8 @@ impl<'src> Lexer<'src> {
                                 MacroEvalNextArgumentMode::None,
                                 false,
                                 false,
+                                // doesn't matter really since comma is not special in tail aguments
+                                false,
                             ),
                             pnl: 0,
                         });
@@ -943,6 +951,9 @@ impl<'src> Lexer<'src> {
                                 MacroEvalNextArgumentMode::EvalExpr,
                                 false,
                                 false,
+                                // in reality it is always true for this mode, but
+                                // it seems more robust to forward the flag
+                                macro_eval_flags.parens_mask_comma(),
                             ),
                             pnl: 0,
                         });
@@ -968,7 +979,10 @@ impl<'src> Lexer<'src> {
             c => {
                 if !self.lex_macro_eval_operator(c) {
                     // Not an operator => must be a macro string
-                    self.lex_macro_string_in_macro_eval_context(macro_eval_flags);
+                    self.lex_macro_string_in_macro_eval_context(
+                        macro_eval_flags,
+                        terminate_on_comma,
+                    );
                 }
             }
         }
@@ -991,7 +1005,7 @@ impl<'src> Lexer<'src> {
                     // If our logic is correct, it should be impossible for the symbol
                     // lex function to decrement the parens nesting level below 0
                     debug_assert!(*parens_nesting_level > 0);
-                    *parens_nesting_level = parens_nesting_level.wrapping_add_signed(-1);
+                    *parens_nesting_level = parens_nesting_level.saturating_sub(1);
                 }
             };
         };
@@ -1063,8 +1077,16 @@ impl<'src> Lexer<'src> {
     }
 
     #[allow(clippy::too_many_lines)]
-    fn lex_macro_string_in_macro_eval_context(&mut self, macro_eval_flags: MacroEvalExprFlags) {
-        debug_assert!(matches!(self.mode(), LexerMode::MacroEval { .. }));
+    fn lex_macro_string_in_macro_eval_context(
+        &mut self,
+        macro_eval_flags: MacroEvalExprFlags,
+        terminate_on_comma: bool,
+    ) {
+        debug_assert!(matches!(
+           self.mode(),
+           LexerMode::MacroEval { macro_eval_flags: f, .. }
+                if f == macro_eval_flags
+        ));
 
         // In eval context, the leading/trailing whitespace may or may not be
         // part of a macro string depending on the preceeding/following characters.
@@ -1087,14 +1109,17 @@ impl<'src> Lexer<'src> {
         // emit a hidden WS token or make it part of the macro string.
 
         // The other aspect is that SAS will recognize numerics (integers for
-        // all contexts except `%sysevals` where it will also recognize floats).
+        // all contexts except `%sysevalf` where it will also recognize floats).
         // But it is very clever. `%eval(1+1)` here both `1` and `1` are recognized
         // as integers. But in `%eval(1.0+1)` the `1.0` is lexed as string because
         // it is not a valid integer. Or in `%eval(1 2=12)` the lhs will be a macro
         // string `1 2`, not integers `1` and `2`.
         //
         // It is super hard to implement this correctly, e.g. in `%eval(1/*comment*/2)`
-        // thus we do our best, but may not be 100% correct for every edge case.
+        // SAS will first yank the comment out of the char stream and then lex the
+        // 12 as an actual integer! But we only support continuous tokens, so we must
+        // break 1 and 2 into separate tokens with a comment in-between.
+        // Thus we do our best, but may not be 100% correct for every edge case.
 
         let mut ws_mark: Option<(ByteOffset, CharOffset, LineIdx)> = None;
         let mut try_lexing_numeric = true;
@@ -1138,7 +1163,7 @@ impl<'src> Lexer<'src> {
                     // Found the end of the expression, break
                     break;
                 }
-                ',' if macro_eval_flags.terminate_on_comma() => {
+                ',' if terminate_on_comma => {
                     // Found the end of the expression, break
                     break;
                 }
@@ -4345,6 +4370,7 @@ impl<'src> Lexer<'src> {
                             MacroEvalNextArgumentMode::None,
                             true,
                             true,
+                            false, // doesn't matter really
                         ),
                         pnl: 0,
                     });
@@ -4367,6 +4393,7 @@ impl<'src> Lexer<'src> {
                         MacroEvalNextArgumentMode::None,
                         true,
                         true,
+                        false, // doesn't matter really
                     ),
                     pnl: 0,
                 });
@@ -4643,6 +4670,7 @@ impl<'src> Lexer<'src> {
                         MacroEvalNextArgumentMode::None,
                         kw_tok_type == TokenTypeMacroCallOrStat::KwmTo,
                         true,
+                        false, // doesn't matter really
                     ),
                     pnl: 0,
                 });
@@ -4672,6 +4700,7 @@ impl<'src> Lexer<'src> {
                         // but lexer will indeed end the expression and lex
                         // semi as semi etc.
                         true,
+                        false, // doesn't matter really
                     ),
                     pnl: 0,
                 });
@@ -4804,6 +4833,10 @@ impl<'src> Lexer<'src> {
                 },
                 false,
                 false,
+                // %eval has only one arg, so comma is not special.
+                // and %sysevalf apparently doesn't mask commas inside
+                // parens! the first comma terminates the first argument
+                false,
             ),
             pnl: 0,
         });
@@ -4837,6 +4870,7 @@ impl<'src> Lexer<'src> {
                 },
                 false,
                 false,
+                true,
             ),
             pnl: 0,
         });
@@ -4940,6 +4974,7 @@ impl<'src> Lexer<'src> {
                 MacroEvalNextArgumentMode::EvalExpr,
                 false,
                 false,
+                true,
             ),
             pnl: 0,
         });
@@ -4985,6 +5020,7 @@ impl<'src> Lexer<'src> {
                 MacroEvalNextArgumentMode::None,
                 false,
                 false,
+                false, // doesn't matter really
             ),
             pnl: 0,
         });
@@ -5066,6 +5102,7 @@ impl<'src> Lexer<'src> {
                 MacroEvalNextArgumentMode::EvalExpr,
                 false,
                 false,
+                true,
             ),
             pnl: 0,
         });

@@ -3226,6 +3226,60 @@ fn test_macro_eval_empty_logical_operand(
         (")", TokenType::RPAREN),
     ]
 )]
+#[case::masked_comma_in_sysfunc("%sysfunc(catx(|, 3.0/2, (,), post))",
+    vec![
+        ("%sysfunc", TokenType::KwmSysfunc, Payload::None),
+        ("(", TokenType::LPAREN, Payload::None),
+        ("catx", TokenType::MacroString, Payload::None),
+        ("(", TokenType::LPAREN, Payload::None),
+        ("|", TokenType::PIPE, Payload::None),
+        (",", TokenType::COMMA, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("3.0", TokenType::FloatLiteral, Payload::Float(3.0)),
+        ("/", TokenType::FSLASH, Payload::None),
+        ("2", TokenType::IntegerLiteral, Payload::Integer(2)),
+        (",", TokenType::COMMA, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("(", TokenType::LPAREN, Payload::None),
+        (",", TokenType::MacroString, Payload::None),
+        (")", TokenType::RPAREN, Payload::None),
+        (",", TokenType::COMMA, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("post", TokenType::MacroString, Payload::None),
+        (")", TokenType::RPAREN, Payload::None),
+        (")", TokenType::RPAREN, Payload::None),
+    ]
+)]
+#[case::masked_comma_in_scan("%scan((1,2),(1,2=1,2),%str(,))",
+    vec![
+        ("%scan", TokenType::KwmScan, TokenChannel::DEFAULT),
+        ("(", TokenType::LPAREN, TokenChannel::DEFAULT),
+        ("(1,2)", TokenType::MacroString, TokenChannel::DEFAULT),
+        (",", TokenType::COMMA, TokenChannel::DEFAULT),
+        ("(", TokenType::LPAREN, TokenChannel::DEFAULT),
+        ("1,2", TokenType::MacroString, TokenChannel::DEFAULT),
+        ("=", TokenType::ASSIGN, TokenChannel::DEFAULT),
+        ("1,2", TokenType::MacroString, TokenChannel::DEFAULT),
+        (")", TokenType::RPAREN, TokenChannel::DEFAULT),
+        (",", TokenType::COMMA, TokenChannel::DEFAULT),
+        ("%str", TokenType::KwmStr, TokenChannel::HIDDEN),
+        ("(", TokenType::LPAREN, TokenChannel::HIDDEN),
+        (",", TokenType::MacroString, TokenChannel::DEFAULT),
+        (")", TokenType::RPAREN, TokenChannel::HIDDEN),
+        (")", TokenType::RPAREN, TokenChannel::DEFAULT),
+    ]
+)]
+// Apparently, in %sysevalf, commas are never masked by parentheses
+#[case::non_masking_comma_in_sysevalf("%sysevalf((1,)",
+    vec![
+        ("%sysevalf", TokenType::KwmSysevalf, Payload::None),
+        ("(", TokenType::LPAREN, Payload::None),
+        ("(", TokenType::LPAREN, Payload::None),
+        ("1", TokenType::IntegerLiteral, Payload::Integer(1)),
+        (",", TokenType::COMMA, Payload::None),
+        (")", TokenType::RPAREN, Payload::None),
+    ]
+)]
 fn test_macro_eval_selected_cases(
     #[case] contents: &str,
     #[case] expected_tokens: Vec<impl TokenTestCase>,
