@@ -89,7 +89,7 @@ fn create_error_df(
         at_column.push(error.at_column());
 
         last_token.push(error.last_token().map(|idx| idx.get()));
-        context.push(get_error_context(&error, source, context_lines));
+        context.push(get_error_context(error, source, context_lines));
     }
 
     let df = DataFrame::new(vec![

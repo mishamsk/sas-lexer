@@ -382,6 +382,8 @@ pub(super) const MACRO_STAT_TOKEN_TYPE_RANGE: (u16, u16) =
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use strum::IntoEnumIterator;
 
     use super::*;
@@ -427,14 +429,24 @@ mod tests {
             assert_eq!(stat_tok_type as u16, TokenType::from(stat_tok_type) as u16);
         }
 
-        assert_eq!(
-            TokenTypeMacroCallOrStat::iter()
-                .filter(|t| !matches!(*t, TokenTypeMacroCallOrStat::MacroIdentifier))
-                .map(TokenType::from)
-                .collect::<Vec<_>>()
-                .sort(),
-            MKEYWORDS.values().copied().collect::<Vec<_>>().sort()
-        );
+        let mut all_stat_tokens = TokenTypeMacroCallOrStat::iter()
+            .filter(|t| !matches!(*t, TokenTypeMacroCallOrStat::MacroIdentifier))
+            .map(TokenType::from)
+            .collect::<Vec<_>>();
+
+        all_stat_tokens.sort();
+
+        let mut all_mkws = MKEYWORDS
+            .values()
+            .copied()
+            // >1 keyword may map to the same token type
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+
+        all_mkws.sort();
+
+        assert_eq!(all_stat_tokens, all_mkws);
     }
 
     #[test]
@@ -514,7 +526,7 @@ mod tests {
     #[test]
     fn test_all_tokens_round_trip() {
         assert_eq!(
-            (0..TokenType::COUNT as u16).into_iter().collect::<Vec<_>>(),
+            (0..TokenType::COUNT as u16).collect::<Vec<_>>(),
             TokenType::iter().map(|t| t as u16).collect::<Vec<_>>()
         );
     }

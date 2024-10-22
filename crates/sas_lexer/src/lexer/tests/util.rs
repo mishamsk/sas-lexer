@@ -613,13 +613,7 @@ impl ErrorTestCase for (ErrorKind, usize) {
         buffer
             .into_iter()
             .filter(|t| buffer.get_token_type(*t).expect("wrong token") != TokenType::EOF)
-            .find_map(|t| {
-                if buffer.get_token_end(t).expect("wrong token").get() == self.1 as u32 {
-                    Some(t)
-                } else {
-                    None
-                }
-            })
+            .find(|&t| buffer.get_token_end(t).expect("wrong token").get() == self.1 as u32)
     }
 }
 

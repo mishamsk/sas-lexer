@@ -50,6 +50,12 @@ tasks:
     desc: "Sync dependencies & install project"
     cmd: uv sync --all-extras --locked --compile-bytecode
 
+  lint:
+    desc: "Run linters"
+    cmds:
+      - uv run pre-commit run --all-files
+      - cargo clippy --all-features -- -D warnings
+
   # Cleanup tasks
   clean-pyc:
     desc: remove Python file artifacts
