@@ -15,7 +15,7 @@ crate-type = ["cdylib"]
 [dependencies]
 pyo3 = "0.22.2"
 rmp-serde.workspace = true
-sas_lexer = { workspace = true, features = ["serde"] }
+sas_lexer = { workspace = true, features = ["serde", "macro_sep"] }
 serde_bytes = "0.11.15"
 
 

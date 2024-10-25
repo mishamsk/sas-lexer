@@ -2651,6 +2651,7 @@ dependencies = [
  "pprof",
  "rmp-serde",
  "rstest",
+ "rustc_version",
  "sas_lexer_macro",
  "serde",
  "serde_repr",

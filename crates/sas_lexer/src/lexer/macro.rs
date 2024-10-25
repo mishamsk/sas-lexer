@@ -92,6 +92,48 @@ pub(super) const fn is_macro_eval_logical_op(tok_type: TokenType) -> bool {
     )
 }
 
+#[inline]
+#[cfg(feature = "macro_sep")]
+pub(super) const fn needs_macro_sep(
+    prev_token_type: Option<TokenType>,
+    tok_type: TokenType,
+) -> bool {
+    // Not following a proper statement delimiter
+    // And preceeds a standalone macro statement
+    !matches!(
+        prev_token_type,
+        None | Some(
+            TokenType::SEMI | TokenType::MacroLabel | TokenType::KwmThen | TokenType::KwmElse
+        )
+    ) && matches!(
+        tok_type,
+        TokenType::KwmAbort
+            | TokenType::KwmCopy
+            | TokenType::KwmDisplay
+            | TokenType::KwmGlobal
+            | TokenType::KwmGoto
+            | TokenType::KwmInput
+            | TokenType::KwmLocal
+            | TokenType::KwmPut
+            | TokenType::KwmReturn
+            | TokenType::KwmSymdel
+            | TokenType::KwmSyscall
+            | TokenType::KwmSysexec
+            | TokenType::KwmSyslput
+            | TokenType::KwmSysmacdelete
+            | TokenType::KwmSysmstoreclear
+            | TokenType::KwmSysrput
+            | TokenType::KwmWindow
+            | TokenType::KwmMacro
+            | TokenType::KwmMend
+            | TokenType::KwmLet
+            | TokenType::KwmIf
+            | TokenType::KwmElse
+            | TokenType::KwmDo
+            | TokenType::KwmEnd
+    )
+}
+
 /// Consumes the cursor starting at a valid sas name start after %,
 /// returning a token type (either one of the built-in call/stats) or a macro
 /// identifier token.

@@ -454,7 +454,7 @@ mod tests {
     #[test]
     fn test_macro_arg_name_value_flags() {
         for context in MacroArgContext::iter() {
-            for populate_next_arg_stack in [true, false].iter() {
+            for populate_next_arg_stack in &[true, false] {
                 let flags = MacroArgNameValueFlags::new(context, *populate_next_arg_stack);
                 assert_eq!(flags.context(), context);
                 assert_eq!(flags.populate_next_arg_stack(), *populate_next_arg_stack);

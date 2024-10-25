@@ -572,8 +572,7 @@ pub(super) fn check_token<S: AsRef<str>>(
 
     assert_eq!(
         expected_token_text, actual_token_text,
-        "Expected text {:?}, got {:?}",
-        expected_token_text, actual_token_text
+        "Expected text {expected_token_text:?}, got {actual_token_text:?}"
     );
 }
 

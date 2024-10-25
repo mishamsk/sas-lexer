@@ -205,8 +205,7 @@ mod tests {
         for error in ErrorKind::iter() {
             assert!(
                 error.get_message().is_some(),
-                "ErrorKind {:?} has no message",
-                error
+                "ErrorKind {error:?} has no message"
             );
         }
     }
@@ -218,14 +217,12 @@ mod tests {
             if error.is_internal() {
                 assert!(
                     variant_as_str.starts_with("InternalError"),
-                    "ErrorKind {:?} marked as internal but has no InternalError prefix",
-                    error
+                    "ErrorKind {error:?} marked as internal but has no InternalError prefix"
                 );
             } else {
                 assert!(
                     !variant_as_str.starts_with("InternalError"),
-                    "ErrorKind {:?} marked as non internal but has InternalError prefix",
-                    error
+                    "ErrorKind {error:?} marked as non internal but has InternalError prefix"
                 );
             }
         }

@@ -35,7 +35,11 @@ zip = { workspace = true }
 walkdir = { workspace = true }
 pprof = { workspace = true, features = ["flamegraph", "criterion"] }
 
+[build-dependencies]
+rustc_version = { workspace = true }
+
 [features]
+macro_sep = []
 opti_stats = []
 serde = ["dep:serde", "dep:rmp-serde", "dep:serde_repr"]
 

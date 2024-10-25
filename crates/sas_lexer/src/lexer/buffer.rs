@@ -94,17 +94,17 @@ pub(super) struct TokenInfo {
 
     /// Zero-based byte offset of the token in the source string slice.
     /// u32 as we only support 4gb files
-    byte_offset: ByteOffset,
+    pub(super) byte_offset: ByteOffset,
 
     /// Zero-based char index of the token start in the source string.
     /// Char here means a Unicode code point, not graphemes. This is
     /// what Python uses to index strings, and IDEs show for cursor position.
     /// u32 as we only support 4gb files
-    start: CharOffset,
+    pub(super) start: CharOffset,
 
     /// Starting line of the token, zero-based.
     /// Also an index of the `LineInfo` in the `TokenizedBuffer.line_infos` vector
-    line: LineIdx,
+    pub(super) line: LineIdx,
 
     // Extra data associated with the token
     pub(super) payload: Payload,
@@ -226,18 +226,16 @@ impl WorkTokenizedBuffer {
         start: CharOffset,
         line: LineIdx,
         payload: Payload,
-    ) -> TokenIdx {
-        // Check that the token start is within the source string
+    ) {
         #[cfg(debug_assertions)]
+        #[allow(clippy::indexing_slicing)]
         {
+            // Check that the token start is within the source string
             debug_assert!(
                 usize::from(start) <= self.source_len,
                 "Token char offset out of bounds"
             );
-        }
 
-        #[allow(clippy::indexing_slicing)]
-        if cfg!(debug_assertions) {
             // Check that the token start is more or equal to the start of the previous token
             if let Some(last_token) = self.token_infos.last() {
                 debug_assert!(
@@ -262,6 +260,16 @@ impl WorkTokenizedBuffer {
             );
         }
 
+        // theoretically number of tokens may be larger than text size,
+        // even though it is checked to be no more than u32 bytes.
+        // This is possible because tokens may have no text. But in practice
+        // it is ok to just panic here.
+        assert!(
+            self.token_infos.len() != u32::MAX as usize,
+            "Token index overflow"
+        );
+
+        #[cfg(rustc_nightly)]
         if let Err(value) = self.token_infos.push_within_capacity(TokenInfo {
             channel,
             token_type,
@@ -276,15 +284,96 @@ impl WorkTokenizedBuffer {
             self.token_infos.push(value);
         };
 
+        #[cfg(not(rustc_nightly))]
+        self.token_infos.push(TokenInfo {
+            channel,
+            token_type,
+            byte_offset,
+            start,
+            line,
+            payload,
+        });
+    }
+
+    /// Inserts a token at the specified index.
+    ///
+    /// NOTE: This is not safe in the sense that all `TokenIdxs` after the inserted token
+    /// that were stored before the insertion will point to incorrect tokens
+    /// and thus need to be updated.
+    ///
+    /// As of now, this is only used for one special case where it is known
+    /// that no `TokenIdxs` are stored before the insertion point.
+    #[cfg(feature = "macro_sep")]
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn insert_token(
+        &mut self,
+        at: TokenIdx,
+        channel: TokenChannel,
+        token_type: TokenType,
+        byte_offset: ByteOffset,
+        start: CharOffset,
+        line: LineIdx,
+        payload: Payload,
+    ) {
+        #[cfg(debug_assertions)]
+        #[allow(clippy::indexing_slicing)]
+        {
+            // Check that the token index is within the token_infos vector
+            debug_assert!(
+                at.get() as usize <= self.token_infos.len(),
+                "Token index out of bounds"
+            );
+
+            // Check that the token start is within the source string
+            debug_assert!(
+                usize::from(start) <= self.source_len,
+                "Token char offset out of bounds"
+            );
+
+            // Check that the token start is more or equal to the start of the previous token
+            if let Some(last_token) = self.token_infos.last() {
+                debug_assert!(
+                    byte_offset >= last_token.byte_offset,
+                    "Token byte offset before previous token byte offset"
+                );
+            } else {
+                // It may be poosible for the first token to start at offset > 0
+                // e.g. due to BOM
+            }
+
+            // Check that the line index is within the line_infos vector
+            debug_assert!(
+                line.0 as usize <= self.line_infos.len(),
+                "Line index out of bounds"
+            );
+
+            // Check that the token start is greater or equal than the line start
+            debug_assert!(
+                byte_offset >= self.line_infos[line.0 as usize].byte_offset,
+                "Token byte offset before line byte offset"
+            );
+        }
+
         // theoretically number of tokens may be larger than text size,
         // even though it is checked to be no more than u32 bytes.
         // This is possible because tokens may have no text. But in practice
         // it is ok to just panic here.
-        if let Ok(idx) = u32::try_from(self.token_infos.len() - 1) {
-            TokenIdx::new(idx)
-        } else {
-            unreachable!("Token index overflow");
-        }
+        assert!(
+            self.token_infos.len() != u32::MAX as usize,
+            "Token index overflow"
+        );
+
+        self.token_infos.insert(
+            at.get() as usize,
+            TokenInfo {
+                channel,
+                token_type,
+                byte_offset,
+                start,
+                line,
+                payload,
+            },
+        );
     }
 
     /// Adds an unescaped string to the buffer.
@@ -378,6 +467,20 @@ impl WorkTokenizedBuffer {
             .find(|tok_info| tok_info.channel == TokenChannel::DEFAULT)
     }
 
+    /// Iterator over the token infos and their indexes.
+    #[cfg(feature = "macro_sep")]
+    #[allow(clippy::cast_possible_truncation)]
+    pub(super) fn iter_token_infos(
+        &self,
+    ) -> impl DoubleEndedIterator<Item = (TokenIdx, &TokenInfo)> {
+        self.token_infos
+            .iter()
+            .enumerate()
+            // SAFETY: the only way to add tokens is via `add_token` or `insert_token` fn,
+            // which both check for overflow, so this is safe
+            .map(|(idx, tok_info)| (TokenIdx::new(idx as u32), tok_info))
+    }
+
     #[inline]
     #[must_use]
     #[allow(clippy::cast_possible_truncation)]
@@ -390,8 +493,8 @@ impl WorkTokenizedBuffer {
     #[must_use]
     #[allow(clippy::cast_possible_truncation)]
     pub(super) fn token_count(&self) -> u32 {
-        // SAFETY: the only way to add tokens is via `add_token` fn,
-        // which checks for overflow, so this is safe
+        // SAFETY: the only way to add tokens is via `add_token` or `insert_token` fn,
+        // which both check for overflow, so this is safe
         self.token_infos.len() as u32
     }
 }
@@ -868,7 +971,7 @@ mod tests {
         let mut buffer = WorkTokenizedBuffer::new(source);
 
         let line1 = buffer.add_line(ByteOffset::default(), CharOffset::default());
-        let token1 = buffer.add_token(
+        buffer.add_token(
             TokenChannel::DEFAULT,
             TokenType::CatchAll,
             ByteOffset::default(),
@@ -877,7 +980,7 @@ mod tests {
             Payload::None,
         );
         let line2 = buffer.add_line(ByteOffset::new(14), CharOffset::new(14));
-        let token2 = buffer.add_token(
+        buffer.add_token(
             TokenChannel::DEFAULT,
             TokenType::CatchAll,
             ByteOffset::new(15),
@@ -896,7 +999,12 @@ mod tests {
             Payload::None,
         );
 
-        (buffer.into_detached(source), token1, token2)
+        let detached = buffer.into_detached(source);
+        let mut buf_iter = detached.iter();
+        let token1 = buf_iter.next().expect("no token");
+        let token2 = buf_iter.next().expect("no token");
+
+        (detached, token1, token2)
     }
 
     #[test]
@@ -988,7 +1096,7 @@ mod tests {
         let mut work_buf = WorkTokenizedBuffer::new(source);
 
         let line = work_buf.add_line(ByteOffset::default(), CharOffset::default());
-        let token = work_buf.add_token(
+        work_buf.add_token(
             TokenChannel::DEFAULT,
             TokenType::CatchAll,
             ByteOffset::default(),
@@ -1008,6 +1116,7 @@ mod tests {
         );
 
         let buf = work_buf.into_detached(source);
+        let token = TokenIdx::new(0);
 
         assert_eq!(
             buf.get_token_type(token).expect("wrong token"),

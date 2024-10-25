@@ -438,10 +438,10 @@ fn test_complex_string_expr(
         (";", TokenType::SEMI),
         ("\"", TokenType::StringExprEnd),
         (";", TokenType::SEMI),
-        ],
+    ],
     vec![
         (ErrorKind::OpenCodeRecursionError, 6),
-        ]
+    ]
 )]
 fn test_string_expr_error_recovery(
     #[case] contents: &str,

@@ -1,4 +1,4 @@
-#![feature(vec_push_within_capacity)]
+#![cfg_attr(rustc_nightly, feature(vec_push_within_capacity))]
 
 mod lexer;
 

@@ -17,7 +17,7 @@ fn read_sas_files_from_zip<P: AsRef<Path>>(path: P) -> io::Result<String> {
             let mut contents = Vec::new();
             file.read_to_end(&mut contents)?;
             if let Ok(contents) = String::from_utf8(contents) {
-                combined_source.push_str(&contents)
+                combined_source.push_str(&contents);
             }
         }
     }
@@ -38,7 +38,7 @@ fn benchmark_lex(c: &mut Criterion) {
         .bench_function("lex", |b| {
             b.iter(|| {
                 lex_program(&source).expect("Lexing failed");
-            })
+            });
         });
 }
 

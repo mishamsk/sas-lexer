@@ -25,6 +25,8 @@ use lexer_mode::{
 };
 
 use numeric::{try_parse_decimal, try_parse_hex_integer, NumericParserResult};
+#[cfg(feature = "macro_sep")]
+use r#macro::needs_macro_sep;
 use r#macro::{
     is_macro_amp, is_macro_eval_logical_op, is_macro_eval_mnemonic, is_macro_eval_quotable_op,
     is_macro_percent, is_macro_quote_call_tok_type, is_macro_stat, is_macro_stat_tok_type,
@@ -358,7 +360,7 @@ impl<'src> Lexer<'src> {
         );
     }
 
-    /// Emits token at a previously locally saved mark. In contrast the
+    /// Emits token at a previously locally saved mark. In contrast to the
     /// normal `emit_token` uses the Lexer state as the starting point
     /// of a token
     fn emit_token_at_mark(
@@ -1840,6 +1842,38 @@ impl<'src> Lexer<'src> {
                     // This is an internal error, we should always have a token to replace
                     self.emit_error(ErrorKind::InternalErrorNoTokenToReplace);
                 };
+
+                #[cfg(feature = "macro_sep")]
+                {
+                    // Emit the macro separator token before the label if necessary
+                    let last_two_tokens = self
+                        .buffer
+                        .iter_token_infos()
+                        .rev()
+                        .filter(|(_, tok_info)| tok_info.channel == TokenChannel::DEFAULT)
+                        .take(2)
+                        .collect::<Vec<_>>();
+
+                    let last_token = last_two_tokens.first();
+                    let second_last_token_tok_type = last_two_tokens
+                        .get(1)
+                        .map(|(_, tok_info)| tok_info.token_type);
+
+                    // Logically this may not be None, but we'll be defensive
+                    if let Some((last_token_idx, last_ti)) = last_token {
+                        if needs_macro_sep(second_last_token_tok_type, last_ti.token_type) {
+                            self.buffer.insert_token(
+                                *last_token_idx,
+                                TokenChannel::DEFAULT,
+                                TokenType::MacroSep,
+                                last_ti.byte_offset,
+                                last_ti.start,
+                                last_ti.line,
+                                Payload::None,
+                            );
+                        };
+                    }
+                }
 
                 // Add the COLON token on hidden channel
                 self.start_token();
@@ -4469,6 +4503,21 @@ impl<'src> Lexer<'src> {
         kw_tok_type: TokenTypeMacroCallOrStat,
         allow_macro_label: bool,
     ) {
+        // If we have macro separator virtual token enabled, we need to
+        // start by checking if we should emit it before the keyword token
+        #[cfg(feature = "macro_sep")]
+        {
+            // This will handle all cases except before the macro label.
+            // Macro label is
+            if needs_macro_sep(
+                self.buffer
+                    .last_token_info_on_default_channel()
+                    .map(|ti| ti.token_type),
+                kw_tok_type.into(),
+            ) {
+                self.emit_token(TokenChannel::DEFAULT, TokenType::MacroSep, Payload::None);
+            }
+        }
         // Emit the token for the keyword itself
 
         // We use hidden channel for the %str/%nrstr and the wrapping parens
