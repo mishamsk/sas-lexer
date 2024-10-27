@@ -331,9 +331,10 @@ impl WorkTokenizedBuffer {
             );
 
             // Check that the token start is more or equal to the start of the previous token
-            if let Some(last_token) = self.token_infos.last() {
+            if at.get() > 0 {
+                let prev_token = self.token_infos.get(at.get() as usize - 1);
                 debug_assert!(
-                    byte_offset >= last_token.byte_offset,
+                    prev_token.map_or(true, |t| byte_offset >= t.byte_offset),
                     "Token byte offset before previous token byte offset"
                 );
             } else {

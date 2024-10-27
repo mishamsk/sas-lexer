@@ -369,7 +369,7 @@ fn test_string_expr_with_macro_no_escape(
         ("&mv", TokenType::MacroVarExpr, Payload::None, "&mv"),
         ("\"\"tail", TokenType::StringExprText, Payload::StringLiteral(13, 18), "\"tail"),
         ("\"", TokenType::StringExprEnd, Payload::None, "\""),
-    ]
+    ], NO_ERRORS
 )]
 #[case::with_macro_and_ws_before_parens("\"%t /*c*/\n()\"",
     vec![
@@ -381,7 +381,7 @@ fn test_string_expr_with_macro_no_escape(
         ("(", TokenType::LPAREN),
         (")", TokenType::RPAREN),
         ("\"", TokenType::StringExprEnd),
-    ]
+    ], NO_ERRORS
 )]
 #[case::with_macro_and_ws_follower("\"%t /*c*/\n\"",
     vec![
@@ -389,7 +389,7 @@ fn test_string_expr_with_macro_no_escape(
         ("%t", TokenType::MacroIdentifier),
         (" /*c*/\n", TokenType::StringExprText),
         ("\"", TokenType::StringExprEnd),
-    ]
+    ], NO_ERRORS
 )]
 #[case::with_macro_and_ws_follower_label_like("\"%t /*c*/\n:post\"",
     vec![
@@ -397,12 +397,12 @@ fn test_string_expr_with_macro_no_escape(
         ("%t", TokenType::MacroIdentifier),
         (" /*c*/\n:post", TokenType::StringExprText),
         ("\"", TokenType::StringExprEnd),
-    ]
+    ], NO_ERRORS
 )]
 #[case::with_unlexed_macro_comment("\"%* not a comment;\"",
     vec![
         ("\"%* not a comment;\"", TokenType::StringLiteral),
-    ]
+    ], NO_ERRORS
 )]
 #[case::with_unlexed_macro_comment_in_macro("%put \"%* not a comment;\"",
     vec![
@@ -410,21 +410,14 @@ fn test_string_expr_with_macro_no_escape(
         (" ", TokenType::WS),
         ("\"%* not a comment;\"", TokenType::StringLiteral),
         ("", TokenType::SEMI),
-    ]
+    ], NO_ERRORS
 )]
 #[case::with_unlexed_cstyle_comment("\"/*not a comment*/\"",
     vec![
         ("\"/*not a comment*/\"", TokenType::StringLiteral),
-    ]
+    ], NO_ERRORS
 )]
-fn test_complex_string_expr(
-    #[case] contents: &str,
-    #[case] expected_token: Vec<impl TokenTestCase>,
-) {
-    assert_lexing(contents, expected_token, NO_ERRORS);
-}
-
-#[rstest]
+// Error recovery cases
 #[case::macro_stat_inside("%put \"%let v=1;\";",
     vec![
         ("%put", TokenType::KwmPut),
@@ -443,12 +436,12 @@ fn test_complex_string_expr(
         (ErrorKind::OpenCodeRecursionError, 6),
     ]
 )]
-fn test_string_expr_error_recovery(
+fn test_complex_string_expr(
     #[case] contents: &str,
-    #[case] expected_token: Vec<impl TokenTestCase>,
-    #[case] expected_error: Vec<impl ErrorTestCase>,
+    #[case] expected_tokens: Vec<impl TokenTestCase>,
+    #[case] expected_errors: Vec<impl ErrorTestCase>,
 ) {
-    assert_lexing(contents, expected_token, expected_error);
+    assert_lexing(contents, expected_tokens, expected_errors);
 }
 
 #[rstest]
@@ -569,7 +562,7 @@ fn test_datalines(#[values("", ";", ";\n\t/*comment*/  ")] prefix: &str, #[case]
             (";", TokenType::SEMI),
     ]
 )]
-#[case::after_macro("input %if &m %then %do; datalines $ %end; dept $;",
+#[cfg_attr(not(feature = "macro_sep"), case::after_macro("input %if &m %then %do; datalines $ %end; dept $;",
     vec![
             ("input", TokenType::KwInput),
             (" ", TokenType::WS),
@@ -594,7 +587,35 @@ fn test_datalines(#[values("", ";", ";\n\t/*comment*/  ")] prefix: &str, #[case]
             ("$", TokenType::DOLLAR),
             (";", TokenType::SEMI),
     ]
-)]
+))]
+#[cfg_attr(feature = "macro_sep", case::after_macro_msep("input %if &m %then %do; datalines $ %end; dept $;",
+    vec![
+            ("input", TokenType::KwInput),
+            (" ", TokenType::WS),
+            ("", TokenType::MacroSep),
+            ("%if", TokenType::KwmIf),
+            (" ", TokenType::WS),
+            ("&m", TokenType::MacroVarExpr),
+            (" ", TokenType::WS),
+            ("%then", TokenType::KwmThen),
+            (" ", TokenType::WS),
+            ("%do", TokenType::KwmDo),
+            (";", TokenType::SEMI),
+            (" ", TokenType::WS),
+            ("datalines", TokenType::Identifier),
+            (" ", TokenType::WS),
+            ("$", TokenType::DOLLAR),
+            (" ", TokenType::WS),
+            ("", TokenType::MacroSep),
+            ("%end", TokenType::KwmEnd),
+            (";", TokenType::SEMI),
+            (" ", TokenType::WS),
+            ("dept", TokenType::Identifier),
+            (" ", TokenType::WS),
+            ("$", TokenType::DOLLAR),
+            (";", TokenType::SEMI),
+    ]
+))]
 fn test_not_datalines(#[case] contents: &str, #[case] expected_token: Vec<impl TokenTestCase>) {
     assert_lexing(contents, expected_token, NO_ERRORS);
 }
@@ -1874,7 +1895,7 @@ fn test_macro_call_arg_disambiguation(#[case] expected_tokens: Vec<(&str, TokenT
         (")", TokenType::RPAREN, TokenChannel::HIDDEN),
     ]
 )]
-#[case::macro_stat_inside("%str( %let v=1;);",
+#[cfg_attr(not(feature = "macro_sep"), case::macro_stat_inside("%str( %let v=1;);",
     vec![
         ("%str", TokenType::KwmStr, TokenChannel::HIDDEN),
         ("(", TokenType::LPAREN, TokenChannel::HIDDEN),
@@ -1888,7 +1909,23 @@ fn test_macro_call_arg_disambiguation(#[case] expected_tokens: Vec<(&str, TokenT
         (")", TokenType::RPAREN, TokenChannel::HIDDEN),
         (";", TokenType::SEMI, TokenChannel::DEFAULT),
     ]
-)]
+))]
+#[cfg_attr(feature = "macro_sep", case::macro_stat_inside_msep("%str( %let v=1;);",
+    vec![
+        ("%str", TokenType::KwmStr, TokenChannel::HIDDEN),
+        ("(", TokenType::LPAREN, TokenChannel::HIDDEN),
+        (" ", TokenType::MacroString, TokenChannel::DEFAULT),
+        ("", TokenType::MacroSep, TokenChannel::DEFAULT),
+        ("%let", TokenType::KwmLet, TokenChannel::DEFAULT),
+        (" ", TokenType::WS, TokenChannel::HIDDEN),
+        ("v", TokenType::MacroString, TokenChannel::DEFAULT),
+        ("=", TokenType::ASSIGN, TokenChannel::DEFAULT),
+        ("1", TokenType::MacroString, TokenChannel::DEFAULT),
+        (";", TokenType::SEMI, TokenChannel::DEFAULT),
+        (")", TokenType::RPAREN, TokenChannel::HIDDEN),
+        (";", TokenType::SEMI, TokenChannel::DEFAULT),
+    ]
+))]
 fn test_macro_str_call(#[case] contents: &str, #[case] expected_token: Vec<impl TokenTestCase>) {
     assert_lexing(contents, expected_token, NO_ERRORS);
 }
@@ -4091,8 +4128,8 @@ vec![
     ],
     NO_ERRORS,
 )]
-// Cases of non-comments
-#[case::do_end_not_comment("a %do;\n\t* /*c*/ 2 %end;",
+// Cases of non-comments. Without macro sep feature
+#[cfg_attr(not(feature = "macro_sep"), case::do_end_not_comment("a %do;\n\t* /*c*/ 2 %end;",
     vec![
         ("a", TokenType::Identifier, Payload::None),
         (" ", TokenType::WS, Payload::None),
@@ -4109,12 +4146,12 @@ vec![
         (";", TokenType::SEMI, Payload::None),
     ],
     NO_ERRORS,
-)]
+))]
 // Tricky ones. Here we have branching, but we are "lucky" and
 // there is another statement after the first, hence we correctly
 // predict the last comment
-#[case::arithmetic_with_macro_branching_1(
-    "a = 1\n%if 1 %do;* 42;%end;%else %do;* 2;%end;b=1;*comment;",
+#[cfg_attr(not(feature = "macro_sep"), case::arithmetic_with_macro_branching_1(
+    "a = 1\n%if 1 %then %do;* 42;%end;%else %do;* 2;%end;b=1;*comment;",
     vec![
         ("a", TokenType::Identifier, Payload::None),
         (" ", TokenType::WS, Payload::None),
@@ -4125,6 +4162,8 @@ vec![
         ("%if", TokenType::KwmIf, Payload::None),
         (" ", TokenType::WS, Payload::None),
         ("1", TokenType::IntegerLiteral, Payload::Integer(1)),
+        (" ", TokenType::WS, Payload::None),
+        ("%then", TokenType::KwmThen, Payload::None),
         (" ", TokenType::WS, Payload::None),
         ("%do", TokenType::KwmDo, Payload::None),
         (";", TokenType::SEMI, Payload::None),
@@ -4151,11 +4190,11 @@ vec![
         ("*comment;", TokenType::PredictedCommentStat, Payload::None),
     ],
     NO_ERRORS,
-)]
+))]
 // Here we will not predict the last comment, as the terminating `;` is
 // inside the macro branch...
-#[case::arithmetic_with_macro_branching_2(
-    "a = 1\n%if 1 %do;* 42;*in-branch-comment;%end;*we_fail_here_comment;",
+#[cfg_attr(not(feature = "macro_sep"), case::arithmetic_with_macro_branching_2(
+    "a = 1\n%if 1 %then %do;* 42;*in-branch-comment;%end;*we_fail_here_comment;",
     vec![
         ("a", TokenType::Identifier, Payload::None),
         (" ", TokenType::WS, Payload::None),
@@ -4166,6 +4205,8 @@ vec![
         ("%if", TokenType::KwmIf, Payload::None),
         (" ", TokenType::WS, Payload::None),
         ("1", TokenType::IntegerLiteral, Payload::Integer(1)),
+        (" ", TokenType::WS, Payload::None),
+        ("%then", TokenType::KwmThen, Payload::None),
         (" ", TokenType::WS, Payload::None),
         ("%do", TokenType::KwmDo, Payload::None),
         (";", TokenType::SEMI, Payload::None),
@@ -4181,9 +4222,9 @@ vec![
         (";", TokenType::SEMI, Payload::None),
     ],
     NO_ERRORS,
-)]
+))]
 // And inside macro definitions we never predict comments with macro code before semi
-#[case::mixed_in_macro_def("a = 1\n%macro m; *%mc(); *com; *%let\na=1; %mend;",
+#[cfg_attr(not(feature = "macro_sep"), case::mixed_in_macro_def("a = 1\n%macro m; *%mc(); *com; *%let\na=1; %mend;",
     vec![
         ("a", TokenType::Identifier, Payload::None),
         (" ", TokenType::WS, Payload::None),
@@ -4216,8 +4257,8 @@ vec![
         (";", TokenType::SEMI, Payload::None),
     ],
     NO_ERRORS,
-)]
-#[case::before_mend_not_comment("a = 1\n%macro m; * /*c*/ 2 %mend;",
+))]
+#[cfg_attr(not(feature = "macro_sep"), case::before_mend_not_comment("a = 1\n%macro m; * /*c*/ 2 %mend;",
     vec![
         ("a", TokenType::Identifier, Payload::None),
         (" ", TokenType::WS, Payload::None),
@@ -4240,11 +4281,321 @@ vec![
         (";", TokenType::SEMI, Payload::None),
     ],
     NO_ERRORS,
-)]
+))]
+// Cases of non-comments. With macro sep feature
+#[cfg_attr(feature = "macro_sep", case::do_end_not_comment("a %do;\n\t* /*c*/ 2 %end;",
+    vec![
+        ("a", TokenType::Identifier, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("", TokenType::MacroSep, Payload::None),
+        ("%do", TokenType::KwmDo, Payload::None),
+        (";", TokenType::SEMI, Payload::None),
+        ("\n\t", TokenType::WS, Payload::None),
+        ("*", TokenType::STAR, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("/*c*/", TokenType::CStyleComment, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("2", TokenType::IntegerLiteral, Payload::Integer(2)),
+        (" ", TokenType::WS, Payload::None),
+        ("", TokenType::MacroSep, Payload::None),
+        ("%end", TokenType::KwmEnd, Payload::None),
+        (";", TokenType::SEMI, Payload::None),
+    ],
+    NO_ERRORS,
+))]
+// Tricky ones. Here we have branching, but we are "lucky" and
+// there is another statement after the first, hence we correctly
+// predict the last comment
+#[cfg_attr(feature = "macro_sep", case::arithmetic_with_macro_branching_1(
+    "a = 1\n%if 1 %then %do;* 42;%end;%else %do;* 2;%end;b=1;*comment;",
+    vec![
+        ("a", TokenType::Identifier, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("=", TokenType::ASSIGN, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("1", TokenType::IntegerLiteral, Payload::Integer(1)),
+        ("\n", TokenType::WS, Payload::None),
+        ("", TokenType::MacroSep, Payload::None),
+        ("%if", TokenType::KwmIf, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("1", TokenType::IntegerLiteral, Payload::Integer(1)),
+        (" ", TokenType::WS, Payload::None),
+        ("%then", TokenType::KwmThen, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("%do", TokenType::KwmDo, Payload::None),
+        (";", TokenType::SEMI, Payload::None),
+        ("*", TokenType::STAR, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("42", TokenType::IntegerLiteral, Payload::Integer(42)),
+        (";", TokenType::SEMI, Payload::None),
+        ("%end", TokenType::KwmEnd, Payload::None),
+        (";", TokenType::SEMI, Payload::None),
+        ("%else", TokenType::KwmElse, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("%do", TokenType::KwmDo, Payload::None),
+        (";", TokenType::SEMI, Payload::None),
+        ("*", TokenType::STAR, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("2", TokenType::IntegerLiteral, Payload::Integer(2)),
+        (";", TokenType::SEMI, Payload::None),
+        ("%end", TokenType::KwmEnd, Payload::None),
+        (";", TokenType::SEMI, Payload::None),
+        ("b", TokenType::Identifier, Payload::None),
+        ("=", TokenType::ASSIGN, Payload::None),
+        ("1", TokenType::IntegerLiteral, Payload::Integer(1)),
+        (";", TokenType::SEMI, Payload::None),
+        ("*comment;", TokenType::PredictedCommentStat, Payload::None),
+    ],
+    NO_ERRORS,
+))]
+// Here we will not predict the last comment, as the terminating `;` is
+// inside the macro branch...
+#[cfg_attr(feature = "macro_sep", case::arithmetic_with_macro_branching_2(
+    "a = 1\n%if 1 %then %do;* 42;*in-branch-comment;%end;*we_fail_here_comment;",
+    vec![
+        ("a", TokenType::Identifier, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("=", TokenType::ASSIGN, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("1", TokenType::IntegerLiteral, Payload::Integer(1)),
+        ("\n", TokenType::WS, Payload::None),
+        ("", TokenType::MacroSep, Payload::None),
+        ("%if", TokenType::KwmIf, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("1", TokenType::IntegerLiteral, Payload::Integer(1)),
+        (" ", TokenType::WS, Payload::None),
+        ("%then", TokenType::KwmThen, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("%do", TokenType::KwmDo, Payload::None),
+        (";", TokenType::SEMI, Payload::None),
+        ("*", TokenType::STAR, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("42", TokenType::IntegerLiteral, Payload::Integer(42)),
+        (";", TokenType::SEMI, Payload::None),
+        ("*in-branch-comment;", TokenType::PredictedCommentStat, Payload::None),
+        ("%end", TokenType::KwmEnd, Payload::None),
+        (";", TokenType::SEMI, Payload::None),
+        ("*", TokenType::STAR, Payload::None),
+        ("we_fail_here_comment", TokenType::Identifier, Payload::None),
+        (";", TokenType::SEMI, Payload::None),
+    ],
+    NO_ERRORS,
+))]
+// And inside macro definitions we never predict comments with macro code before semi
+#[cfg_attr(feature = "macro_sep", case::mixed_in_macro_def("a = 1\n%macro m; *%mc(); *com; *%let\na=1; %mend;",
+    vec![
+        ("a", TokenType::Identifier, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("=", TokenType::ASSIGN, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("1", TokenType::IntegerLiteral, Payload::Integer(1)),
+        ("\n", TokenType::WS, Payload::None),
+        ("", TokenType::MacroSep, Payload::None),
+        ("%macro", TokenType::KwmMacro, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("m", TokenType::Identifier, Payload::None),
+        (";", TokenType::SEMI, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("*", TokenType::STAR, Payload::None),
+        ("%mc", TokenType::MacroIdentifier, Payload::None),
+        ("(", TokenType::LPAREN, Payload::None),
+        (")", TokenType::RPAREN, Payload::None),
+        (";", TokenType::SEMI, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("*com;", TokenType::PredictedCommentStat, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("*", TokenType::STAR, Payload::None),
+        ("", TokenType::MacroSep, Payload::None),
+        ("%let", TokenType::KwmLet, Payload::None),
+        ("\n", TokenType::WS, Payload::None),
+        ("a", TokenType::MacroString, Payload::None),
+        ("=", TokenType::ASSIGN, Payload::None),
+        ("1", TokenType::MacroString, Payload::None),
+        (";", TokenType::SEMI, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("%mend", TokenType::KwmMend, Payload::None),
+        (";", TokenType::SEMI, Payload::None),
+    ],
+    NO_ERRORS,
+))]
+#[cfg_attr(feature = "macro_sep", case::before_mend_not_comment("a = 1\n%macro m; * /*c*/ 2 %mend;",
+    vec![
+        ("a", TokenType::Identifier, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("=", TokenType::ASSIGN, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("1", TokenType::IntegerLiteral, Payload::Integer(1)),
+        ("\n", TokenType::WS, Payload::None),
+        ("", TokenType::MacroSep, Payload::None),
+        ("%macro", TokenType::KwmMacro, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("m", TokenType::Identifier, Payload::None),
+        (";", TokenType::SEMI, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("*", TokenType::STAR, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("/*c*/", TokenType::CStyleComment, Payload::None),
+        (" ", TokenType::WS, Payload::None),
+        ("2", TokenType::IntegerLiteral, Payload::Integer(2)),
+        (" ", TokenType::WS, Payload::None),
+        ("", TokenType::MacroSep, Payload::None),
+        ("%mend", TokenType::KwmMend, Payload::None),
+        (";", TokenType::SEMI, Payload::None),
+    ],
+    NO_ERRORS,
+))]
 fn test_comment_prediction(
     #[case] contents: &str,
     #[case] expected_token: Vec<impl TokenTestCase>,
     #[case] expected_error: Vec<impl ErrorTestCase>,
 ) {
     assert_lexing(contents, expected_token, expected_error);
+}
+
+// This tests that macro sep is inserted before all the expected macro statements.
+// The fact that it is not inserted in other context is implicitly tested by
+// the other tests with the said macro stats/identifiers.
+#[cfg(feature = "macro_sep")]
+#[rstest]
+#[case::macro_label(vec![
+    ("%lbl", TokenType::MacroLabel, TokenChannel::DEFAULT),
+    ("/*c*/", TokenType::CStyleComment, TokenChannel::COMMENT),
+    (":", TokenType::COLON, TokenChannel::HIDDEN),
+])]
+#[case::abort(vec![
+    ("%abort", TokenType::KwmAbort, TokenChannel::DEFAULT),
+    (";", TokenType::SEMI, TokenChannel::DEFAULT),
+])]
+#[case::copy(vec![
+    ("%copy", TokenType::KwmCopy, TokenChannel::DEFAULT),
+    (" ", TokenType::WS, TokenChannel::HIDDEN),
+    ("a", TokenType::MacroString, TokenChannel::DEFAULT),
+    ("/", TokenType::FSLASH, TokenChannel::DEFAULT),
+    (";", TokenType::SEMI, TokenChannel::DEFAULT),
+])]
+#[case::display(vec![
+    ("%display", TokenType::KwmDisplay, TokenChannel::DEFAULT),
+    (";", TokenType::SEMI, TokenChannel::DEFAULT),
+])]
+#[case::global(vec![
+    ("%global", TokenType::KwmGlobal, TokenChannel::DEFAULT),
+    (" ", TokenType::WS, TokenChannel::HIDDEN),
+    ("a", TokenType::MacroString, TokenChannel::DEFAULT),
+    (";", TokenType::SEMI, TokenChannel::DEFAULT),
+])]
+#[case::goto(vec![
+    ("%goto", TokenType::KwmGoto, TokenChannel::DEFAULT),
+    (";", TokenType::SEMI, TokenChannel::DEFAULT),
+])]
+#[case::input(vec![
+    ("%input", TokenType::KwmInput, TokenChannel::DEFAULT),
+    (";", TokenType::SEMI, TokenChannel::DEFAULT),
+])]
+#[case::local(vec![
+    ("%local", TokenType::KwmLocal, TokenChannel::DEFAULT),
+    (" ", TokenType::WS, TokenChannel::HIDDEN),
+    ("a", TokenType::MacroString, TokenChannel::DEFAULT),
+    (";", TokenType::SEMI, TokenChannel::DEFAULT),
+])]
+#[case::put(vec![
+    ("%put", TokenType::KwmPut, TokenChannel::DEFAULT),
+    (";", TokenType::SEMI, TokenChannel::DEFAULT),
+])]
+#[case::macro_return(vec![
+    ("%return", TokenType::KwmReturn, TokenChannel::DEFAULT),
+    (";", TokenType::SEMI, TokenChannel::DEFAULT),
+])]
+#[case::symdel(vec![
+    ("%symdel", TokenType::KwmSymdel, TokenChannel::DEFAULT),
+    (";", TokenType::SEMI, TokenChannel::DEFAULT),
+])]
+#[case::syscall(vec![
+    ("%syscall", TokenType::KwmSyscall, TokenChannel::DEFAULT),
+    (" ", TokenType::WS, TokenChannel::HIDDEN),
+    ("a", TokenType::MacroString, TokenChannel::DEFAULT),
+    ("(", TokenType::LPAREN, TokenChannel::DEFAULT),
+    ("", TokenType::MacroStringEmpty, TokenChannel::DEFAULT),
+    (")", TokenType::RPAREN, TokenChannel::DEFAULT),
+    (";", TokenType::SEMI, TokenChannel::DEFAULT),
+])]
+#[case::sysexec(vec![
+    ("%sysexec", TokenType::KwmSysexec, TokenChannel::DEFAULT),
+    (";", TokenType::SEMI, TokenChannel::DEFAULT),
+])]
+#[case::syslput(vec![
+    ("%syslput", TokenType::KwmSyslput, TokenChannel::DEFAULT),
+    (";", TokenType::SEMI, TokenChannel::DEFAULT),
+])]
+#[case::sysmacdelete(vec![
+    ("%sysmacdelete", TokenType::KwmSysmacdelete, TokenChannel::DEFAULT),
+    (" ", TokenType::WS, TokenChannel::HIDDEN),
+    ("a", TokenType::MacroString, TokenChannel::DEFAULT),
+    ("/", TokenType::FSLASH, TokenChannel::DEFAULT),
+    (";", TokenType::SEMI, TokenChannel::DEFAULT),
+])]
+#[case::sysmstoreclear(vec![
+    ("%sysmstoreclear", TokenType::KwmSysmstoreclear, TokenChannel::DEFAULT),
+    (";", TokenType::SEMI, TokenChannel::DEFAULT),
+])]
+#[case::sysrput(vec![
+    ("%sysrput", TokenType::KwmSysrput, TokenChannel::DEFAULT),
+    (";", TokenType::SEMI, TokenChannel::DEFAULT),
+])]
+#[case::window(vec![
+    ("%window", TokenType::KwmWindow, TokenChannel::DEFAULT),
+    (";", TokenType::SEMI, TokenChannel::DEFAULT),
+])]
+#[case::sas_macro(vec![
+    ("%macro", TokenType::KwmMacro, TokenChannel::DEFAULT),
+    (" ", TokenType::WS, TokenChannel::HIDDEN),
+    ("a", TokenType::Identifier, TokenChannel::DEFAULT),
+    (";", TokenType::SEMI, TokenChannel::DEFAULT),
+])]
+#[case::mend(vec![
+    ("%mend", TokenType::KwmMend, TokenChannel::DEFAULT),
+    (";", TokenType::SEMI, TokenChannel::DEFAULT),
+])]
+#[case::macro_let(vec![
+    ("%let", TokenType::KwmLet, TokenChannel::DEFAULT),
+    (" ", TokenType::WS, TokenChannel::HIDDEN),
+    ("a", TokenType::MacroString, TokenChannel::DEFAULT),
+    ("=", TokenType::ASSIGN, TokenChannel::DEFAULT),
+    (";", TokenType::SEMI, TokenChannel::DEFAULT),
+])]
+#[case::macro_if(vec![
+    ("%if", TokenType::KwmIf, TokenChannel::DEFAULT),
+])]
+#[case::macro_else(vec![
+    ("%else", TokenType::KwmElse, TokenChannel::DEFAULT),
+])]
+#[case::macro_do(vec![
+    ("%do", TokenType::KwmDo, TokenChannel::DEFAULT),
+    (";", TokenType::SEMI, TokenChannel::DEFAULT),
+])]
+#[case::end(vec![
+    ("%end", TokenType::KwmEnd, TokenChannel::DEFAULT),
+    (";", TokenType::SEMI, TokenChannel::DEFAULT),
+])]
+fn test_macro_sep(#[case] expected_follow_tokens: Vec<(&str, TokenType, TokenChannel)>) {
+    // Create a full test case by prepending "data /*c*/\n"
+
+    let mut all_expected_tokens = vec![
+        ("data", TokenType::KwData, TokenChannel::DEFAULT),
+        (" ", TokenType::WS, TokenChannel::HIDDEN),
+        ("/*c*/", TokenType::CStyleComment, TokenChannel::COMMENT),
+        ("\n", TokenType::WS, TokenChannel::HIDDEN),
+        ("", TokenType::MacroSep, TokenChannel::DEFAULT),
+    ];
+
+    all_expected_tokens.extend(expected_follow_tokens);
+
+    assert_lexing(
+        all_expected_tokens
+            .iter()
+            .map(|(snip, _, _)| *snip)
+            .collect::<String>()
+            .as_str(),
+        all_expected_tokens,
+        NO_ERRORS,
+    );
 }

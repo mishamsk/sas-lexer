@@ -4508,13 +4508,24 @@ impl<'src> Lexer<'src> {
         #[cfg(feature = "macro_sep")]
         {
             // This will handle all cases except before the macro label.
-            // Macro label is
+            // Macro label is disambiguated via a separate mode, see below
+            // how MacroIdentifier is handled.
+            // Also, we do not emit macro sep in string expressions and macro
+            // args, which can't have labels, so the logic is directly here
+            // and not checked by the shared `needs_macro_sep` fn
             if needs_macro_sep(
                 self.buffer
                     .last_token_info_on_default_channel()
                     .map(|ti| ti.token_type),
                 kw_tok_type.into(),
-            ) {
+            ) && self.mode_stack.last().is_none_or(|m| {
+                !matches!(
+                    m,
+                    LexerMode::StringExpr { .. }
+                        | LexerMode::MacroCallArgOrValue { .. }
+                        | LexerMode::MacroCallValue { .. }
+                )
+            }) {
                 self.emit_token(TokenChannel::DEFAULT, TokenType::MacroSep, Payload::None);
             }
         }

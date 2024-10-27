@@ -107,7 +107,8 @@ pub(super) const fn needs_macro_sep(
         )
     ) && matches!(
         tok_type,
-        TokenType::KwmAbort
+        TokenType::MacroLabel
+            | TokenType::KwmAbort
             | TokenType::KwmCopy
             | TokenType::KwmDisplay
             | TokenType::KwmGlobal
