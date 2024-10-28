@@ -4518,7 +4518,7 @@ impl<'src> Lexer<'src> {
                     .last_token_info_on_default_channel()
                     .map(|ti| ti.token_type),
                 kw_tok_type.into(),
-            ) && self.mode_stack.last().is_none_or(|m| {
+            ) && self.mode_stack.last().map_or(true, |m| {
                 !matches!(
                     m,
                     LexerMode::StringExpr { .. }

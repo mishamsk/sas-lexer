@@ -129,7 +129,6 @@ tasks:
     generates:
       - target/debug/*.*
     cmds:
-      - cargo build
       - maturin develop --uv -r
 
   # Test tasks

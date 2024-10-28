@@ -3,7 +3,7 @@ requires = ["maturin>=1.5,<2.0"]
 build-backend = "maturin"
 
 [project]
-name = "sas-lexer-rust"
+name = "sas-lexer"
 version = "0.1.0"
 requires-python = ">=3.10"
 classifiers = [
@@ -14,13 +14,13 @@ classifiers = [
 ]
 dependencies = ["msgspec>=0.18.0"]
 
-[tool.uv]
-dev-dependencies = [
-    "ipython>=8.27.0",
-    "mypy>=1.10.0",
-    "pre-commit>=4.0.0",
-    "pytest>=8.0.0",
-    "ruff>=0.6.0",
+[dependency-groups]
+dev = [
+    "mypy[faster-cache]>=1.13.0",
+    "pre-commit>=4.0.1",
+    "pytest>=8.3.3",
+    "ruff>=0.6.9",
+    "uv>=0.4.27",
 ]
 
 [tool.maturin]
@@ -60,7 +60,3 @@ ignore = [
     "E501",    # line too long, handled by ruff format
     "PLC0105", # We are ok with TypeVars without variance in name
 ]
-
-
-# Avoid trying to fix flake8-bugbear (`B`) violations.
-# unfixable = ["B"]

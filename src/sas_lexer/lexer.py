@@ -2,7 +2,7 @@ from collections.abc import Sequence
 
 from msgspec.msgpack import Decoder
 
-from sas_lexer._sas_lexer_rust import lex_program_from_str as _lex_program_from_str
+from sas_lexer._sas_lexer_rust import _lex_program_from_str
 from sas_lexer.error import Error
 from sas_lexer.token import Token
 
