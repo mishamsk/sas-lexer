@@ -58,7 +58,7 @@ pub(crate) fn token_to_string(
     let token_raw_text = get_token_raw_text(token, source);
 
     let token_type = token.token_type.to_string();
-    let token_channel = token.channel.to_string();
+    let token_channel = token.channel.to_string()[..1].to_uppercase();
 
     let payload_str = match token.payload {
         Payload::None => "<None>".to_string(),
@@ -77,9 +77,9 @@ pub(crate) fn token_to_string(
 
     // Constructing the string representation of the token
     format!(
-        "[@{token_index},{token_start}:{token_stop}={token_raw_text},<{token_type}>,\
+        "[@{token_index},{token_start}:{token_stop}={token_raw_text:?},<{token_type}>,\
         L{start_line}:C{start_column}-L{end_line}:C{end_column},chl={token_channel},\
-        pl={payload_str}]"
+        pl={payload_str:?}]"
     )
 }
 

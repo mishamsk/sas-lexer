@@ -1,12 +1,15 @@
 from msgspec import Struct
 
+from sas_lexer.token_channel import TokenChannel
+from sas_lexer.token_type import TokenType
+
 
 class Token(Struct, array_like=True, gc=False, frozen=True):
     """Represents one lexed token.
 
     Attributes:
         channel (int): Channel of the token.
-        token_type (int): Type of the token.
+        token_type (TokenType): Type of the token.
         token_index (int): Token index.
         start (int): Zero-based char index of the token start in the source string.
         stop (int): Zero-based char index of the token end in the source string.
@@ -23,8 +26,8 @@ class Token(Struct, array_like=True, gc=False, frozen=True):
             these offsets will give the encoded unquoted string value of the token.
     """
 
-    channel: int
-    token_type: int
+    channel: TokenChannel
+    token_type: TokenType
     token_index: int
     start: int
     stop: int

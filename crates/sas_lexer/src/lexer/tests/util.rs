@@ -18,7 +18,7 @@ fn token_to_string_inner<S: AsRef<str>>(
         .get_token_raw_text(token, source)?
         .unwrap_or("<no text>");
     let token_type = buffer.get_token_type(token)?;
-    let token_channel = buffer.get_token_channel(token)?;
+    let token_channel = buffer.get_token_channel(token)?.to_string()[..1].to_uppercase();
     let payload = buffer.get_token_payload(token)?;
 
     let payload_str = match payload {
@@ -31,14 +31,16 @@ fn token_to_string_inner<S: AsRef<str>>(
                 format!("{val:.3e}")
             }
         }
-        Payload::StringLiteral(start, end) => buffer.get_string_literal(start, end)?.to_string(),
+        Payload::StringLiteral(start, end) => {
+            format!("\"{}\"", buffer.get_string_literal(start, end)?.to_string())
+        }
     };
 
     // Constructing the string representation of the token
     let token_repr = format!(
-        "[@{token},{token_start}:{token_end}={token_text:?},<{token_type}>,\
-        L{start_line}:C{start_column}-L{end_line}:C{end_column},chl={token_channel},\
-        pl={payload_str:?}]"
+        "[@{token},{token_start}:{token_end}=\"{token_text}\",<{token_type}>,\
+        L{start_line}:C{start_column}-L{end_line}:C{end_column},chl=<{token_channel}>,\
+        pl={payload_str}]"
     );
 
     Ok(token_repr)
