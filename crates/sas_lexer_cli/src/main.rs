@@ -1,9 +1,7 @@
-mod antlr;
 mod lex;
 mod print;
 mod stat;
 
-use antlr::write_tokens_file;
 use clap::Parser;
 use clap::Subcommand;
 use lex::lex_and_print;
@@ -63,11 +61,6 @@ enum Commands {
         /// If not provided, nothing is printed.
         #[arg(short)]
         context_lines: Option<usize>,
-    },
-    /// Generate ANTLR .tokens file
-    Gen {
-        /// The path to output the .tokens file to. If not provided, writes to stdout.
-        grammar_file_path: Option<PathBuf>,
     },
     /// Run lexing over samples and generate various statistics used for
     /// debugging and optimization.
@@ -220,9 +213,6 @@ fn main() -> io::Result<()> {
                 }
             }
         }
-        Commands::Gen {
-            grammar_file_path: grammar,
-        } => write_tokens_file(grammar)?,
         Commands::Stats {
             samples,
             #[cfg(feature = "polars")]

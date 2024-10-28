@@ -56,14 +56,7 @@ fn generate_token_channel_python_enum() -> Result<()> {
     enum_str.push_str("class TokenChannel(IntEnum):\n");
 
     for token_channel in TokenChannel::iter() {
-        enum_str.push_str(
-            format!(
-                "    {} = {}\n",
-                token_channel.to_string(),
-                token_channel as u8
-            )
-            .as_str(),
-        );
+        enum_str.push_str(format!("    {} = {}\n", token_channel, token_channel as u8).as_str());
     }
 
     // Now write the enum to a file
