@@ -8,7 +8,7 @@ class Token(Struct, array_like=True, gc=False, frozen=True):
     """Represents one lexed token.
 
     Attributes:
-        channel (int): Channel of the token.
+        channel (TokenChannel): Channel of the token.
         token_type (TokenType): Type of the token.
         token_index (int): Token index.
         start (int): Zero-based char index of the token start in the source string.

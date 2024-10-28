@@ -72,7 +72,7 @@ def _to_rust_yaml_repr(val: str) -> str:
     return f'\\"{s}\\"'
 
 
-def _token_to_string(token_idx: int, token: Token, source: str, str_lit_buf: bytes) -> str:
+def _token_to_string(token: Token, source: str, str_lit_buf: bytes) -> str:
     """Generates the same string representation as our test printer in Rust."""
     payload_str = "<None>"
 
@@ -96,7 +96,7 @@ def _token_to_string(token_idx: int, token: Token, source: str, str_lit_buf: byt
     )
 
     return (
-        f"[@{token_idx!s},{token.start}:{token.stop}={token_raw_text},"
+        f"[@{token.token_index!s},{token.start}:{token.stop}={token_raw_text},"
         f"<{_token_type_to_rust_str(token.token_type)}>,L{token.line}:C{token.column}-"
         f"L{token.end_line}:C{token.end_column},chl=<{token.channel.name[0]}>,pl={payload_str}]"
     )
@@ -112,9 +112,7 @@ expression: tokens
 ---
 - "\
 """
-    body = '"\n- "'.join(
-        _token_to_string(idx, token, source, str_lit_buf) for idx, token in enumerate(tokens)
-    )
+    body = '"\n- "'.join(_token_to_string(token, source, str_lit_buf) for token in tokens)
     return header + body + '"\n'
 
 
