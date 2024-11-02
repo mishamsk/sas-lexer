@@ -3,5 +3,5 @@ from enum import IntEnum
 
 class TokenChannel(IntEnum):
     DEFAULT = 0
-    COMMENT = 1
-    HIDDEN = 2
+    HIDDEN = 1
+    COMMENT = 2

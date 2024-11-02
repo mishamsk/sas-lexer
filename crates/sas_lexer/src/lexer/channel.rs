@@ -9,6 +9,6 @@ use serde_repr::Serialize_repr;
 pub enum TokenChannel {
     #[default]
     DEFAULT,
-    COMMENT,
     HIDDEN, // whitespace and other things to skip
+    COMMENT,
 }

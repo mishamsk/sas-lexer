@@ -1,3 +1,5 @@
+use strum::EnumMessage;
+
 use crate::{
     error::{ErrorInfo, ErrorKind},
     lex_program, LexResult, Payload, TokenChannel, TokenIdx, TokenType, TokenizedBuffer,
@@ -52,7 +54,8 @@ pub(super) fn token_to_string<S: AsRef<str>>(
     buffer: &TokenizedBuffer,
     source: &S,
 ) -> String {
-    token_to_string_inner(token, buffer, source).unwrap_or_else(|err| err.to_string())
+    token_to_string_inner(token, buffer, source)
+        .unwrap_or_else(|err| err.get_message().unwrap_or("Unknown error").to_string())
 }
 
 pub(super) fn error_to_string<S: AsRef<str>>(

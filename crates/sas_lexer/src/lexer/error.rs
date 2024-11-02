@@ -1,15 +1,15 @@
 use super::buffer::TokenIdx;
-use std::fmt::Display;
+use std::ops::Range;
 #[cfg(test)]
 use strum::IntoStaticStr;
-use strum::{EnumIter, EnumMessage};
+use strum::{Display, EnumCount, EnumIter, EnumMessage};
 
 #[cfg(feature = "serde")]
 use serde::Serialize;
 #[cfg(feature = "serde")]
 use serde_repr::Serialize_repr;
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy, EnumIter, EnumMessage)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Display, EnumIter, EnumMessage, EnumCount)]
 #[cfg_attr(test, derive(IntoStaticStr))]
 #[cfg_attr(feature = "serde", derive(Serialize_repr))]
 #[repr(u16)]
@@ -110,26 +110,24 @@ pub enum ErrorKind {
     InternalErrorEmptyPendingStatStack = 9009,
 }
 
+pub const CODE_ERROR_RANGE: Range<u16> = 1000..2000;
+pub const WARNING_RANGE: Range<u16> = 4000..5000;
+pub const INTERNAL_ERROR_RANGE: Range<u16> = 9000..10000;
+
 impl ErrorKind {
     #[must_use]
     pub fn is_internal(&self) -> bool {
-        (*self as u16) > 9000u16 && (*self as u16) < 10000u16
+        INTERNAL_ERROR_RANGE.contains(&(*self as u16))
     }
 
     #[must_use]
     pub fn is_warning(&self) -> bool {
-        (*self as u16) > 4000u16 && (*self as u16) < 5000u16
+        WARNING_RANGE.contains(&(*self as u16))
     }
 
     #[must_use]
     pub fn is_code_error(&self) -> bool {
-        (*self as u16) > 1000u16 && (*self as u16) < 2000u16
-    }
-}
-
-impl Display for ErrorKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.get_message().unwrap_or("Unknown error"))
+        CODE_ERROR_RANGE.contains(&(*self as u16))
     }
 }
 

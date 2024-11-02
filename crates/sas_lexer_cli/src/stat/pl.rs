@@ -10,7 +10,7 @@ use sas_lexer::{
     error::{ErrorInfo, ErrorKind},
     Payload, ResolvedTokenInfo,
 };
-use strum::IntoEnumIterator;
+use strum::{EnumMessage, IntoEnumIterator};
 use walkdir::WalkDir;
 
 use crate::{
@@ -61,7 +61,9 @@ fn create_error_dict_df() -> PolarsResult<LazyFrame> {
         ),
         Series::new(
             "error_message".into(),
-            ErrorKind::iter().map(|e| e.to_string()).collect::<Vec<_>>(),
+            ErrorKind::iter()
+                .map(|e| e.get_message().unwrap_or("Unknown error"))
+                .collect::<Vec<_>>(),
         ),
     ])?
     .lazy())

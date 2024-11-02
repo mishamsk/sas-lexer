@@ -171,13 +171,23 @@ pub(super) struct MacroArgNameValueFlags(u8);
 impl MacroArgNameValueFlags {
     const CONTEXT_MASK: u8 = 0b0000_0011;
     const POPULATE_NEXT_ARG_STACK_MASK: u8 = 0b0000_0100;
+    const TERMINATE_ON_COMMA_MASK: u8 = 0b0000_1000;
 
-    pub(super) const fn new(context: MacroArgContext, populate_next_arg_stack: bool) -> Self {
+    pub(super) const fn new(
+        context: MacroArgContext,
+        populate_next_arg_stack: bool,
+        terminate_on_comma: bool,
+    ) -> Self {
         let mut bits = context as u8;
 
         if populate_next_arg_stack {
             bits |= Self::POPULATE_NEXT_ARG_STACK_MASK;
         }
+
+        if terminate_on_comma {
+            bits |= Self::TERMINATE_ON_COMMA_MASK;
+        }
+
         Self(bits)
     }
 
@@ -191,6 +201,10 @@ impl MacroArgNameValueFlags {
 
     pub(super) const fn populate_next_arg_stack(self) -> bool {
         self.0 & Self::POPULATE_NEXT_ARG_STACK_MASK != 0
+    }
+
+    pub(super) const fn terminate_on_comma(self) -> bool {
+        self.0 & Self::TERMINATE_ON_COMMA_MASK != 0
     }
 }
 
@@ -296,7 +310,7 @@ pub(crate) enum LexerMode {
     /// A mode to check for an optional trailing argument in a macro call.
     /// As of today used only for `%sysfunc` where the last argument may
     /// or may not be present.
-    MaybeOptionalMacroArgValue,
+    MaybeTailMacroArgValue,
     /// The state for lexing inside an %str/%nrstr call. I.e. in `%str(-->1+1<--)`.
     MacroStrQuotedExpr {
         /// Boolean flag indicates if % and & are masked, i.e. this is %nrstr.
@@ -348,6 +362,7 @@ pub(crate) enum LexerMode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rstest::rstest;
     use strum::IntoEnumIterator;
 
     #[test]
@@ -451,14 +466,17 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn test_macro_arg_name_value_flags() {
+    #[rstest]
+    fn test_macro_arg_name_value_flags(
+        #[values(true, false)] populate_next_arg_stack: bool,
+        #[values(true, false)] terminate_on_comma: bool,
+    ) {
         for context in MacroArgContext::iter() {
-            for populate_next_arg_stack in &[true, false] {
-                let flags = MacroArgNameValueFlags::new(context, *populate_next_arg_stack);
-                assert_eq!(flags.context(), context);
-                assert_eq!(flags.populate_next_arg_stack(), *populate_next_arg_stack);
-            }
+            let flags =
+                MacroArgNameValueFlags::new(context, populate_next_arg_stack, terminate_on_comma);
+            assert_eq!(flags.context(), context);
+            assert_eq!(flags.populate_next_arg_stack(), populate_next_arg_stack);
+            assert_eq!(flags.terminate_on_comma(), terminate_on_comma);
         }
     }
 

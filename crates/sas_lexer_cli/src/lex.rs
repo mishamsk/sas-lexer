@@ -1,10 +1,10 @@
+use sas_lexer::{error::ErrorInfo, lex_program, LexResult, TokenizedBuffer};
 use std::panic::catch_unwind;
 use std::{
     io::Write,
     time::{Duration, Instant},
 };
-
-use sas_lexer::{error::ErrorInfo, lex_program, LexResult, TokenizedBuffer};
+use strum::EnumMessage;
 
 use crate::print::{print_errors, print_tokens};
 
@@ -28,7 +28,7 @@ pub(crate) fn safe_lex(
         )),
         Err(error) => {
             if print_lex_return_errors {
-                eprintln!("Error: {error}");
+                eprintln!("Error: {}", error.get_message().unwrap_or("Unknown error"));
             }
             None
         }

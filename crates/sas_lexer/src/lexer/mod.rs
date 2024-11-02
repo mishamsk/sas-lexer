@@ -536,7 +536,7 @@ impl<'src> Lexer<'src> {
                 | LexerMode::MaybeMacroCallArgAssign { .. }
                 | LexerMode::MacroCallArgOrValue { .. }
                 | LexerMode::MaybeMacroDefArgs
-                | LexerMode::MaybeOptionalMacroArgValue
+                | LexerMode::MaybeTailMacroArgValue
                 | LexerMode::MacroDefArg
                 | LexerMode::MacroDefNextArgOrDefaultValue
                 | LexerMode::MacroSemiTerminatedTextExpr
@@ -658,8 +658,8 @@ impl<'src> Lexer<'src> {
             LexerMode::MaybeMacroCallArgAssign { flags } => {
                 self.lex_maybe_macro_call_arg_assign(next_char, flags);
             }
-            LexerMode::MaybeOptionalMacroArgValue => {
-                self.lex_maybe_optional_macro_call_arg_value(next_char);
+            LexerMode::MaybeTailMacroArgValue => {
+                self.lex_maybe_tail_macro_call_arg_value(next_char);
             }
             LexerMode::MacroCallArgOrValue { flags } => {
                 self.dispatch_macro_call_arg_or_value(next_char, flags);
@@ -962,7 +962,11 @@ impl<'src> Lexer<'src> {
                     }
                     MacroEvalNextArgumentMode::MacroArg => {
                         self.push_mode(LexerMode::MacroCallValue {
-                            flags: MacroArgNameValueFlags::new(MacroArgContext::BuiltInMacro, true),
+                            flags: MacroArgNameValueFlags::new(
+                                MacroArgContext::BuiltInMacro,
+                                true,
+                                true,
+                            ),
                             pnl: 0,
                         });
                     }
@@ -1819,7 +1823,7 @@ impl<'src> Lexer<'src> {
                 ));
                 // The handler fo arguments will push the mode for the comma, etc.
                 self.push_mode(LexerMode::MacroCallArgOrValue {
-                    flags: MacroArgNameValueFlags::new(MacroArgContext::MacroCall, true),
+                    flags: MacroArgNameValueFlags::new(MacroArgContext::MacroCall, true, true),
                 });
                 // Leading insiginificant WS before the first argument
                 self.push_mode(LexerMode::WsOrCStyleCommentOnly);
@@ -1941,8 +1945,8 @@ impl<'src> Lexer<'src> {
     /// the necessary following modes for exactly one macro argument
     /// or does nothing.
     #[inline]
-    fn lex_maybe_optional_macro_call_arg_value(&mut self, next_char: char) {
-        debug_assert!(matches!(self.mode(), LexerMode::MaybeOptionalMacroArgValue));
+    fn lex_maybe_tail_macro_call_arg_value(&mut self, next_char: char) {
+        debug_assert!(matches!(self.mode(), LexerMode::MaybeTailMacroArgValue));
 
         // Pop this mode no matter what
         self.pop_mode();
@@ -1955,7 +1959,7 @@ impl<'src> Lexer<'src> {
             self.emit_token(TokenChannel::DEFAULT, TokenType::COMMA, Payload::None);
 
             self.push_mode(LexerMode::MacroCallValue {
-                flags: MacroArgNameValueFlags::new(MacroArgContext::BuiltInMacro, false),
+                flags: MacroArgNameValueFlags::new(MacroArgContext::BuiltInMacro, false, false),
                 pnl: 0,
             });
             // Leading insiginificant WS before the argument
@@ -2116,7 +2120,7 @@ impl<'src> Lexer<'src> {
                     }
                 }
             }
-            ',' => {
+            ',' if flags.terminate_on_comma() => {
                 // Found the terminator, pop the mode and push new modes
                 // to expect stuff then return
                 safe_pop_mode(self);
@@ -2272,7 +2276,7 @@ impl<'src> Lexer<'src> {
                 self.add_line();
                 self.lex_macro_string_in_macro_call_arg_value(flags, parens_nesting_level);
             }
-            ',' if parens_nesting_level == 0 => {
+            ',' if parens_nesting_level == 0 && flags.terminate_on_comma() => {
                 // Found the terminator, pop the mode and push new modes
                 // to expect stuff then return
                 self.pop_mode();
@@ -2409,7 +2413,9 @@ impl<'src> Lexer<'src> {
                     self.pop_mode();
                     return;
                 }
-                ',' if parens_nesting_level.wrapping_add_signed(local_parens_nesting) == 0 => {
+                ',' if parens_nesting_level.wrapping_add_signed(local_parens_nesting) == 0
+                    && flags.terminate_on_comma() =>
+                {
                     // Found the terminator, pop the mode and push new modes
                     // to expect stuff, emit token then return
                     self.emit_token(TokenChannel::DEFAULT, TokenType::MacroString, Payload::None);
@@ -2497,7 +2503,7 @@ impl<'src> Lexer<'src> {
             // more stuff...
             self.pop_mode();
             self.push_mode(LexerMode::MacroCallArgOrValue {
-                flags: MacroArgNameValueFlags::new(MacroArgContext::MacroDef, true),
+                flags: MacroArgNameValueFlags::new(MacroArgContext::MacroDef, true, true),
             });
             return;
         }
@@ -2529,7 +2535,7 @@ impl<'src> Lexer<'src> {
                 // The default value. It will add the next arg mode to stack
                 // if `,` is found
                 self.push_mode(LexerMode::MacroCallValue {
-                    flags: MacroArgNameValueFlags::new(MacroArgContext::MacroDef, true),
+                    flags: MacroArgNameValueFlags::new(MacroArgContext::MacroDef, true, true),
                     pnl: 0,
                 });
                 // Leading insiginificant WS before the argument default value
@@ -4942,7 +4948,7 @@ impl<'src> Lexer<'src> {
             TokenChannel::DEFAULT,
         ));
         self.push_mode(LexerMode::MacroCallValue {
-            flags: MacroArgNameValueFlags::new(MacroArgContext::BuiltInMacro, false),
+            flags: MacroArgNameValueFlags::new(MacroArgContext::BuiltInMacro, false, true),
             pnl: 0,
         });
         // Leading insiginificant WS before the first argument
@@ -4968,7 +4974,7 @@ impl<'src> Lexer<'src> {
         // Built-ins do not allow named arguments, so we pass `MacroCallValue`
         // right away
         self.push_mode(LexerMode::MacroCallValue {
-            flags: MacroArgNameValueFlags::new(MacroArgContext::BuiltInMacro, true),
+            flags: MacroArgNameValueFlags::new(MacroArgContext::BuiltInMacro, true, true),
             pnl: 0,
         });
         // Leading insiginificant WS before the first argument
@@ -4991,7 +4997,7 @@ impl<'src> Lexer<'src> {
         ));
         // The handler for arguments will push the mode for the comma, etc.
         self.push_mode(LexerMode::MacroCallArgOrValue {
-            flags: MacroArgNameValueFlags::new(MacroArgContext::MacroCall, true),
+            flags: MacroArgNameValueFlags::new(MacroArgContext::MacroCall, true, true),
         });
         // Leading insiginificant WS before the first argument
         self.push_mode(LexerMode::WsOrCStyleCommentOnly);
@@ -5020,7 +5026,7 @@ impl<'src> Lexer<'src> {
             TokenType::RPAREN,
             TokenChannel::DEFAULT,
         ));
-        self.push_mode(LexerMode::MaybeOptionalMacroArgValue);
+        self.push_mode(LexerMode::MaybeTailMacroArgValue);
         // Leading insiginificant WS before the last argument
         self.push_mode(LexerMode::WsOrCStyleCommentOnly);
         // Inner closing parenthesis
