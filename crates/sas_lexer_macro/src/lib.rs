@@ -226,8 +226,8 @@ pub fn generate_macro_keyword_map(input: TokenStream) -> TokenStream {
 /// - Debug, Clone, Copy, PartialEq, Eq, EnumIter
 ///
 /// Also, the following impls are generated:
-/// - From<SubsetEnum> for FullEnum
-/// - TryFrom<FullEnum> for SubsetEnum
+/// - `From<SubsetEnum> for FullEnum`
+/// - `TryFrom<FullEnum> for SubsetEnum`
 ///
 /// Also currently assumes `repr(u16)`.
 ///

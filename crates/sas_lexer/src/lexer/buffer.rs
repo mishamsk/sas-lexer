@@ -52,7 +52,7 @@ impl LineIdx {
 pub enum Payload {
     None,
     /// Stores parsed integer value. We do not parse -N as a single token
-    /// so it is unsugned.
+    /// so it is unsigned.
     Integer(u64),
     /// Stores parsed float value
     Float(f64),
