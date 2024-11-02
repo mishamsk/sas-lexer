@@ -16,7 +16,6 @@ sas_lexer = { workspace = true, features = ["opti_stats", "macro_sep"] }
 clap = { version = "4.5.10", features = ["derive", "env"] }
 walkdir = { workspace = true }
 strum = { workspace = true }
-convert_case = "0.6.0"
 polars = { version = "0.43.1", features = [
     "lazy",
     "parquet",

@@ -14,17 +14,38 @@ repos:
       - id: trailing-whitespace
         args: [--markdown-linebreak-ext=md]
       - id: check-added-large-files
+  - repo: https://github.com/est31/cargo-udeps
+    rev: v0.1.52
+    hooks:
+      - id: udeps
   - repo: https://github.com/astral-sh/ruff-pre-commit
     # Ruff version.
-    rev: v0.6.9
+    rev: v0.7.2
     hooks:
       # Run the linter.
       - id: ruff
         args: ["--fix", "--exit-non-zero-on-fix"]
       # Run the formatter.
       - id: ruff-format
-  # - repo: https://github.com/PyCQA/docformatter
-  #   rev: v1.7.5
-  #   hooks:
-  #     - id: docformatter
-  #       args: ["--in-place"]
+  - repo: local
+    hooks:
+      - id: rustfmt
+        name: Rustfmt
+        entry: cargo fmt
+        language: system
+        types: [rust]
+        args: ["--all", "--check"]
+        pass_filenames: false
+      - id: cargo-check
+        name: Cargo Check
+        entry: cargo check
+        language: system
+        types: [rust]
+        pass_filenames: false
+      - id: clippy
+        name: Clippy
+        entry: cargo clippy
+        language: system
+        types: [rust]
+        args: ["--all-features", "--", "-D", "warnings"]
+        pass_filenames: false

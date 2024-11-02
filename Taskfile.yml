@@ -54,7 +54,6 @@ tasks:
     desc: "Run linters"
     cmds:
       - uv run pre-commit run --all-files
-      - cargo clippy --all-features -- -D warnings
 
   # Cleanup tasks
   clean-pyc:
