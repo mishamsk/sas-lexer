@@ -1,6 +1,7 @@
 ---
-source: crates/sas_lexer/src/lexer/tests/test_sample_files.rs
+source: crates/sas-lexer/src/lexer/tests/test_sample_files.rs
 expression: tokens
+snapshot_kind: text
 ---
 - "[@0,0:79=\"******************************************************************************;\",<PredictedCommentStat>,L1:C0-L1:C79,chl=<C>,pl=<None>]"
 - "[@1,79:80=\"\n\",<WS>,L1:C79-L1:C80,chl=<H>,pl=<None>]"

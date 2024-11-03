@@ -1,5 +1,5 @@
 [package]
-name = "sas_lexer_cli"
+name = "sas-lexer-cli"
 authors = { workspace = true }
 edition = { workspace = true }
 publish = { workspace = true }
@@ -12,7 +12,7 @@ name = "sas-lexer"
 path = "src/main.rs"
 
 [dependencies]
-sas_lexer = { workspace = true, features = ["opti_stats", "macro_sep"] }
+sas-lexer = { workspace = true, features = ["opti_stats", "macro_sep"] }
 clap = { version = "4.5.10", features = ["derive", "env"] }
 walkdir = { workspace = true }
 strum = { workspace = true }

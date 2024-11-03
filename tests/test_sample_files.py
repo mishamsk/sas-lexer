@@ -9,7 +9,7 @@ from sas_lexer import lex_program_from_str
 from sas_lexer.token import Token
 from sas_lexer.token_type import TokenType
 
-RUST_TESTS_BASE_PATH = Path(__file__).parent.parent / "crates/sas_lexer/src/lexer/tests"
+RUST_TESTS_BASE_PATH = Path(__file__).parent.parent / "crates/sas-lexer/src/lexer/tests"
 TEST_SAMPLES = RUST_TESTS_BASE_PATH / "samples"
 TEST_SNAPSHOTS = RUST_TESTS_BASE_PATH / "snapshots"
 
@@ -107,8 +107,9 @@ def _get_expected_snap_content_from_tokens(
 ):
     header = """\
 ---
-source: crates/sas_lexer/src/lexer/tests/test_sample_files.rs
+source: crates/sas-lexer/src/lexer/tests/test_sample_files.rs
 expression: tokens
+snapshot_kind: text
 ---
 - "\
 """

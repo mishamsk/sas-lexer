@@ -1,5 +1,5 @@
 [package]
-name = "sas_lexer_py"
+name = "sas-lexer-py"
 authors = { workspace = true }
 edition = { workspace = true }
 publish = { workspace = true }
@@ -15,12 +15,12 @@ crate-type = ["cdylib"]
 [dependencies]
 pyo3 = "0.22.2"
 rmp-serde = { workspace = true }
-sas_lexer = { workspace = true, features = ["serde", "macro_sep"] }
+sas-lexer = { workspace = true, features = ["serde", "macro_sep"] }
 serde_bytes = "0.11.15"
 
 [build-dependencies]
 anyhow = "1.0.91"
-sas_lexer = { workspace = true, features = ["serde", "macro_sep"] }
+sas-lexer = { workspace = true, features = ["serde", "macro_sep"] }
 strum = { workspace = true }
 convert_case = "0.6.0"
 

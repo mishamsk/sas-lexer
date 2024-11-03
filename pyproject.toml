@@ -7,10 +7,19 @@ name = "sas-lexer"
 version = "0.1.0"
 requires-python = ">=3.10"
 classifiers = [
-    "Programming Language :: Rust",
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
     "Programming Language :: Python :: Implementation :: CPython",
-    "Programming Language :: Python :: Implementation :: PyPy",
-    "Private :: Do Not Upload",
+    "Programming Language :: Rust",
+    "Topic :: Software Development :: Compilers",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Software Development :: Libraries",
+    "Typing :: Typed",
 ]
 dependencies = ["msgspec>=0.18.0"]
 
@@ -25,7 +34,7 @@ dev = [
 ]
 
 [tool.maturin]
-manifest-path = "crates/sas_lexer_py/Cargo.toml"
+manifest-path = "crates/sas-lexer-py/Cargo.toml"
 module-name = "sas_lexer._sas_lexer_rust"
 python-source = "src"
 strip = true

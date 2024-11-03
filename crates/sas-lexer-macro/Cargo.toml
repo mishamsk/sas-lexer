@@ -1,5 +1,5 @@
 [package]
-name = "sas_lexer_macro"
+name = "sas-lexer-macro"
 edition.workspace = true
 rust-version.workspace = true
 repository.workspace = true

@@ -7,17 +7,17 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug unit tests in library 'sas_lexer'",
+            "name": "Debug unit tests in library 'sas-lexer'",
             "cargo": {
                 "args": [
                     "test",
                     "--no-run",
                     "--lib",
-                    "--package=sas_lexer"
+                    "--package=sas-lexer"
                 ],
                 "problemMatcher": "$rustc",
                 "filter": {
-                    "name": "sas_lexer",
+                    "name": "sas-lexer",
                     "kind": "lib"
                 }
             },
@@ -33,7 +33,7 @@
                     "test",
                     "--no-run",
                     "--bench=lexer",
-                    "--package=sas_lexer"
+                    "--package=sas-lexer"
                 ],
                 "problemMatcher": "$rustc",
                 "filter": {
@@ -52,7 +52,7 @@
                 "args": [
                     "build",
                     "--bin=sas-lexer",
-                    "--package=sas_lexer_cli"
+                    "--package=sas-lexer-cli"
                 ],
                 "problemMatcher": "$rustc",
                 "filter": {
@@ -71,7 +71,7 @@
                 "args": [
                     "build",
                     "--bin=sas-lexer",
-                    "--package=sas_lexer_cli"
+                    "--package=sas-lexer-cli"
                 ],
                 "problemMatcher": "$rustc",
                 "filter": {
@@ -94,7 +94,7 @@
                     "test",
                     "--no-run",
                     "--bin=sas-lexer",
-                    "--package=sas_lexer_cli"
+                    "--package=sas-lexer-cli"
                 ],
                 "problemMatcher": "$rustc",
                 "filter": {

@@ -11,8 +11,8 @@ version = "0.1.0"
 publish = false
 
 [workspace.dependencies]
-sas_lexer = { path = "crates/sas_lexer" }
-sas_lexer_macro = { path = "crates/sas_lexer_macro" }
+sas-lexer = { path = "crates/sas-lexer" }
+sas-lexer-macro = { path = "crates/sas-lexer-macro" }
 
 criterion = { version = "0.5.1", features = ["html_reports"] }
 pprof = { version = "0.13.0", features = [

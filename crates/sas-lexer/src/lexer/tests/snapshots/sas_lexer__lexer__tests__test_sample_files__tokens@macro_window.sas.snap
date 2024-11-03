@@ -1,6 +1,7 @@
 ---
-source: crates/sas_lexer/src/lexer/tests/test_sample_files.rs
+source: crates/sas-lexer/src/lexer/tests/test_sample_files.rs
 expression: tokens
+snapshot_kind: text
 ---
 - "[@0,0:7=\"%window\",<KwmWindow>,L1:C0-L1:C7,chl=<D>,pl=<None>]"
 - "[@1,7:8=\" \",<WS>,L1:C7-L1:C8,chl=<H>,pl=<None>]"
