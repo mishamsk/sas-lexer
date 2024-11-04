@@ -37,11 +37,13 @@ use serde_repr::Serialize_repr;
 #[repr(u16)]
 pub enum TokenType {
     EOF,
-    /// A special virtual token emitted by the lexer to separate macro statements
-    /// from open code when there is no "natural" separator. This is used for
-    /// downstream parser to be able to use reliably terminate dynamic open code
-    /// statements without doing lookaheads. Dynamic, means that the statement
-    /// has a macro statements in it, like `data %if cond %then %do; t1 %end; %else %do; t2 %end;;`
+    /// A special virtual token that is emitted between open code and macro statements
+    /// when there is no "natural" separator, or when semicolon is missing between two
+    /// macro statements (a coding error).
+    ///
+    /// This may be used by a downstream parser as a reliable terminating token for dynamic
+    /// open code and thus avoid doing lookaheads. Dynamic, means that the statement has a
+    /// macro statements in it, like `data %if cond %then %do; t1 %end; %else %do; t2 %end;;`
     ///
     /// It is emitted when `macro_sep` feature is enabled.
     MacroSep,

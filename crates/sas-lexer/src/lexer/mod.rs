@@ -5190,22 +5190,11 @@ impl<'src> Lexer<'src> {
     }
 }
 
-/// Lex the source code of an entire program and return the tokenized buffer.
+/// Lex the source code of an entire program.
 ///
-/// This is the most common way to use the lexer, and assume that a standalone
+/// This is the most common way to use the lexer. This function assumes that a standalone
 /// program is being lexed. I.e. the code is not partial code snippet or
 /// file that is meant to be included in a parent program.
-///
-/// Known differences from the SAS lexer:
-/// - String expressions in macro context are lexed as in open code,
-///     for example literals will be lexed as literals, although SAS lexes them
-///     as macro text expressions, verbatim and later interprets at call site.
-/// - As lexer is not aware whether a given macro was defined with or without
-///     parenthesis, it will always lex the following parens as special tokens,
-///     while SAS may not. E.g. `"&m /*c*/ ()"` will yield different tokens in
-///     SAS depending on whether `m` was defined via `%macro m;` or `%macro m();`.
-/// - The exact error when `readonly` is missing after `%local /` and `%global /`
-///    may not be reproduced, but some error conditions are checked.
 ///
 /// # Arguments
 /// * `source: &str` - The source code to lex
@@ -5219,10 +5208,15 @@ impl<'src> Lexer<'src> {
 ///
 /// # Examples
 /// ```
-/// use sas_lexer::lex_program;
+/// use sas_lexer::{lex_program, LexResult, TokenIdx};
 /// let source = "%let x = 42;";
-/// let result = lex_program(&source);
-/// assert!(result.is_ok());
+/// let LexResult { buffer, .. } = lex_program(&source).unwrap();
+/// let tokens: Vec<TokenIdx> = buffer.into_iter().collect();
+/// assert_eq!(tokens.len(), 9);
+///
+/// for token in tokens {
+///     println!("{:?}", buffer.get_token_raw_text(token, &source));
+/// }
 /// ```
 pub fn lex_program<S: AsRef<str>>(source: &S) -> Result<LexResult, ErrorKind> {
     let lexer = Lexer::new(source.as_ref(), None, None)?;

@@ -48,7 +48,6 @@ fn test_snapshots(#[files("src/lexer/tests/samples/**/*.sas")] path: PathBuf) {
     if errors.is_empty() {
         insta::allow_duplicates! {
             assert_yaml_snapshot!("errors_snapshot", @r###"
-            ---
             errors_snapshot
             "###);
         }
