@@ -37,6 +37,8 @@ insta = { workspace = true }
 rstest = { workspace = true }
 zip = { workspace = true }
 walkdir = { workspace = true }
+
+[target.'cfg(not(target_os = "windows"))'.dev-dependencies]
 pprof = { workspace = true, features = ["flamegraph", "criterion"] }
 
 [build-dependencies]
