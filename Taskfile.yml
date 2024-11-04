@@ -137,7 +137,7 @@ tasks:
       # First without macro_sep feature
       - cargo test -p sas-lexer --all-targets
       # Then with macro_sep feature
-      - cargo test -p sas-lexer --all-targets --features macro_sep
+      - cargo test -p sas-lexer --all-targets --features macro_sep --features serde
       # Then make sure python is built
       - task: build:dev
       # Finally run python tests
