@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "sas-lexer"
-version = "0.1.0"
+version = "1.0.0-beta.1"
 description = "Ultra fast correct context-aware \"parsing\" SAS code lexer"
 readme = "README.md"
 requires-python = ">=3.10"

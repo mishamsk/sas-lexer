@@ -5200,8 +5200,7 @@ impl<'src> Lexer<'src> {
 /// * `source: &str` - The source code to lex
 ///
 /// # Returns
-/// * `Result<TokenizedBuffer, &str>` - The tokenized buffer if lexing was successful
-///   or an error message if lexing failed
+/// * `Result<LexResult, ErrorKind>` - The lexed tokens, errors and string literals buffer
 ///
 /// # Errors
 /// If the source code is larger than 4GB, an error message is returned
