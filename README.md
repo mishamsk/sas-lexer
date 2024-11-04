@@ -15,18 +15,21 @@ Let me break it down for you:
 
 ## Table of Contents
 
-- [Lexer Features](#lexer-features)
-- [Heuristics, limitations and known deviations from the SAS engine](#heuristics-limitations-and-known-deviations-from-the-sas-engine)
-- [Getting Started](#getting-started)
-    - [Installation](#installation)
-    - [Usage (Rust)](#usage-rust)
-        - [Crate Features](#crate-features)
-    - [Usage (Python)](#usage-python)
-- [Let's talk about SAS](#lets-talk-about-sas)
-- [Motivation](#motivation)
-- [License](#license)
-- [Contributing](#contributing)
-- [Acknowledgments](#acknowledgments)
+- [SAS Lexer](#sas-lexer)
+    - [Table of Contents](#table-of-contents)
+    - [Lexer Features](#lexer-features)
+    - [Heuristics, limitations and known deviations from the SAS engine](#heuristics-limitations-and-known-deviations-from-the-sas-engine)
+        - [Keyword Token Types](#keyword-token-types)
+    - [Getting Started](#getting-started)
+        - [Installation](#installation)
+        - [Usage (Rust)](#usage-rust)
+            - [Crate Features](#crate-features)
+        - [Usage (Python)](#usage-python)
+    - [Let's talk about SAS](#lets-talk-about-sas)
+    - [Motivation](#motivation)
+    - [License](#license)
+    - [Contributing](#contributing)
+    - [Acknowledgments](#acknowledgments)
 
 ## Lexer Features
 
@@ -53,6 +56,12 @@ The key limitation is that the lexer is static, meaning it does not execute the 
 * Numeric formats are not lexed as a separate token, as they are indistinguishable from numeric literals and/or column references and require context to interpret.
 * SAS session skips the entire macro definition (including the body) on pretty much any error. For example, `%macro $bad` will cause whatever follows up-to `%mend` to be skipped. The lexer does not do this, and will try to recover and continue lexing.
 * Lexer recovery sometimes goes beyond what SAS engine does. For instance, both SAS and this lexer will recover missing `=` in `%let a 1;` but SAS will not recover missing `)` in `%macro a(a=1;` , while this lexer will.
+
+### Keyword Token Types
+
+SAS has thousands of keywords, and none of them are reserved. All fans of columns named `when`, rejoice, you can finally execute sql that looks like this `select case when when = 42 then then else else end from table`!
+
+Thus the selection of keywords that are lexed as a dedicated token type vs. as an identifier is somewhat arbitrary and based on personal experience of writing parsers for SAS code.
 
 ## Getting Started
 
