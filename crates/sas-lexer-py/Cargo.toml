@@ -1,11 +1,15 @@
 [package]
 name = "sas-lexer-py"
+description = "Python bindings for sas-lexer crate."
 authors = { workspace = true }
 edition = { workspace = true }
-publish = { workspace = true }
 repository = { workspace = true }
 rust-version = { workspace = true }
 version = { workspace = true }
+license = { workspace = true }
+keywords = { workspace = true }
+categories = { workspace = true }
+publish = false
 
 [lib]
 name = "_sas_lexer_rust"

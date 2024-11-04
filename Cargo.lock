@@ -2637,7 +2637,7 @@ dependencies = [
 
 [[package]]
 name = "sas-lexer"
-version = "0.1.0"
+version = "1.0.0-beta.1"
 dependencies = [
  "bit-vec",
  "criterion",
@@ -2659,7 +2659,7 @@ dependencies = [
 
 [[package]]
 name = "sas-lexer-cli"
-version = "0.1.0"
+version = "1.0.0-beta.1"
 dependencies = [
  "clap",
  "indicatif",
@@ -2671,7 +2671,7 @@ dependencies = [
 
 [[package]]
 name = "sas-lexer-macro"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2680,7 +2680,7 @@ dependencies = [
 
 [[package]]
 name = "sas-lexer-py"
-version = "0.1.0"
+version = "1.0.0-beta.1"
 dependencies = [
  "anyhow",
  "convert_case",

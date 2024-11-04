@@ -1,11 +1,16 @@
 [package]
 name = "sas-lexer"
+description = "Ultra fast \"correct\" static context-aware parsing SAS code lexer."
 authors = { workspace = true }
 edition = { workspace = true }
-publish = { workspace = true }
 repository = { workspace = true }
 rust-version = { workspace = true }
 version = { workspace = true }
+readme = { workspace = true }
+license = { workspace = true }
+keywords = { workspace = true }
+categories = { workspace = true }
+exclude = ["benches/*", "src/**/tests/*"]
 
 [lib]
 
