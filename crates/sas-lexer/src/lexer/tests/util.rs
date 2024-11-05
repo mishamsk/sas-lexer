@@ -805,7 +805,7 @@ pub(super) fn assert_lexing<TT: TokenTestCase, ET: ErrorTestCase>(
         cur_start_column = if ends_with_newline { 0 } else { cur_end_column };
     }
 
-    // Chec EOF token
+    // Check EOF token
     check_token::<String>(
         source,
         tokens.pop().unwrap(),

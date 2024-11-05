@@ -87,7 +87,7 @@ pub enum ErrorKind {
     // chances of false-positives
     // Codes 4001-4999. Make sure to preserve
     // the existing codes & the range. The latter is used in classification impl
-    // CURENTLY UNUSED
+    // CURRENTLY UNUSED
     // Internal errors. Codes 9001-9999. Make sure to preserve
     // the existing codes & the range. The latter is used in classification impl
     #[strum(message = "No checkpoint to rollback")]

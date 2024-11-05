@@ -65,7 +65,7 @@ enum Commands {
     /// Run lexing over samples and generate various statistics used for
     /// debugging and optimization.
     Stats {
-        /// Path to put the resulting stat tabls to. If not provided
+        /// Path to put the resulting stat tables to. If not provided
         /// only the summary report on console is produced
         #[cfg(feature = "polars")]
         #[arg(short, long)]

@@ -14,7 +14,7 @@ tasks:
     cmds:
       - |
         if test -d .venv; then
-            echo Found existing virutal env at .venv. Removing...
+            echo Found existing virtual env at .venv. Removing...
             rm -fR .venv
         else
             echo No venv exist. Creating anew...
@@ -54,6 +54,7 @@ tasks:
     desc: "Run linters"
     cmds:
       - uv run pre-commit run --all-files
+      - typos
 
   # Cleanup tasks
   clean-pyc:

@@ -56,7 +56,7 @@ fn test_unicode_char_offset() {
             .get()
     );
 
-    // Now test the ubiquotous Hoe many characters is 🤦🏼‍♂️ case.
+    // Now test the ubiquitous Hoe many characters is 🤦🏼‍♂️ case.
     // We want python compatibility here. So 5 characters.
     let source = "'🤦🏼‍♂️'";
     let LexResult { buffer, errors, .. } = lex_program(&source).unwrap();
@@ -768,7 +768,7 @@ fn test_char_format(#[case] contents: &str, #[case] expected_token: Vec<impl Tok
 #[case::int01_dot("01.", (TokenType::FloatLiteral, 1.))]
 #[case::int01_dot00("01.00", (TokenType::FloatLiteral, 1.))]
 // one more than u64::MAX
-#[case::u64_overlow("18446744073709551616", (TokenType::FloatLiteral, 18446744073709551616.0))]
+#[case::u64_overflow("18446744073709551616", (TokenType::FloatLiteral, 18446744073709551616.0))]
 // Hexadecimal notation
 #[case::hex("02Ax", (TokenType::IntegerLiteral, 42))]
 #[case::hex_one_digit("9X", (TokenType::IntegerLiteral, 9))]
@@ -813,7 +813,7 @@ fn test_numeric_literal_with_leading_sign(
     );
 }
 
-// Makes sure that traiing sings are not causing erros in scientific notation
+// Makes sure that trailing sings are not causing errors in scientific notation
 #[rstest]
 #[case::sci("1e3", (TokenType::FloatExponentLiteral, 1000.0))]
 #[case::sci_plus("1E+3", (TokenType::FloatExponentLiteral, 1000.0))]
@@ -3340,7 +3340,7 @@ fn test_macro_eval_selected_cases(
         (";", TokenType::SEMI, Payload::None),
         ]
 )]
-#[case::do_to_no_by_trailing_commnet("%do i=1 %to 2  /*c*/  ;",
+#[case::do_to_no_by_trailing_comment("%do i=1 %to 2  /*c*/  ;",
     vec![
         ("%do", TokenType::KwmDo, Payload::None),
         (" ", TokenType::WS, Payload::None),
@@ -3753,7 +3753,7 @@ fn test_macro_special_builtins(
         (")", TokenType::RPAREN),
     ], NO_ERRORS
 )]
-#[case::sysfunc_simple_with_args_no_fromat("%sysfunc \n\t(index \n\t(&op., ar🔥))",
+#[case::sysfunc_simple_with_args_no_format("%sysfunc \n\t(index \n\t(&op., ar🔥))",
     vec![
         ("%sysfunc", TokenType::KwmSysfunc),
         (" \n\t", TokenType::WS),
