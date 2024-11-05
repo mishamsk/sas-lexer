@@ -48,7 +48,7 @@ tasks:
 
   py:sync:
     desc: "Sync dependencies & install project"
-    cmd: uv sync --all-extras --locked --compile-bytecode
+    cmd: uv sync --all-extras --locked --compile-bytecode --python python
 
   lint:
     desc: "Run linters"
