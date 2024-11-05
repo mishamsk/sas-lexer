@@ -8,10 +8,16 @@ use sas_lexer::{
 };
 use strum::{EnumCount, EnumMessage, IntoEnumIterator};
 
+#[cfg(target_os = "windows")]
+const LINE_FEED: &str = "\r\n";
+
+#[cfg(not(target_os = "windows"))]
+const LINE_FEED: &str = "\n";
+
 fn generate_token_type_python_enum() -> Result<()> {
     let mut enum_str = String::with_capacity(TokenType::COUNT * 40);
 
-    enum_str.push_str("class TokenType(IntEnum):\n");
+    enum_str.push_str(&format!("class TokenType(IntEnum):{LINE_FEED}"));
 
     let conv = Converter::new()
         .from_case(Case::Pascal)
@@ -21,7 +27,7 @@ fn generate_token_type_python_enum() -> Result<()> {
     for token_type in TokenType::iter() {
         enum_str.push_str(
             format!(
-                "    {} = {}\n",
+                "    {} = {}{LINE_FEED}",
                 conv.convert(token_type.to_string()),
                 token_type as u16
             )
@@ -56,10 +62,12 @@ fn generate_token_type_python_enum() -> Result<()> {
 fn generate_token_channel_python_enum() -> Result<()> {
     let mut enum_str = String::with_capacity(TokenChannel::COUNT * 40);
 
-    enum_str.push_str("class TokenChannel(IntEnum):\n");
+    enum_str.push_str(&format!("class TokenChannel(IntEnum):{LINE_FEED}"));
 
     for token_channel in TokenChannel::iter() {
-        enum_str.push_str(format!("    {} = {}\n", token_channel, token_channel as u8).as_str());
+        enum_str.push_str(
+            format!("    {} = {}{LINE_FEED}", token_channel, token_channel as u8).as_str(),
+        );
     }
 
     // Now write the enum to a file
@@ -100,7 +108,7 @@ fn generate_error_kind_python_module() -> Result<()> {
     // First generate the enum
     let mut enum_str = String::with_capacity(ErrorKind::COUNT * 40);
 
-    enum_str.push_str("class ErrorKind(IntEnum):\n");
+    enum_str.push_str(&format!("class ErrorKind(IntEnum):{LINE_FEED}"));
 
     let conv = Converter::new()
         .from_case(Case::Pascal)
@@ -114,7 +122,7 @@ fn generate_error_kind_python_module() -> Result<()> {
     for error_kind in &error_kinds {
         enum_str.push_str(
             format!(
-                "    {} = {}\n",
+                "    {} = {}{LINE_FEED}",
                 conv.convert(error_kind.to_string()),
                 *error_kind as u16
             )
@@ -132,7 +140,7 @@ fn generate_error_kind_python_module() -> Result<()> {
         + file_content[start_pos..]
             .lines()
             .take_while(|line| !line.is_empty())
-            .map(|line| line.len() + 1)
+            .map(|line| line.len() + LINE_FEED.len())
             .sum::<usize>();
 
     // Overwrite the class code with the new string
@@ -141,12 +149,14 @@ fn generate_error_kind_python_module() -> Result<()> {
     // Now the ERROR_MESSAGE dictionary
     let mut error_message_str = String::with_capacity(ErrorKind::COUNT * 100);
 
-    error_message_str.push_str("ERROR_MESSAGE: dict[ErrorKind, str] = {\n");
+    error_message_str.push_str(&format!(
+        "ERROR_MESSAGE: dict[ErrorKind, str] = {{{LINE_FEED}"
+    ));
 
     for error_kind in error_kinds {
         error_message_str.push_str(
             format!(
-                "    ErrorKind.{}: \"{}\",\n",
+                "    ErrorKind.{}: \"{}\",{LINE_FEED}",
                 conv.convert(error_kind.to_string()),
                 error_kind
                     .get_message()
@@ -172,7 +182,7 @@ fn generate_error_kind_python_module() -> Result<()> {
         + file_content[start_pos..]
             .lines()
             .take_while(|line| *line != "}")
-            .map(|line| line.len() + 1)
+            .map(|line| line.len() + LINE_FEED.len())
             .sum::<usize>()
         + 1;
 
@@ -182,14 +192,16 @@ fn generate_error_kind_python_module() -> Result<()> {
     // And finally update the ranges in `is_xxx_error` functions.
     // First we find the line number where each of the functions is defined,
     // then the range will be on the following line starting with `range(`.
-    let range_pos_common_prefix_len = "error_kind: ErrorKind) -> bool:\n    \
+    let range_pos_common_prefix_len = format!(
+        "error_kind: ErrorKind) -> bool:{LINE_FEED}    \
         return error_kind in range("
-        .len();
+    )
+    .len();
 
     let is_internal_error_range_start_pos = file_content
         .lines()
         .take_while(|line| !line.contains("def is_internal_error("))
-        .map(|line| line.len() + 1)
+        .map(|line| line.len() + LINE_FEED.len())
         .sum::<usize>()
         + "def is_internal_error(".len()
         + range_pos_common_prefix_len;
@@ -210,7 +222,7 @@ fn generate_error_kind_python_module() -> Result<()> {
     let is_code_error_range_start_pos = file_content
         .lines()
         .take_while(|line| !line.contains("def is_code_error("))
-        .map(|line| line.len() + 1)
+        .map(|line| line.len() + LINE_FEED.len())
         .sum::<usize>()
         + "def is_code_error(".len()
         + range_pos_common_prefix_len;
@@ -228,7 +240,7 @@ fn generate_error_kind_python_module() -> Result<()> {
     let is_warning_range_start_pos = file_content
         .lines()
         .take_while(|line| !line.contains("def is_warning("))
-        .map(|line| line.len() + 1)
+        .map(|line| line.len() + LINE_FEED.len())
         .sum::<usize>()
         + "def is_warning(".len()
         + range_pos_common_prefix_len;
