@@ -134,6 +134,8 @@ tasks:
   test:
     desc: Run tests
     cmds:
+      # Test docs
+      - cargo test -p sas-lexer --doc
       # First without macro_sep feature
       - cargo test -p sas-lexer --all-targets
       # Then with macro_sep feature
