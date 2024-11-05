@@ -80,6 +80,8 @@ jobs:
           - build: win
             os: windows-latest
             rust: stable
+    env:
+      TEST_TARGET: ${{ matrix.build == 'stable' && '--all-targets' || '--lib' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -93,14 +95,10 @@ jobs:
         run: cargo doc --verbose
       - name: Tests docs
         run: cargo test -p sas-lexer --doc
-      - name: Set test target flag
-        id: set-test-target-flag
-        run: echo "TEST_TARGET_FLAG=$([[ ${{ matrix.build }} == 'stable' || ${{ matrix.build }} == 'nightly' ]] && echo '--all-targets' || echo '--lib')" >> $GITHUB_ENV
-        shell: bash
       - name: Tests with default features
-        run: cargo test -p sas-lexer $TEST_TARGET_FLAG
+        run: cargo test -p sas-lexer $TEST_TARGET
       - name: Tests with macro_sep, serde features
-        run: cargo test -p sas-lexer $TEST_TARGET_FLAG --features macro_sep --features serde
+        run: cargo test -p sas-lexer $TEST_TARGET --features macro_sep --features serde
 
   # Python linting / formatting.
   ruff:
@@ -120,13 +118,14 @@ jobs:
           src: "src"
 
   # Python tests.
-  py-linux:
-    runs-on: ${{ matrix.platform.runner }}
+  test-python:
+    runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
-        platform:
-          - runner: ubuntu-latest
-            target: x86_64
+        runner:
+          - ubuntu-latest
+          - windows-latest
+          - macos-latest
         python-version:
           - "3.10"
           - "3.11"
@@ -139,81 +138,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Install uv
         uses: astral-sh/setup-uv@v3
-      - name: Build wheels
-        uses: PyO3/maturin-action@v1
-        with:
-          target: ${{ matrix.platform.target }}
-          args: --release --out dist
-          sccache: 'true'
-          manylinux: auto
-      - name: pytest
-        shell: bash
-        run: |
-          set -e
-          uv sync --no-install-project --dev
-          uv pip install sas-lexer --find-links dist --force-reinstall
-          # do not use uv run which will install package as editable
-          source .venv/bin/activate
-          pytest
-
-  py-windows:
-    runs-on: ${{ matrix.platform.runner }}
-    strategy:
-      matrix:
-        platform:
-          - runner: windows-latest
-            target: x64
-          - runner: windows-latest
-            target: x86
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: 3.11
-          architecture: ${{ matrix.platform.target }}
-      - name: Build wheels
-        uses: PyO3/maturin-action@v1
-        with:
-          target: ${{ matrix.platform.target }}
-          args: --release --out dist
-          sccache: 'true'
-      - name: Install uv
-        uses: astral-sh/setup-uv@v3
-      - name: pytest
-        shell: bash
-        run: |
-          set -e
-          uv sync --no-install-project --dev
-          uv pip install sas-lexer --find-links dist --force-reinstall
-          # do not use uv run which will install package as editable
-          source .venv/Scripts/activate
-          pytest
-
-  py-macos:
-    runs-on: ${{ matrix.platform.runner }}
-    strategy:
-      matrix:
-        platform:
-          - runner: macos-14
-            target: x86_64
-          - runner: macos-latest
-            target: aarch64
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: 3.11
-      - name: Build wheels
-        uses: PyO3/maturin-action@v1
-        with:
-          target: ${{ matrix.platform.target }}
-          args: --release --out dist
-          sccache: 'true'
-      - name: pytest
-        run: |
-          set -e
-          uv sync --no-install-project --dev
-          uv pip install sas-lexer --find-links dist --force-reinstall
-          # do not use uv run which will install package as editable
-          source .venv/bin/activate
-          pytest
+      - name: Sync & build project
+        run: uv sync --no-editable --locked
+      - name: Run tests
+        run: uv run pytest

@@ -1,0 +1,6 @@
+# Set the default behavior, in case people don't have core.autocrlf set.
+* text=auto
+
+# Explicitly declare test assets used in snapshot tests to use LF line endings
+# to avoid issues with snapshot tests on Windows.
+crates/sas-lexer/src/lexer/tests/samples/*.sas text eol=lf
