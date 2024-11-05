@@ -12,7 +12,7 @@ use serde_repr::Serialize_repr;
 /// are generated automatically from the order.
 ///
 /// Naming is also important. Namely all non-macro keywords
-/// must be preceeded with `Kw` and macro keywords are all start
+/// must be preceded with `Kw` and macro keywords are all start
 /// with `Kwm`. These are used to autogenerate static hash maps
 /// for keywords and other downstream codegen outside of this crate
 #[derive(

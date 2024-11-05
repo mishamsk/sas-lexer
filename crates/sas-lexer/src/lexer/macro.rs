@@ -39,7 +39,7 @@ pub(super) fn is_macro_amp<I: Iterator<Item = char>>(mut chars: I) -> (bool, u32
 
 #[inline]
 pub(super) fn is_macro_eval_quotable_op(c: char) -> bool {
-    // Expermientally shown to work! (ignores the %)
+    // Experimentally shown to work! (ignores the %)
     // e.g. `%^ 0` returned 1 (true)
     ['~', '^', '='].contains(&c)
 }
@@ -99,7 +99,7 @@ pub(super) const fn needs_macro_sep(
     tok_type: TokenType,
 ) -> bool {
     // Not following a proper statement delimiter
-    // And preceeds a standalone macro statement
+    // And precedes a standalone macro statement
     !matches!(
         prev_token_type,
         None | Some(
@@ -173,7 +173,7 @@ pub(super) fn lex_macro_call_stat_or_label(
     // we know it is not a keyword and can skip the test right away
     let mut is_ascii = true;
 
-    // Eat the identifier. We can safely use `is_xid_continue` becase the caller
+    // Eat the identifier. We can safely use `is_xid_continue` because the caller
     // already checked that the first character is a valid start of an identifier
     cursor.eat_while(|c| {
         if c.is_ascii() {
@@ -222,7 +222,7 @@ pub(super) fn lex_macro_call_stat_or_label(
         .map_err(|()| ErrorKind::InternalErrorOutOfBounds)
 }
 
-/// Predicate to check if the following chracters are one of macro logical
+/// Predicate to check if the following characters are one of macro logical
 /// expression mnemonics (eq, ne, lt, le, gt, ge, and, or, not, in).
 ///
 /// Must be passed an iterator that starts with the first character
@@ -290,7 +290,7 @@ pub(super) fn is_macro_eval_mnemonic<I: Iterator<Item = char>>(
 pub(super) fn is_macro_stat(input: &str) -> bool {
     debug_assert!(input.as_bytes().iter().next().map_or(false, |&c| c == b'%'));
 
-    // Unfortunatelly this one needs a very inefficient lookahead
+    // Unfortunately this one needs a very inefficient lookahead
     // to check if we have any statement upfront.
     let mut is_ascii = true;
 

@@ -703,7 +703,7 @@ impl<'src> Lexer<'src> {
                 // not just the macro statement. But we'll try to salvage at least smth.
                 // It is as easy as just popping current mode, since we have
                 // `LexerMode::MacroStatOptionsTextExpr` on the stack as well as args
-                // and tey will catch the rest of the macro definition
+                // and they will catch the rest of the macro definition
 
                 // Thus no matter the return value, we'll pop the mode
                 self.pop_mode();
@@ -940,7 +940,7 @@ impl<'src> Lexer<'src> {
                                 MacroEvalNextArgumentMode::None,
                                 false,
                                 false,
-                                // doesn't matter really since comma is not special in tail aguments
+                                // doesn't matter really since comma is not special in tail arguments
                                 false,
                             ),
                             pnl: 0,
@@ -1017,7 +1017,7 @@ impl<'src> Lexer<'src> {
         };
 
         let (tok_type, extra_advance_by) = match next_char {
-            // '/' is not here, becase it is handled in the caller with c-style comment
+            // '/' is not here, because it is handled in the caller with c-style comment
             // same for `&`
             '*' => {
                 if self.cursor.peek_next() == '*' {
@@ -1095,7 +1095,7 @@ impl<'src> Lexer<'src> {
         ));
 
         // In eval context, the leading/trailing whitespace may or may not be
-        // part of a macro string depending on the preceeding/following characters.
+        // part of a macro string depending on the preceding/following characters.
         // Before and after operators and delimiter (comma, semicolon) it is not
         // part of the macro string. But in-between of the operands it is.
         //
@@ -1129,7 +1129,7 @@ impl<'src> Lexer<'src> {
 
         let mut ws_mark: Option<(ByteOffset, CharOffset, LineIdx)> = None;
         let mut try_lexing_numeric = true;
-        let mut may_preceed_mnemonic = true;
+        let mut may_precede_mnemonic = true;
 
         while let Some(c) = self.cursor.peek() {
             // We read until we've found something that terminates
@@ -1180,8 +1180,8 @@ impl<'src> Lexer<'src> {
                     // to properly handle the trailing WS.
                     if is_macro_amp(self.cursor.chars()).0 {
                         // Not an operator, but a macro var expression
-                        // Hence preceeding WS is significant and we should not
-                        // try lexing the preceeding as a numeric literal
+                        // Hence preceding WS is significant and we should not
+                        // try lexing the preceding as a numeric literal
                         try_lexing_numeric = false;
                         ws_mark = None;
                     }
@@ -1190,15 +1190,15 @@ impl<'src> Lexer<'src> {
                 }
                 '%' => {
                     if is_macro_percent(self.cursor.peek_next(), true) {
-                        // Hit a macro call or statment in/after the string expression
+                        // Hit a macro call or statement in/after the string expression
                         // Stop consuming char and break for standard logic.
 
                         // NOTE: this is super expensive look-ahead. If we push down
                         // trailing WS trimming to the parser, it can be avoided.
                         if !is_macro_stat(self.cursor.as_str()) {
-                            // Not a delimiting statment, but a macro call
-                            // Hence preceeding WS is significant and we should not
-                            // try lexing the preceeding as a numeric literal
+                            // Not a delimiting statement, but a macro call
+                            // Hence preceding WS is significant and we should not
+                            // try lexing the preceding as a numeric literal
                             try_lexing_numeric = false;
                             ws_mark = None;
                         }
@@ -1214,7 +1214,7 @@ impl<'src> Lexer<'src> {
                     ws_mark = None;
 
                     // And allow an immediate mnemonic
-                    may_preceed_mnemonic = true;
+                    may_precede_mnemonic = true;
                 }
                 '\n' => {
                     ws_mark = ws_mark.or_else(|| Some(self.mark_token_start()));
@@ -1229,7 +1229,7 @@ impl<'src> Lexer<'src> {
                 // some character that is allowed before a mnemonic
                 'e' | 'n' | 'l' | 'g' | 'a' | 'o' | 'i' | 'E' | 'N' | 'L' | 'G' | 'A' | 'O'
                 | 'I'
-                    if ws_mark.is_some() || may_preceed_mnemonic =>
+                    if ws_mark.is_some() || may_precede_mnemonic =>
                 {
                     if let (Some(_), _) = is_macro_eval_mnemonic(self.cursor.chars()) {
                         // Found a mnemonic, break
@@ -1252,7 +1252,7 @@ impl<'src> Lexer<'src> {
                     }
 
                     // Calculate if we can have a mnemonic after this character
-                    may_preceed_mnemonic = !is_xid_continue(c);
+                    may_precede_mnemonic = !is_xid_continue(c);
                 }
             }
         }
@@ -1398,7 +1398,7 @@ impl<'src> Lexer<'src> {
                     // or if we are at the start of expression, or start of parenthesized subexpression
                     || matches!(
                         prev_tok_type,
-                        // These are all possible "starts", tokens preceeding
+                        // These are all possible "starts", tokens preceding
                         // the start of an evaluated logical macro subexpression.
                         // See: https://documentation.sas.com/doc/en/pgmsascdc/9.4_3.5/mcrolref/n1alyfc9f4qrten10sd5qz5e1w5q.htm#p17exjo2c9f5e3n19jqgng0ho42u
                         TokenType::LPAREN
@@ -1625,7 +1625,7 @@ impl<'src> Lexer<'src> {
                 }
                 '%' => {
                     if is_macro_percent(self.cursor.peek_next(), false) {
-                        // Hit a macro call or statment in/after the string expression => emit the text token
+                        // Hit a macro call or statement in/after the string expression => emit the text token
                         self.emit_token(
                             TokenChannel::DEFAULT,
                             TokenType::MacroString,
@@ -1762,7 +1762,7 @@ impl<'src> Lexer<'src> {
                 }
                 '%' => {
                     if is_macro_percent(self.cursor.peek_next(), false) {
-                        // Hit a macro call or statment in/after the string expression => emit the text token
+                        // Hit a macro call or statement in/after the string expression => emit the text token
                         self.emit_token(
                             TokenChannel::DEFAULT,
                             TokenType::MacroString,
@@ -1821,7 +1821,7 @@ impl<'src> Lexer<'src> {
                     TokenType::RPAREN,
                     TokenChannel::DEFAULT,
                 ));
-                // The handler fo arguments will push the mode for the comma, etc.
+                // The handler for arguments will push the mode for the comma, etc.
                 self.push_mode(LexerMode::MacroCallArgOrValue {
                     flags: MacroArgNameValueFlags::new(MacroArgContext::MacroCall, true, true),
                 });
@@ -2083,11 +2083,11 @@ impl<'src> Lexer<'src> {
                             // and we can't really "see through" - i.e. we may not know
                             // if the code inside the following macro is part of arg value,
                             // or maybe even terminates the current argument and starts a new one.
-                            // So we kinda pretend as if nothing happend in terms of argument lexing
+                            // So we kinda pretend as if nothing happened in terms of argument lexing
                             // states. The macro stat will parse based on
                             // it's logic and as soon as mandatory stat parts are done,
                             // it will go back to the current state...
-                            // Theoritically this should work correctly in valid code, like:
+                            // Theoretically this should work correctly in valid code, like:
                             //
                             // `%m(1 %if %mi(=a) %then %do; ,arg=value %end;)`
                         } else {
@@ -2383,7 +2383,7 @@ impl<'src> Lexer<'src> {
                 }
                 '%' => {
                     if is_macro_percent(self.cursor.peek_next(), false) {
-                        // Hit a macro call or statment in/after the string expression => emit the text token
+                        // Hit a macro call or statement in/after the string expression => emit the text token
                         emit_token_update_nesting(self, local_parens_nesting);
 
                         return;
@@ -2472,7 +2472,7 @@ impl<'src> Lexer<'src> {
                 TokenType::RPAREN,
                 TokenChannel::DEFAULT,
             ));
-            // The handler fo arguments will push the mode for the comma, etc.
+            // The handler for arguments will push the mode for the comma, etc.
             self.push_mode(LexerMode::MacroDefArg);
             // Leading insiginificant WS before the first argument
             self.push_mode(LexerMode::WsOrCStyleCommentOnly);
@@ -2559,7 +2559,7 @@ impl<'src> Lexer<'src> {
                 // Not a valid char for the next arg or default value
                 // We'll just pop the mode and let the next mode handle it.
                 // If it is `)` - it will be consumed by the next mode (which
-                // should expect it). Othwerise lexer will recover.
+                // should expect it). Otherwise lexer will recover.
             }
         }
     }
@@ -2770,7 +2770,7 @@ impl<'src> Lexer<'src> {
                         self.cursor.advance();
 
                         // And update the last byte offset - this will ensure that the
-                        // following escaped char will be incuded in the next literal section
+                        // following escaped char will be included in the next literal section
                         last_lit_end_byte_offset = self.cur_byte_offset();
 
                         // Finally, advance the cursor past the quoted char
@@ -2779,7 +2779,7 @@ impl<'src> Lexer<'src> {
                     }
 
                     if !mask_macro && is_macro_percent(self.cursor.peek_next(), false) {
-                        // Hit a macro call or statment in/after the string expression => emit the text token
+                        // Hit a macro call or statement in/after the string expression => emit the text token
                         let payload = self.resolve_string_literal_payload(
                             lit_start_idx,
                             lit_end_idx,
@@ -3516,7 +3516,7 @@ impl<'src> Lexer<'src> {
         // skip the dispatching
         let mut is_ascii = true;
 
-        // Eat the identifier. We can safely use `is_xid_continue` becase the caller
+        // Eat the identifier. We can safely use `is_xid_continue` because the caller
         // already checked that the first character is a valid start of an identifier
         self.cursor.eat_while(|c| {
             if c.is_ascii() {
@@ -3580,7 +3580,7 @@ impl<'src> Lexer<'src> {
     /// argument names may only be ASCII identifiers, and not even
     /// text expressions.
     ///
-    /// Emits a SAS-like error if the `next_char` is not ASCII. Othwerise
+    /// Emits a SAS-like error if the `next_char` is not ASCII. Otherwise
     /// consumes the identifier (ascii only) and emits the token.
     ///
     /// Assumes caller has called `self.start_token()` and handles
@@ -3592,7 +3592,7 @@ impl<'src> Lexer<'src> {
         ));
 
         if matches!(next_char, 'a'..='z' | 'A'..='Z' | '_') {
-            // Eat the identifier. We can safely use all continuation cahrs becase
+            // Eat the identifier. We can safely use all continuation chars because
             // we already checked that the first character is a valid start of an identifier
             self.cursor
                 .eat_while(|c| matches!(c, 'a'..='z' | 'A'..='Z' | '0'..='9' | '_'));
@@ -3634,7 +3634,7 @@ impl<'src> Lexer<'src> {
         }
 
         // So, datalines are pretty insane beast. First, we use heuristic to determine
-        // if it may be the start of the datalines (must be preceeded by `;` on default channel),
+        // if it may be the start of the datalines (must be preceded by `;` on default channel),
         // then we need to peek forward to find a `;`. Only if we find it, we can be sure
         // that this is indeed a datalines start token.
         if let Some(tok_info) = self.buffer.last_token_info_on_default_channel() {
@@ -4420,7 +4420,7 @@ impl<'src> Lexer<'src> {
                         TokenChannel::DEFAULT,
                     ));
                     self.push_mode(LexerMode::WsOrCStyleCommentOnly);
-                    // Note the difference from below. We aready lexed one part of the var name expr,
+                    // Note the difference from below. We already lexed one part of the var name expr,
                     // so we pass `true` and do not pass error, since it won't ever be emitted anyway
                     self.push_mode(LexerMode::MacroNameExpr(true, None));
                 }
@@ -4730,7 +4730,7 @@ impl<'src> Lexer<'src> {
             }
             TokenTypeMacroCallOrStat::KwmTo | TokenTypeMacroCallOrStat::KwmBy => {
                 self.push_mode(LexerMode::ExpectSemiOrEOF);
-                // The handler fo arguments will push the mode for the comma, etc.
+                // The handler for arguments will push the mode for the comma, etc.
                 self.push_mode(LexerMode::MacroEval {
                     macro_eval_flags: MacroEvalExprFlags::new(
                         MacroEvalNumericMode::Integer,
@@ -4827,7 +4827,7 @@ impl<'src> Lexer<'src> {
     /// with arguments. Notice that there is WS & comment between the macro identifier
     /// and the opening parenthesis. It is insignificant and should be lexed as such.
     /// While in `"&m /*comment*/ suffix"` `&m` is a macro call without arguments,
-    /// and ` /*comment*/ suffix` is a single token of remaing text!
+    /// and ` /*comment*/ suffix` is a single token of remaining text!
     ///
     /// In reality, in SAS, this is even more complex and impossible to statically
     /// determine, as SAS looks for () only if the macro was defined with parameters!
@@ -4970,7 +4970,7 @@ impl<'src> Lexer<'src> {
             TokenType::RPAREN,
             TokenChannel::DEFAULT,
         ));
-        // The handler fo arguments will push the mode for the comma, etc.
+        // The handler for arguments will push the mode for the comma, etc.
         // Built-ins do not allow named arguments, so we pass `MacroCallValue`
         // right away
         self.push_mode(LexerMode::MacroCallValue {
@@ -5010,7 +5010,7 @@ impl<'src> Lexer<'src> {
     }
 
     /// A helper to populate the expected states for the %[q]sysfunc call.
-    /// It starts with a mandatory name text expression (similat to `%let`
+    /// It starts with a mandatory name text expression (similar to `%let`
     /// var name expression), then mandatory arguments in parens.
     ///
     /// The inner function arguments are evaluated in `sysevalf` mode

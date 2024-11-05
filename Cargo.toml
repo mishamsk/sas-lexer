@@ -65,3 +65,10 @@ inherits = "release"
 debug = true
 incremental = true
 codegen-units = 3
+
+[workspace.metadata.typos]
+default.extend-ignore-identifiers-re = ["(?i)KWM[a-z0-9_]+"]
+# One comment for TokenType
+default.extend-ignore-words-re = ["LOWCASE"]
+# One test with nOt in that specific case
+default.extend-words = { "Ot" = "Ot" }

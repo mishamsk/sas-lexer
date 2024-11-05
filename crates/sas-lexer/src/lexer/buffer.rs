@@ -122,7 +122,7 @@ const TOKEN_INFO_CAPACITY_DIVISOR: usize = 3;
 /// Heursitic for determining an optimal initial capactiy for unescaped string literals vector
 /// I didn't do a scientific test of the frequency of quote usage, but between
 /// %nrstr, %str, 'string with '' quote', "string with "" quote" and the fact
-/// that one occurence of smth. like %% inside %nrstr will put the whole contents
+/// that one occurrence of smth. like %% inside %nrstr will put the whole contents
 /// into our buffer - thought we may afford overallocating. Let it be 5%
 const STR_LIT_CAPACITY_DIVISOR: usize = 20;
 
@@ -136,7 +136,7 @@ const STR_LIT_CAPACITY_DIVISOR: usize = 20;
 pub(super) struct WorkTokenizedBuffer {
     line_infos: Vec<LineInfo>,
     token_infos: Vec<TokenInfo>,
-    /// Stores unescaped string literals as a single continous string
+    /// Stores unescaped string literals as a single continuous string
     /// Payloads of tokens that repsent strings with escaped characters
     /// store the range of the literal within this string.
     string_literals_buffer: String,
@@ -243,7 +243,7 @@ impl WorkTokenizedBuffer {
                     "Token byte offset before previous token byte offset"
                 );
             } else {
-                // It may be poosible for the first token to start at offset > 0
+                // It may be possible for the first token to start at offset > 0
                 // e.g. due to BOM
             }
 
@@ -338,7 +338,7 @@ impl WorkTokenizedBuffer {
                     "Token byte offset before previous token byte offset"
                 );
             } else {
-                // It may be poosible for the first token to start at offset > 0
+                // It may be possible for the first token to start at offset > 0
                 // e.g. due to BOM
             }
 
@@ -528,7 +528,7 @@ pub struct ResolvedTokenInfo {
     pub start: u32,
 
     /// Zero-based char index of the token end in the source string. Will
-    /// point to the character immediatelly after the token.
+    /// point to the character immediately after the token.
     /// Char here means a Unicode code point, not graphemes. This is
     /// what Python uses to index strings, and IDEs show for cursor position.
     /// u32 as we only support 4gb files
@@ -544,7 +544,7 @@ pub struct ResolvedTokenInfo {
     pub end_line: u32,
 
     /// Zero-based column of the token end on the end line.
-    /// This is the column of the character immediatelly after the token.
+    /// This is the column of the character immediately after the token.
     pub end_column: u32,
 
     /// Extra data associated with the token.
@@ -809,7 +809,7 @@ impl TokenizedBuffer {
             .map_or(Err(ErrorKind::TokenIdxOutOfBounds), |t| Ok(t.channel))
     }
 
-    /// Retruns the text slice from the source using the token range.
+    /// Returns the text slice from the source using the token range.
     /// If the range is empty, returns `None`, not an empty string!
     ///
     /// # Errors

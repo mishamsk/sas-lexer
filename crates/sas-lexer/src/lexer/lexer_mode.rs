@@ -243,7 +243,7 @@ pub(crate) enum LexerMode {
     ///
     /// If `check_macro_label` is true, it will also check if the next
     /// non-ws or cstyle follower is `:`, which is a macro label. In this case
-    /// it will chang the preceeding `MacroIdentifier` token type to `MacroLabel`
+    /// it will chang the preceding `MacroIdentifier` token type to `MacroLabel`
     /// in addition to lexing `;` on hidden channel.
     ///
     /// Note - it should always be preceded by the `WsOrCStyleCommentOnly` mode
@@ -257,7 +257,7 @@ pub(crate) enum LexerMode {
     ///
     /// Then always adds necessary mode stack to parse the macro call arg value.
     ///
-    /// Note - it should alwys be preceded by the `WsOrCStyleCommentOnly` mode
+    /// Note - it should always be preceded by the `WsOrCStyleCommentOnly` mode
     /// and a checkpoint created!
     MaybeMacroCallArgAssign {
         /// The packed flags for macro argument name or value. See `MacroArgNameValueFlags`
