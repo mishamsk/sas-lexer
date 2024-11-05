@@ -1,0 +1,143 @@
+name: Dev CI (lint, format, test)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref_name }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+env:
+  CARGO_NET_RETRY: 10
+  CARGO_TERM_COLOR: always
+  RUSTUP_MAX_RETRIES: 10
+
+jobs:
+  # Rust linting / formatting.
+  cargo-fmt:
+    name: "cargo fmt"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all --check
+
+  cargo-clippy:
+    name: "cargo clippy"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: "Clippy"
+        run: cargo clippy --workspace --all-features --locked -- -D warnings
+
+  cargo-udeps:
+    name: "cargo udeps"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@nightly
+      - name: "Install cargo udeps"
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-udeps
+      - name: "Udeps release"
+        run: cargo +nightly udeps --workspace --all-features --release
+
+  # Rust tests for supported platforms.
+  test-rust:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - build: stable
+            os: ubuntu-latest
+            rust: stable
+          - build: nightly
+            os: ubuntu-latest
+            rust: nightly
+          - build: macos
+            os: macos-latest
+            rust: stable
+          - build: win
+            os: windows-latest
+            rust: stable
+    env:
+      TEST_TARGET: ${{ matrix.build == 'stable' && '--all-targets' || '--lib' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+      - name: Basic build
+        run: cargo build --verbose
+      - name: Build docs
+        run: cargo doc --verbose
+      - name: Tests docs
+        run: cargo test -p sas-lexer --doc
+      - name: Tests with default features
+        run: cargo test -p sas-lexer $TEST_TARGET
+      - name: Tests with macro_sep, serde features
+        run: cargo test -p sas-lexer $TEST_TARGET --features macro_sep --features serde
+
+  # Python linting / formatting.
+  ruff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lint with Ruff
+        uses: astral-sh/ruff-action@v1
+        with:
+          version: 0.7.2
+          src: "src"
+      - name: Check formatting with Ruff
+        uses: astral-sh/ruff-action@v1
+        with:
+          version: 0.7.2
+          args: format --check
+          src: "src"
+
+  # Python tests.
+  test-python:
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        runner:
+          - ubuntu-latest
+          - windows-latest
+          - macos-latest
+        python-version:
+          - "3.10"
+          - "3.11"
+          - "3.12"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+      - name: Sync & build project
+        run: uv sync --no-editable --locked
+      - name: Run tests
+        run: uv run pytest
