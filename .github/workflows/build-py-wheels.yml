@@ -1,0 +1,199 @@
+# Build wheels for sas-lexer on all supported platforms for PyPI publishing.
+name: "Build wheels"
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PACKAGE_NAME: sas-lexer
+  MODULE_NAME: sas_lexer
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_RETRY: 10
+  CARGO_TERM_COLOR: always
+  RUSTUP_MAX_RETRIES: 10
+
+jobs:
+  define-py-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      py-matrix: ${{ steps.matrix.outputs.matrix }}
+
+    steps:
+      - name: Set up Python matrix
+        id: matrix
+        run: |
+          # echo 'matrix=["3.10", "3.11", "3.12"]' >> "$GITHUB_OUTPUT"
+          echo 'matrix=["3.11"]' >> "$GITHUB_OUTPUT"
+
+  sdist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          # Use Python static 3.11 to build the sdist, since
+          # we are not linking against Python.
+          python-version: 3.11
+      - name: "Build sdist"
+        uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist
+      - name: "Test sdist"
+        run: |
+          pip install dist/${{ env.PACKAGE_NAME }}-*.tar.gz --force-reinstall
+          python -c "import ${{ env.MODULE_NAME }}; print(${{ env.MODULE_NAME }}.__version__)"
+      - name: "Upload sdist"
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-sdist
+          path: dist
+
+  macos:
+    runs-on: ${{ matrix.platform.runner }}
+    needs: define-py-matrix
+    strategy:
+      matrix:
+        platform:
+          - runner: macos-13
+            target: x86_64
+          - runner: macos-14
+            target: aarch64
+        python-version: ${{ fromJSON(needs.define-py-matrix.outputs.py-matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          architecture: ${{ matrix.platform.target == 'x86_64' && 'x64' || 'arm64' }}
+      - name: "Build wheels"
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.platform.target }}
+          args: --release --locked --out dist
+          sccache: "true"
+      - name: "Test wheel"
+        run: |
+          pip install ${{ env.PACKAGE_NAME }} --find-links dist --force-reinstall
+          python -c "import ${{ env.MODULE_NAME }}; print(${{ env.MODULE_NAME }}.__version__)"
+      - name: "Upload wheels"
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-macos-${{ matrix.platform.target }}
+          path: dist
+
+  windows:
+    runs-on: windows-latest
+    needs: define-py-matrix
+    strategy:
+      matrix:
+        platform:
+          - target: x86_64-pc-windows-msvc
+            arch: x64
+          - target: i686-pc-windows-msvc
+            arch: x86
+          - target: aarch64-pc-windows-msvc
+            arch: x64
+        python-version: ${{ fromJSON(needs.define-py-matrix.outputs.py-matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          architecture: ${{ matrix.platform.arch }}
+      - name: "Build wheels"
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.platform.target }}
+          args: --release --locked --out dist
+          sccache: 'true'
+        env:
+          # aarch64 build fails, see https://github.com/PyO3/maturin/issues/2110
+          XWIN_VERSION: 16
+      - name: "Test wheel"
+        if: ${{ !startsWith(matrix.platform.target, 'aarch64') }}
+        shell: bash
+        run: |
+          pip install ${{ env.PACKAGE_NAME }} --find-links dist --force-reinstall
+          python -c "import ${{ env.MODULE_NAME }}; print(${{ env.MODULE_NAME }}.__version__)"
+      - name: "Upload wheels"
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.platform.target }}
+          path: dist
+
+
+  linux:
+    runs-on: ubuntu-latest
+    needs: define-py-matrix
+    strategy:
+      matrix:
+        python-version: ${{ fromJSON(needs.define-py-matrix.outputs.py-matrix) }}
+        target:
+          - x86_64-unknown-linux-gnu
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          architecture: x64
+      - name: "Build wheels"
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          args: --release --locked --out dist
+          sccache: 'true'
+          manylinux: auto
+      - name: "Test wheel"
+        if: ${{ startsWith(matrix.target, 'x86_64') }}
+        run: |
+          pip install ${{ env.PACKAGE_NAME }} --find-links dist --force-reinstall
+          python -c "import ${{ env.MODULE_NAME }}; print(${{ env.MODULE_NAME }}.__version__)"
+      - name: "Upload wheels"
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.target }}
+          path: dist
+
+  musllinux:
+    runs-on: ubuntu-latest
+    needs: define-py-matrix
+    strategy:
+      matrix:
+        python-version: ${{ fromJSON(needs.define-py-matrix.outputs.py-matrix) }}
+        target:
+          - x86_64-unknown-linux-musl
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          architecture: x64
+      - name: "Build wheels"
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          args: --release --locked --out dist
+          sccache: 'true'
+          manylinux: musllinux_1_2
+      - name: "Test wheel"
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        uses: addnab/docker-run-action@v3
+        with:
+          image: alpine:latest
+          options: -v ${{ github.workspace }}:/io -w /io
+          run: |
+            apk add python3
+            python -m venv .venv
+            .venv/bin/pip3 install ${{ env.PACKAGE_NAME }} --find-links dist --force-reinstall
+            .venv/bin/python -c "import ${{ env.MODULE_NAME }}; print(${{ env.MODULE_NAME }}.__version__)"
+      - name: "Upload wheels"
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.target }}
+          path: dist
