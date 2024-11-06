@@ -46,7 +46,10 @@ jobs:
           args: --out dist
       - name: "Test sdist"
         run: |
-          pip install dist/${{ env.PACKAGE_NAME }}-*.tar.gz --force-reinstall
+          set -e
+          python3 -m venv .venv
+          source .venv/bin/activate
+          pip install dist/${{ env.MODULE_NAME }}-*.tar.gz --force-reinstall
           python -c "import ${{ env.MODULE_NAME }}; print(${{ env.MODULE_NAME }}.__version__)"
       - name: "Upload sdist"
         uses: actions/upload-artifact@v4
@@ -79,6 +82,9 @@ jobs:
           sccache: "true"
       - name: "Test wheel"
         run: |
+          set -e
+          python3 -m venv .venv
+          source .venv/bin/activate
           pip install ${{ env.PACKAGE_NAME }} --find-links dist --force-reinstall
           python -c "import ${{ env.MODULE_NAME }}; print(${{ env.MODULE_NAME }}.__version__)"
       - name: "Upload wheels"
@@ -98,7 +104,7 @@ jobs:
           - target: i686-pc-windows-msvc
             arch: x86
           - target: aarch64-pc-windows-msvc
-            arch: x64
+            arch: arm64
         python-version: ${{ fromJSON(needs.define-py-matrix.outputs.py-matrix) }}
     steps:
       - uses: actions/checkout@v4
@@ -119,6 +125,9 @@ jobs:
         if: ${{ !startsWith(matrix.platform.target, 'aarch64') }}
         shell: bash
         run: |
+          set -e
+          python3 -m venv .venv
+          source .venv/Scripts/activate
           pip install ${{ env.PACKAGE_NAME }} --find-links dist --force-reinstall
           python -c "import ${{ env.MODULE_NAME }}; print(${{ env.MODULE_NAME }}.__version__)"
       - name: "Upload wheels"
@@ -146,12 +155,15 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.target }}
-          args: --release --locked --out dist
+          args: --release --locked --out dist -i python${{ matrix.python-version }}
           sccache: 'true'
           manylinux: auto
       - name: "Test wheel"
         if: ${{ startsWith(matrix.target, 'x86_64') }}
         run: |
+          set -e
+          python3 -m venv .venv
+          source .venv/bin/activate
           pip install ${{ env.PACKAGE_NAME }} --find-links dist --force-reinstall
           python -c "import ${{ env.MODULE_NAME }}; print(${{ env.MODULE_NAME }}.__version__)"
       - name: "Upload wheels"
@@ -178,7 +190,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.target }}
-          args: --release --locked --out dist
+          args: --release --locked --out dist -i python${{ matrix.python-version }}
           sccache: 'true'
           manylinux: musllinux_1_2
       - name: "Test wheel"
@@ -188,10 +200,12 @@ jobs:
           image: alpine:latest
           options: -v ${{ github.workspace }}:/io -w /io
           run: |
-            apk add python3
-            python -m venv .venv
-            .venv/bin/pip3 install ${{ env.PACKAGE_NAME }} --find-links dist --force-reinstall
-            .venv/bin/python -c "import ${{ env.MODULE_NAME }}; print(${{ env.MODULE_NAME }}.__version__)"
+            set -e
+            apk add py3-pip py3-virtualenv
+            python3 -m virtualenv .venv
+            source .venv/bin/activate
+            pip install ${{ env.PACKAGE_NAME }} --find-links dist --force-reinstall
+            python -c "import ${{ env.MODULE_NAME }}; print(${{ env.MODULE_NAME }}.__version__)"
       - name: "Upload wheels"
         uses: actions/upload-artifact@v4
         with:
