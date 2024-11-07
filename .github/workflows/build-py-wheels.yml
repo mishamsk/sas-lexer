@@ -171,27 +171,33 @@ jobs:
     needs: define-py-matrix
     strategy:
       matrix:
-        python-version: ${{ fromJSON(needs.define-py-matrix.outputs.py-matrix) }}
+        python:
+          - version: 3.10
+            alpine: 3.17
+          - version: 3.11
+            alpine: 3.19
+          - version: 3.12
+            alpine: 3.20
         target:
           - x86_64-unknown-linux-musl
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: ${{ matrix.python.version }}
           architecture: x64
       - name: "Build wheels"
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.target }}
-          args: --release --locked --out dist -i python${{ matrix.python-version }}
+          args: --release --locked --out dist -i python${{ matrix.python.version }}
           sccache: 'true'
           manylinux: musllinux_1_2
       - name: "Test wheel"
         if: matrix.target == 'x86_64-unknown-linux-musl'
         uses: addnab/docker-run-action@v3
         with:
-          image: alpine:latest
+          image: alpine:${{ matrix.python.alpine }}
           options: -v ${{ github.workspace }}:/io -w /io
           run: |
             set -e
