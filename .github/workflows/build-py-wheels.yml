@@ -27,8 +27,7 @@ jobs:
       - name: Set up Python matrix
         id: matrix
         run: |
-          # echo 'matrix=["3.10", "3.11", "3.12"]' >> "$GITHUB_OUTPUT"
-          echo 'matrix=["3.11"]' >> "$GITHUB_OUTPUT"
+          echo 'matrix=["3.10", "3.11", "3.12"]' >> "$GITHUB_OUTPUT"
 
   sdist:
     runs-on: ubuntu-latest
@@ -38,7 +37,7 @@ jobs:
         with:
           # Use Python static 3.11 to build the sdist, since
           # we are not linking against Python.
-          python-version: 3.11
+          python-version: "3.11"
       - name: "Build sdist"
         uses: PyO3/maturin-action@v1
         with:
@@ -90,7 +89,7 @@ jobs:
       - name: "Upload wheels"
         uses: actions/upload-artifact@v4
         with:
-          name: wheels-macos-${{ matrix.platform.target }}
+          name: wheels-macos-${{ matrix.platform.target }}-${{ matrix.python-version }}
           path: dist
 
   windows:
@@ -127,7 +126,7 @@ jobs:
       - name: "Upload wheels"
         uses: actions/upload-artifact@v4
         with:
-          name: wheels-${{ matrix.platform.target }}
+          name: wheels-${{ matrix.platform.target }}-${{ matrix.python-version }}
           path: dist
 
 
@@ -163,7 +162,7 @@ jobs:
       - name: "Upload wheels"
         uses: actions/upload-artifact@v4
         with:
-          name: wheels-${{ matrix.target }}
+          name: wheels-${{ matrix.target }}-${{ matrix.python-version }}
           path: dist
 
   musllinux:
@@ -209,5 +208,5 @@ jobs:
       - name: "Upload wheels"
         uses: actions/upload-artifact@v4
         with:
-          name: wheels-${{ matrix.target }}
+          name: wheels-${{ matrix.target }}-${{ matrix.python.version }}
           path: dist
