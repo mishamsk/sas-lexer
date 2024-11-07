@@ -32,3 +32,6 @@ indicatif = "0.17.8"
 
 [features]
 polars = ["dep:polars"]
+
+[package.metadata.release]
+release = false

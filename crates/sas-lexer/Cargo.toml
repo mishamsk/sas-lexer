@@ -55,3 +55,43 @@ workspace = true
 [[bench]]
 name = "lexer"
 harness = false
+
+[package.metadata.release]
+tag-prefix = "rust-"
+
+pre-release-replacements = [
+    # Remove unused subsections in unreleased section
+    { file = "../../CHANGELOG-RUST.md", prerelease = true, search = "### Added\n-\\s*\n", replace = "", min = 0, max = 1 },
+    { file = "../../CHANGELOG-RUST.md", prerelease = true, search = "### Changed\n-\\s*\n", replace = "", min = 0, max = 1 },
+    { file = "../../CHANGELOG-RUST.md", prerelease = true, search = "### Deprecated\n-\\s*\n", replace = "", min = 0, max = 1 },
+    { file = "../../CHANGELOG-RUST.md", prerelease = true, search = "### Removed\n-\\s*\n", replace = "", min = 0, max = 1 },
+    { file = "../../CHANGELOG-RUST.md", prerelease = true, search = "### Fixed\n-\\s*\n", replace = "", min = 0, max = 1 },
+    { file = "../../CHANGELOG-RUST.md", prerelease = true, search = "### Security\n-\\s*\n", replace = "", min = 0, max = 1 },
+    # Replace placeholders
+    { file = "../../CHANGELOG-RUST.md", prerelease = true, search = "Unreleased", replace = "{{version}}", exactly = 2 },
+    { file = "../../CHANGELOG-RUST.md", prerelease = true, search = "\\.\\.\\.HEAD", replace = "...{{tag_name}}", exactly = 1 },
+    { file = "../../CHANGELOG-RUST.md", prerelease = true, search = "ReleaseDate", replace = "{{date}}", exactly = 1 },
+    { file = "../../CHANGELOG-RUST.md", prerelease = true, search = "<!-- next-url -->", replace = "<!-- next-url -->\n[Unreleased]: https://github.com/mishamsk/sas-lexer/compare/{{tag_name}}...HEAD", exactly = 1 },
+    { file = "../../CHANGELOG-RUST.md", prerelease = true, search = "<!-- next-header -->", replace = """
+<!-- next-header -->
+
+## [Unreleased] - ReleaseDate
+
+### Added
+-
+
+### Changed
+-
+
+### Deprecated
+-
+
+### Removed
+-
+
+### Fixed
+-
+
+### Security
+-""", exactly = 1 },
+]

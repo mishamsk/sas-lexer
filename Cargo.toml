@@ -72,3 +72,7 @@ default.extend-ignore-identifiers-re = ["(?i)KWM[a-z0-9_]+"]
 default.extend-ignore-words-re = ["LOWCASE"]
 # One test with nOt in that specific case
 default.extend-words = { "Ot" = "Ot" }
+
+[workspace.metadata.release]
+sign-commit = true
+sign-tag = true
