@@ -103,8 +103,6 @@ jobs:
             arch: x64
           - target: i686-pc-windows-msvc
             arch: x86
-          - target: aarch64-pc-windows-msvc
-            arch: arm64
         python-version: ${{ fromJSON(needs.define-py-matrix.outputs.py-matrix) }}
     steps:
       - uses: actions/checkout@v4
@@ -118,11 +116,7 @@ jobs:
           target: ${{ matrix.platform.target }}
           args: --release --locked --out dist
           sccache: 'true'
-        env:
-          # aarch64 build fails, see https://github.com/PyO3/maturin/issues/2110
-          XWIN_VERSION: 16
       - name: "Test wheel"
-        if: ${{ !startsWith(matrix.platform.target, 'aarch64') }}
         shell: bash
         run: |
           set -e

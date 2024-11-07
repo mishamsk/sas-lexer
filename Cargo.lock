@@ -2637,24 +2637,6 @@ dependencies = [
 
 [[package]]
 name = "sas-lexer"
-version = "1.0.0-beta.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b9e4e32b9c78d8eba56377f4d12e874cd91b4629cc269559b1e95d78ace19aa0"
-dependencies = [
- "bit-vec",
- "encoding",
- "lexical",
- "phf",
- "rustc_version",
- "sas-lexer-macro 0.1.0",
- "serde",
- "serde_repr",
- "strum",
- "unicode-ident",
-]
-
-[[package]]
-name = "sas-lexer"
 version = "1.0.0-beta.2"
 dependencies = [
  "bit-vec",
@@ -2676,6 +2658,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "sas-lexer"
+version = "1.0.0-beta.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "169155e54770390b09e229e289a624ed71e5592ea585cc6f164fa855293ee800"
+dependencies = [
+ "bit-vec",
+ "encoding",
+ "lexical",
+ "phf",
+ "rustc_version",
+ "sas-lexer-macro 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "serde",
+ "serde_repr",
+ "strum",
+ "unicode-ident",
+]
+
+[[package]]
 name = "sas-lexer-cli"
 version = "1.0.0-beta.2"
 dependencies = [
@@ -2689,9 +2689,7 @@ dependencies = [
 
 [[package]]
 name = "sas-lexer-macro"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e94534a3b020115091fd7f95f5a73f3257dbea98708474c204f6e0409fc1e7b"
+version = "0.1.1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2701,6 +2699,8 @@ dependencies = [
 [[package]]
 name = "sas-lexer-macro"
 version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3c404c07eaaf07a26d65c98f0ddc0f1dc1a85dc831b79f2f96c4b98c6cdf54aa"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2715,7 +2715,7 @@ dependencies = [
  "convert_case",
  "pyo3",
  "rmp-serde",
- "sas-lexer 1.0.0-beta.1",
+ "sas-lexer 1.0.0-beta.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde_bytes",
  "strum",
 ]
