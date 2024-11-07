@@ -14,13 +14,6 @@ repos:
       - id: trailing-whitespace
         args: [--markdown-linebreak-ext=md]
       - id: check-added-large-files
-  - repo: https://github.com/est31/cargo-udeps
-    rev: v0.1.52
-    hooks:
-      - id: udeps
-        stages:
-          - pre-push
-        args: ["--workspace", "--all-features", "--release"]
   - repo: https://github.com/astral-sh/ruff-pre-commit
     # Ruff version.
     rev: v0.7.2
@@ -44,6 +37,7 @@ repos:
         entry: cargo check
         language: system
         types: [rust]
+        args: ["--workspace", "--all-features", "--locked"]
         pass_filenames: false
       - id: clippy
         name: Clippy

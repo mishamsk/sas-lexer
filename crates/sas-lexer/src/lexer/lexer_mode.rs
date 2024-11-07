@@ -210,7 +210,7 @@ impl MacroArgNameValueFlags {
 
 /// The lexer mode
 #[derive(Debug, Clone, PartialEq, Eq, Default, EnumIs)]
-pub(crate) enum LexerMode {
+pub(super) enum LexerMode {
     /// Default mode aka open code (non macro)
     #[default]
     Default,

@@ -4,7 +4,7 @@ description = "Development CLI for sas-lexer crate."
 authors = { workspace = true }
 edition = { workspace = true }
 repository = { workspace = true }
-rust-version = { workspace = true }
+rust-version = "1.80.0"
 version = { workspace = true }
 license = { workspace = true }
 keywords = { workspace = true }

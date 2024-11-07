@@ -5,7 +5,7 @@ resolver = "2"
 
 [workspace.package]
 edition = "2021"
-rust-version = "1.80.1"
+rust-version = "1.74"
 repository = "https://github.com/mishamsk/sas-lexer"
 authors = ["Mike Perlov <mishamsk@gmail.com>"]
 version = "1.0.0-beta.1"
