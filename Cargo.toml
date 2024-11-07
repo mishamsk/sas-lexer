@@ -16,7 +16,7 @@ categories = ["development-tools", "parsing"]
 
 [workspace.dependencies]
 sas-lexer = { path = "crates/sas-lexer" }
-sas-lexer-macro = { path = "crates/sas-lexer-macro", version = "0.1.0" }
+sas-lexer-macro = { path = "crates/sas-lexer-macro", version = "0.1.1" }
 
 criterion = { version = "0.5.1", features = ["html_reports"] }
 pprof = { version = "0.13.0", features = [
