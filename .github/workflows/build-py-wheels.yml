@@ -27,8 +27,7 @@ jobs:
       - name: Set up Python matrix
         id: matrix
         run: |
-          # echo 'matrix=["3.10", "3.11", "3.12"]' >> "$GITHUB_OUTPUT"
-          echo 'matrix=["3.11"]' >> "$GITHUB_OUTPUT"
+          echo 'matrix=["3.10", "3.11", "3.12"]' >> "$GITHUB_OUTPUT"
 
   sdist:
     runs-on: ubuntu-latest
@@ -38,7 +37,7 @@ jobs:
         with:
           # Use Python static 3.11 to build the sdist, since
           # we are not linking against Python.
-          python-version: 3.11
+          python-version: "3.11"
       - name: "Build sdist"
         uses: PyO3/maturin-action@v1
         with:
@@ -46,7 +45,10 @@ jobs:
           args: --out dist
       - name: "Test sdist"
         run: |
-          pip install dist/${{ env.PACKAGE_NAME }}-*.tar.gz --force-reinstall
+          set -e
+          python3 -m venv .venv
+          source .venv/bin/activate
+          pip install dist/${{ env.MODULE_NAME }}-*.tar.gz --force-reinstall
           python -c "import ${{ env.MODULE_NAME }}; print(${{ env.MODULE_NAME }}.__version__)"
       - name: "Upload sdist"
         uses: actions/upload-artifact@v4
@@ -79,12 +81,15 @@ jobs:
           sccache: "true"
       - name: "Test wheel"
         run: |
+          set -e
+          python3 -m venv .venv
+          source .venv/bin/activate
           pip install ${{ env.PACKAGE_NAME }} --find-links dist --force-reinstall
           python -c "import ${{ env.MODULE_NAME }}; print(${{ env.MODULE_NAME }}.__version__)"
       - name: "Upload wheels"
         uses: actions/upload-artifact@v4
         with:
-          name: wheels-macos-${{ matrix.platform.target }}
+          name: wheels-macos-${{ matrix.platform.target }}-${{ matrix.python-version }}
           path: dist
 
   windows:
@@ -97,8 +102,6 @@ jobs:
             arch: x64
           - target: i686-pc-windows-msvc
             arch: x86
-          - target: aarch64-pc-windows-msvc
-            arch: x64
         python-version: ${{ fromJSON(needs.define-py-matrix.outputs.py-matrix) }}
     steps:
       - uses: actions/checkout@v4
@@ -112,19 +115,18 @@ jobs:
           target: ${{ matrix.platform.target }}
           args: --release --locked --out dist
           sccache: 'true'
-        env:
-          # aarch64 build fails, see https://github.com/PyO3/maturin/issues/2110
-          XWIN_VERSION: 16
       - name: "Test wheel"
-        if: ${{ !startsWith(matrix.platform.target, 'aarch64') }}
         shell: bash
         run: |
+          set -e
+          python3 -m venv .venv
+          source .venv/Scripts/activate
           pip install ${{ env.PACKAGE_NAME }} --find-links dist --force-reinstall
           python -c "import ${{ env.MODULE_NAME }}; print(${{ env.MODULE_NAME }}.__version__)"
       - name: "Upload wheels"
         uses: actions/upload-artifact@v4
         with:
-          name: wheels-${{ matrix.platform.target }}
+          name: wheels-${{ matrix.platform.target }}-${{ matrix.python-version }}
           path: dist
 
 
@@ -146,18 +148,21 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.target }}
-          args: --release --locked --out dist
+          args: --release --locked --out dist -i python${{ matrix.python-version }}
           sccache: 'true'
           manylinux: auto
       - name: "Test wheel"
         if: ${{ startsWith(matrix.target, 'x86_64') }}
         run: |
+          set -e
+          python3 -m venv .venv
+          source .venv/bin/activate
           pip install ${{ env.PACKAGE_NAME }} --find-links dist --force-reinstall
           python -c "import ${{ env.MODULE_NAME }}; print(${{ env.MODULE_NAME }}.__version__)"
       - name: "Upload wheels"
         uses: actions/upload-artifact@v4
         with:
-          name: wheels-${{ matrix.target }}
+          name: wheels-${{ matrix.target }}-${{ matrix.python-version }}
           path: dist
 
   musllinux:
@@ -165,35 +170,43 @@ jobs:
     needs: define-py-matrix
     strategy:
       matrix:
-        python-version: ${{ fromJSON(needs.define-py-matrix.outputs.py-matrix) }}
+        python:
+          - version: "3.10"
+            alpine: "3.17"
+          - version: "3.11"
+            alpine: "3.19"
+          - version: "3.12"
+            alpine: "3.20"
         target:
           - x86_64-unknown-linux-musl
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: ${{ matrix.python.version }}
           architecture: x64
       - name: "Build wheels"
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.target }}
-          args: --release --locked --out dist
+          args: --release --locked --out dist -i python${{ matrix.python.version }}
           sccache: 'true'
           manylinux: musllinux_1_2
       - name: "Test wheel"
         if: matrix.target == 'x86_64-unknown-linux-musl'
         uses: addnab/docker-run-action@v3
         with:
-          image: alpine:latest
+          image: alpine:${{ matrix.python.alpine }}
           options: -v ${{ github.workspace }}:/io -w /io
           run: |
-            apk add python3
-            python -m venv .venv
-            .venv/bin/pip3 install ${{ env.PACKAGE_NAME }} --find-links dist --force-reinstall
-            .venv/bin/python -c "import ${{ env.MODULE_NAME }}; print(${{ env.MODULE_NAME }}.__version__)"
+            set -e
+            apk add py3-pip py3-virtualenv
+            python3 -m virtualenv .venv
+            source .venv/bin/activate
+            pip install ${{ env.PACKAGE_NAME }} --find-links dist --force-reinstall
+            python -c "import ${{ env.MODULE_NAME }}; print(${{ env.MODULE_NAME }}.__version__)"
       - name: "Upload wheels"
         uses: actions/upload-artifact@v4
         with:
-          name: wheels-${{ matrix.target }}
+          name: wheels-${{ matrix.target }}-${{ matrix.python.version }}
           path: dist
