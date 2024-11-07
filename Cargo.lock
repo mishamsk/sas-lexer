@@ -2648,7 +2648,7 @@ dependencies = [
  "pprof",
  "rstest",
  "rustc_version",
- "sas-lexer-macro 0.1.0",
+ "sas-lexer-macro 0.1.1",
  "serde",
  "serde_repr",
  "strum",
@@ -2668,7 +2668,7 @@ dependencies = [
  "lexical",
  "phf",
  "rustc_version",
- "sas-lexer-macro 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "sas-lexer-macro 0.1.0",
  "serde",
  "serde_repr",
  "strum",
@@ -2690,6 +2690,8 @@ dependencies = [
 [[package]]
 name = "sas-lexer-macro"
 version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e94534a3b020115091fd7f95f5a73f3257dbea98708474c204f6e0409fc1e7b"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2698,9 +2700,7 @@ dependencies = [
 
 [[package]]
 name = "sas-lexer-macro"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e94534a3b020115091fd7f95f5a73f3257dbea98708474c204f6e0409fc1e7b"
+version = "0.1.1"
 dependencies = [
  "proc-macro2",
  "quote",
