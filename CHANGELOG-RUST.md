@@ -12,7 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 -
 
 ### Changed
--
+- Distinguish built-in macro calls and autocall macros that mask comma in arguments from those that don't.
 
 ### Deprecated
 -
@@ -38,5 +38,5 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 <!-- next-url -->
 [Unreleased]: https://github.com/mishamsk/sas-lexer/compare/rust-v1.0.0-beta.2...HEAD
-[1.0.0-beta.2]: https://github.com/mishamsk/sas-lexer/compare/v1.0.0-beta.1...rust-v1.0.0-beta.2
+[1.0.0-beta.2]: https://github.com/mishamsk/sas-lexer/compare/rust-v1.0.0-beta.1...rust-v1.0.0-beta.2
 [1.0.0-beta.1]: https://github.com/mishamsk/sas-lexer/releases/tag/rust-v1.0.0-beta.1
