@@ -1,0 +1,80 @@
+name: Test, build, publish to PyPI & release Python package
+
+on:
+  push:
+    tags:
+      - "py-v*"
+
+jobs:
+  test:
+    uses: ./.github/workflows/ci.yml
+
+  build-wheels:
+    needs: test
+    uses: ./.github/workflows/build-py-wheels.yml
+
+  pypi-publish:
+    name: Upload to PyPI
+    needs: [test, build-wheels]
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+    permissions:
+      # For PyPI's trusted publishing.
+      id-token: write
+      # Used to generate artifact attestation
+      attestations: write
+    steps:
+      - name: "Install uv"
+        uses: astral-sh/setup-uv@v3
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          path: wheels
+          merge-multiple: true
+      - name: Generate artifact attestation
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: "wheels/wheels-*"
+      - name: Publish to PyPi
+        run: uv publish -v wheels/*
+
+  release:
+    name: Create Release
+    needs: [test, build-wheels, pypi-publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Get version from tag
+        id: tag_name
+        run: |
+          echo "current_version=${GITHUB_REF#refs/tags/py-v}" >> $GITHUB_OUTPUT
+        shell: bash
+
+      - uses: actions/checkout@v4
+
+      - name: Get Changelog Entry
+        id: changelog_reader
+        uses: mindsers/changelog-reader-action@v2
+        with:
+          validation_level: error
+          version: ${{ steps.tag_name.outputs.current_version }}
+          path: ./CHANGELOG-PY.md
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          path: wheels
+          merge-multiple: true
+
+      - name: create github release
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          body: ${{ steps.changelog_reader.outputs.changes }}
+          files: wheels/*
+          draft: true
+          prerelease: ${{ steps.changelog_reader.outputs.status == 'prereleased' }}
