@@ -76,3 +76,4 @@ default.extend-words = { "Ot" = "Ot" }
 [workspace.metadata.release]
 sign-commit = true
 sign-tag = true
+allow-branch = ["main", "!HEAD"]
