@@ -19,12 +19,12 @@ crate-type = ["cdylib"]
 [dependencies]
 pyo3 = "0.22.2"
 rmp-serde = { workspace = true }
-sas-lexer = { version = "1.0.0-beta.2", features = ["serde", "macro_sep"] }
+sas-lexer = { version = "1.0.0-beta.3", features = ["serde", "macro_sep"] }
 serde_bytes = "0.11.15"
 
 [build-dependencies]
 anyhow = "1.0.91"
-sas-lexer = { version = "1.0.0-beta.2", features = ["serde", "macro_sep"] }
+sas-lexer = { version = "1.0.0-beta.3", features = ["serde", "macro_sep"] }
 strum = { workspace = true }
 convert_case = "0.6.0"
 
