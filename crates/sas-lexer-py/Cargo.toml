@@ -5,7 +5,7 @@ authors = { workspace = true }
 edition = { workspace = true }
 repository = { workspace = true }
 rust-version = { workspace = true }
-version = "1.0.0-beta.1"
+version = "1.0.0-beta.0"
 license = { workspace = true }
 keywords = { workspace = true }
 categories = { workspace = true }
@@ -32,4 +32,43 @@ convert_case = "0.6.0"
 workspace = true
 
 [package.metadata.release]
-release = false
+tag-prefix = "py-"
+
+pre-release-replacements = [
+    # Remove unused subsections in unreleased section
+    { file = "../../src/sas_lexer/__init__.py", prerelease = true, search = "__version__ = \"[^\"]+\"", replace = "__version__ = \"{{version}}\"", exactly = 1 },
+    { file = "../../pyproject.toml", prerelease = true, search = "version = \"[^\"]+\"", replace = "version = \"{{version}}\"", exactly = 1 },
+    { file = "../../CHANGELOG-PY.md", prerelease = true, search = "### Added\n-\\s*\n", replace = "", min = 0, max = 1 },
+    { file = "../../CHANGELOG-PY.md", prerelease = true, search = "### Changed\n-\\s*\n", replace = "", min = 0, max = 1 },
+    { file = "../../CHANGELOG-PY.md", prerelease = true, search = "### Deprecated\n-\\s*\n", replace = "", min = 0, max = 1 },
+    { file = "../../CHANGELOG-PY.md", prerelease = true, search = "### Removed\n-\\s*\n", replace = "", min = 0, max = 1 },
+    { file = "../../CHANGELOG-PY.md", prerelease = true, search = "### Fixed\n-\\s*\n", replace = "", min = 0, max = 1 },
+    { file = "../../CHANGELOG-PY.md", prerelease = true, search = "### Security\n-\\s*\n", replace = "", min = 0, max = 1 },
+    # Replace placeholders
+    { file = "../../CHANGELOG-PY.md", prerelease = true, search = "Unreleased", replace = "{{version}}", exactly = 2 },
+    { file = "../../CHANGELOG-PY.md", prerelease = true, search = "\\.\\.\\.HEAD", replace = "...{{tag_name}}", exactly = 1 },
+    { file = "../../CHANGELOG-PY.md", prerelease = true, search = "ReleaseDate", replace = "{{date}}", exactly = 1 },
+    { file = "../../CHANGELOG-PY.md", prerelease = true, search = "<!-- next-url -->", replace = "<!-- next-url -->\n[Unreleased]: https://github.com/mishamsk/sas-lexer/compare/{{tag_name}}...HEAD", exactly = 1 },
+    { file = "../../CHANGELOG-PY.md", prerelease = true, search = "<!-- next-header -->", replace = """
+<!-- next-header -->
+
+## [Unreleased] - ReleaseDate
+
+### Added
+-
+
+### Changed
+-
+
+### Deprecated
+-
+
+### Removed
+-
+
+### Fixed
+-
+
+### Security
+-""", exactly = 1 },
+]
