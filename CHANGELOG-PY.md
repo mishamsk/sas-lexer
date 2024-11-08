@@ -9,7 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [Unreleased] - ReleaseDate
 
 ### Added
-- Python initial pre-release.
+-
 
 ### Changed
 -
@@ -26,5 +26,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Security
 -
 
+## [1.0.0-beta.1] - 2024-11-08
+
+### Added
+- Python initial pre-release.
+
 <!-- next-url -->
-[Unreleased]: https://github.com/mishamsk/sas-lexer/releases/tag/...HEAD
+[Unreleased]: https://github.com/mishamsk/sas-lexer/compare/py-v1.0.0-beta.1...HEAD
+[1.0.0-beta.1]: https://github.com/mishamsk/sas-lexer/releases/tag/py-v1.0.0-beta.1
