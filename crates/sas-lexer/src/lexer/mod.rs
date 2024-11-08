@@ -4579,24 +4579,11 @@ impl<'src> Lexer<'src> {
                 self.expect_scan_or_substr_call_args(false);
             }
             // The "simple" built-ins, that are lexed as macro calls without any special handling
-            // Even though we know that some of them have speecific types or number of arguments.
-            // E.g. the last 6 are really one argument of var name expr only, but
-            // decided to not do too much parsing-like validation here
+            // Even though we know that most of them are single arg, SAS won't mask commas
+            // and just emit error if 2+ args are passed
             TokenTypeMacroCallOrStat::KwmDatatyp
-            | TokenTypeMacroCallOrStat::KwmIndex
-            | TokenTypeMacroCallOrStat::KwmKIndex
-            | TokenTypeMacroCallOrStat::KwmLength
-            | TokenTypeMacroCallOrStat::KwmKLength
             | TokenTypeMacroCallOrStat::KwmLowcase
             | TokenTypeMacroCallOrStat::KwmKLowcase
-            | TokenTypeMacroCallOrStat::KwmQLowcase
-            | TokenTypeMacroCallOrStat::KwmQKLowcase
-            | TokenTypeMacroCallOrStat::KwmUpcase
-            | TokenTypeMacroCallOrStat::KwmKUpcase
-            | TokenTypeMacroCallOrStat::KwmQUpcase
-            | TokenTypeMacroCallOrStat::KwmQKUpcase
-            | TokenTypeMacroCallOrStat::KwmSysmexecname
-            | TokenTypeMacroCallOrStat::KwmSysprod
             | TokenTypeMacroCallOrStat::KwmCmpres
             | TokenTypeMacroCallOrStat::KwmQCmpres
             | TokenTypeMacroCallOrStat::KwmKCmpres
@@ -4608,11 +4595,29 @@ impl<'src> Lexer<'src> {
             | TokenTypeMacroCallOrStat::KwmTrim
             | TokenTypeMacroCallOrStat::KwmQTrim
             | TokenTypeMacroCallOrStat::KwmKTrim
-            | TokenTypeMacroCallOrStat::KwmQKTrim
+            | TokenTypeMacroCallOrStat::KwmQKTrim => {
+                self.expect_builtin_macro_call_args();
+            }
+            // For these "simple" built-ins SAS will mask commas, so we need handle
+            // them as strict single arg functions
+            TokenTypeMacroCallOrStat::KwmIndex
+            | TokenTypeMacroCallOrStat::KwmKIndex
+            | TokenTypeMacroCallOrStat::KwmLength
+            | TokenTypeMacroCallOrStat::KwmKLength
+            | TokenTypeMacroCallOrStat::KwmQLowcase
+            | TokenTypeMacroCallOrStat::KwmQKLowcase
+            | TokenTypeMacroCallOrStat::KwmUpcase
+            | TokenTypeMacroCallOrStat::KwmKUpcase
+            | TokenTypeMacroCallOrStat::KwmQUpcase
+            | TokenTypeMacroCallOrStat::KwmQKUpcase
+            | TokenTypeMacroCallOrStat::KwmSysmexecname
+            | TokenTypeMacroCallOrStat::KwmSysprod
             | TokenTypeMacroCallOrStat::KwmQuote
             | TokenTypeMacroCallOrStat::KwmNrQuote
             | TokenTypeMacroCallOrStat::KwmBquote
             | TokenTypeMacroCallOrStat::KwmNrBquote
+            // Superq is in a league of it's own. in reality it expects valid macro var
+            // name, and comma inside will cause a different error, but whatever
             | TokenTypeMacroCallOrStat::KwmSuperq
             | TokenTypeMacroCallOrStat::KwmUnquote
             | TokenTypeMacroCallOrStat::KwmSymExist
@@ -4621,7 +4626,7 @@ impl<'src> Lexer<'src> {
             | TokenTypeMacroCallOrStat::KwmSysget
             | TokenTypeMacroCallOrStat::KwmSysmacexec
             | TokenTypeMacroCallOrStat::KwmSysmacexist => {
-                self.expect_builtin_macro_call_args();
+                self.expect_builtin_macro_call_one_arg_masking();
             }
             // The special built-in beast, that allows named arguments
             TokenTypeMacroCallOrStat::KwmCompstor
@@ -4636,6 +4641,7 @@ impl<'src> Lexer<'src> {
             }
             // No argument built-in calls
             TokenTypeMacroCallOrStat::KwmSysmexecdepth => {}
+            // The most special of them all - %sysfunc
             TokenTypeMacroCallOrStat::KwmSysfunc | TokenTypeMacroCallOrStat::KwmQSysfunc => {
                 self.expect_sysfunc_macro_call_args();
             }
@@ -4975,6 +4981,30 @@ impl<'src> Lexer<'src> {
         // right away
         self.push_mode(LexerMode::MacroCallValue {
             flags: MacroArgNameValueFlags::new(MacroArgContext::BuiltInMacro, true, true),
+            pnl: 0,
+        });
+        // Leading insiginificant WS before the first argument
+        self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+        self.push_mode(LexerMode::ExpectSymbol(
+            TokenType::LPAREN,
+            TokenChannel::DEFAULT,
+        ));
+        // Leading insiginificant WS before opening parenthesis
+        self.push_mode(LexerMode::WsOrCStyleCommentOnly);
+    }
+
+    /// A helper to populate the expected states for the built-in macro calls
+    /// that mask comma, and thus have exactly one argument
+    #[inline]
+    fn expect_builtin_macro_call_one_arg_masking(&mut self) {
+        // All built-ins have arguments, so we may avoid the `maybe` version
+        self.push_mode(LexerMode::ExpectSymbol(
+            TokenType::RPAREN,
+            TokenChannel::DEFAULT,
+        ));
+        // Push the mode for the sole expected argument
+        self.push_mode(LexerMode::MacroCallValue {
+            flags: MacroArgNameValueFlags::new(MacroArgContext::BuiltInMacro, false, false),
             pnl: 0,
         });
         // Leading insiginificant WS before the first argument

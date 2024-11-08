@@ -148,11 +148,13 @@ impl MacroEvalExprFlags {
 #[cfg_attr(test, derive(EnumIter, PartialEq, Eq))]
 #[repr(u8)]
 pub(super) enum MacroArgContext {
-    /// Built-in macro call
+    /// Built-in macro call. These do not support named arguments
+    /// so in this mode the following arg mode is always `MacroCallValue`
     BuiltInMacro,
-    /// User defined macro call or built-in macro that allows named arguments
+    /// User defined macro call or built-in macro that allows named arguments.
+    /// In this mode the following arg mode is `MacroCallArgOrValue`
     MacroCall,
-    /// Macro definition
+    /// Macro definition. In this mode the following arg mode is `MacroDefArg`
     MacroDef,
 }
 

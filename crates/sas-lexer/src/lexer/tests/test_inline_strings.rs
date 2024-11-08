@@ -3539,7 +3539,10 @@ fn test_macro_def(
 }
 
 /// This test doesn't follow true semantics of built-ins. Most accept
-/// only one arg, but we have a test case with two regardless.
+/// only one arg and will generate either `ERROR: More positional parameters found than defined.`
+/// or `ERROR: Macro function XXX has too many arguments.` error,
+/// but we include tests with two arguments regardless, to check
+/// lexer behavior.
 #[rstest]
 #[case::ints_not_evaluated(
     // Integers are not evaluated
@@ -3560,7 +3563,7 @@ fn test_macro_def(
         (")", TokenType::MacroString),
     ]
 )]
-#[case::nested_call_with_comment(
+#[case::two_arg_nested_call_with_comment(
     vec![
         ("/*c*/", TokenType::CStyleComment),
         ("some()", TokenType::MacroString),
@@ -3571,23 +3574,11 @@ fn test_macro_def(
         ("/*c*/", TokenType::CStyleComment),
     ]
 )]
-fn test_macro_simple_builtins(
+fn test_macro_builtins_non_masking_comma(
     #[values(
         TokenType::KwmDatatyp,
-        TokenType::KwmIndex,
-        TokenType::KwmKIndex,
-        TokenType::KwmLength,
-        TokenType::KwmKLength,
         TokenType::KwmLowcase,
         TokenType::KwmKLowcase,
-        TokenType::KwmQLowcase,
-        TokenType::KwmQKLowcase,
-        TokenType::KwmUpcase,
-        TokenType::KwmKUpcase,
-        TokenType::KwmQUpcase,
-        TokenType::KwmQKUpcase,
-        TokenType::KwmSysmexecname,
-        TokenType::KwmSysprod,
         TokenType::KwmCmpres,
         TokenType::KwmQCmpres,
         TokenType::KwmKCmpres,
@@ -3599,7 +3590,85 @@ fn test_macro_simple_builtins(
         TokenType::KwmTrim,
         TokenType::KwmQTrim,
         TokenType::KwmKTrim,
-        TokenType::KwmQKTrim,
+        TokenType::KwmQKTrim
+    )]
+    tok_type: TokenType,
+    #[case] inner_expr_tokens: Vec<(&str, TokenType)>,
+    kwm_to_str_map: HashMap<TokenType, String>,
+) {
+    let func_name = mangle_case(kwm_to_str_map.get(&tok_type).unwrap());
+    let func_name = format!("%{func_name}");
+
+    let expr_str = inner_expr_tokens
+        .iter()
+        .map(|(snip, _)| *snip)
+        .collect::<String>();
+
+    let mut expected_tokens = Vec::with_capacity(inner_expr_tokens.len() + 3);
+
+    expected_tokens.push((func_name.as_str(), tok_type, Payload::None));
+    expected_tokens.push(("(", TokenType::LPAREN, Payload::None));
+    expected_tokens.extend(
+        inner_expr_tokens
+            .iter()
+            .map(|(snip, tok)| (*snip, *tok, Payload::None)),
+    );
+    expected_tokens.push((")", TokenType::RPAREN, Payload::None));
+
+    assert_lexing(
+        format!("{func_name}({expr_str})").as_str(),
+        expected_tokens,
+        NO_ERRORS,
+    );
+}
+
+/// These macro functions/autocall macroses mask the comma in their arguments
+/// so always have exactly one argument.
+#[rstest]
+#[case::ints_not_evaluated(
+    // Integers are not evaluated
+    vec![
+        ("1+1", TokenType::MacroString)
+    ]
+)]
+#[case::look_like_named_args_and_comma(
+    // No named args, and comma is never a terminator
+    vec![
+        ("arg1=some(,arg2=())", TokenType::MacroString)
+    ],
+)]
+#[case::balanced_parens_after_slash_with_comment(
+    vec![
+        ("/(", TokenType::MacroString),
+        ("/*c*/", TokenType::CStyleComment),
+        (")", TokenType::MacroString),
+    ]
+)]
+#[case::nested_call_with_comment(
+    vec![
+        ("/*c*/", TokenType::CStyleComment),
+        ("some()", TokenType::MacroString),
+        ("/*c*/", TokenType::CStyleComment),
+        (",", TokenType::MacroString),
+        ("/*c*/", TokenType::CStyleComment),
+        ("2", TokenType::MacroString),
+        ("/*c*/", TokenType::CStyleComment),
+    ]
+)]
+fn test_macro_builtins_masking_comma(
+    #[values(
+        TokenType::KwmIndex,
+        TokenType::KwmKIndex,
+        TokenType::KwmLength,
+        TokenType::KwmKLength,
+        TokenType::KwmQLowcase,
+        TokenType::KwmQKLowcase,
+        TokenType::KwmUpcase,
+        TokenType::KwmKUpcase,
+        TokenType::KwmQUpcase,
+        TokenType::KwmQKUpcase,
+        TokenType::KwmSysmexecname,
+        TokenType::KwmSysprod,
         TokenType::KwmQuote,
         TokenType::KwmNrQuote,
         TokenType::KwmBquote,

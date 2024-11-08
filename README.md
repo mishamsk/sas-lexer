@@ -130,7 +130,7 @@ THIS SECTION IS WIP. PLANNED CONTENT:
 * Total ambiguity of numeric formats
 * Environment-dependent lexing: parenthesis following macro identifier
 * Macro call arguments starting with `=`
-* Context-aware masking of ',' in macro call arguments
+* Context-aware masking of ',' in macro call arguments and discrepancies between sister functions
 * `%sysfunc/%syscall` function aware lexing
 * String literals that "hide" semicolon from macro but are not string literals
 * Star comments that sometimes disable macro processing and sometimes not
