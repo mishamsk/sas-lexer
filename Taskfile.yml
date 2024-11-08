@@ -106,7 +106,7 @@ tasks:
     generates:
       - target/release/*.*
     cmds:
-      - cargo build --release
+      - cargo build --release --workspace
 
   build:stats_polars:
     sources:
