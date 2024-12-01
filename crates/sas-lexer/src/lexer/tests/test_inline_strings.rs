@@ -33,7 +33,7 @@ fn test_unicode_char_offset() {
 
     assert_eq!(errors.len(), 0, "Expected no errors, got {}", errors.len());
 
-    let token = buffer.into_iter().next().unwrap();
+    let token = buffer.iter_tokens().next().unwrap();
 
     assert_eq!(
         buffer.get_token_end(token).expect("wrong token").get(),
@@ -63,7 +63,7 @@ fn test_unicode_char_offset() {
 
     assert_eq!(errors.len(), 0, "Expected no errors, got {}", errors.len());
 
-    let token = buffer.into_iter().next().unwrap();
+    let token = buffer.iter_tokens().next().unwrap();
 
     assert_eq!(
         buffer.get_token_end(token).expect("wrong token").get(),
@@ -81,7 +81,7 @@ fn test_column_count_with_bom() {
 
     assert_eq!(errors.len(), 0, "Expected no errors, got {}", errors.len());
 
-    let token = buffer.into_iter().next().unwrap();
+    let token = buffer.iter_tokens().next().unwrap();
 
     assert_eq!(
         buffer.get_token_start_column(token).expect("wrong token"),
@@ -111,7 +111,7 @@ fn test_end_line_with_empty_tok() {
     let LexResult { buffer, .. } = lex_program(&source).unwrap();
 
     // Get the empty token MacroStringEmpty and check the end line
-    let token = buffer.into_iter().nth(3).unwrap();
+    let token = buffer.iter_tokens().nth(3).unwrap();
 
     assert_eq!(
         buffer.get_token_end_line(token).expect("wrong token"),
@@ -516,7 +516,7 @@ fn test_datalines(#[values("", ";", ";\n\t/*comment*/  ")] prefix: &str, #[case]
         vec![]
     } else {
         buffer
-            .into_iter()
+            .iter_tokens()
             .filter(|t| buffer.get_token_type(*t).expect("wrong token") != TokenType::EOF)
             .map(|t| {
                 (

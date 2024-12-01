@@ -9,7 +9,7 @@
 //!
 //! let LexResult { buffer, .. } = lex_program(&source).unwrap();
 //!
-//! let tokens: Vec<TokenIdx> = buffer.into_iter().collect();
+//! let tokens: Vec<TokenIdx> = buffer.iter_tokens().collect();
 //!
 //! for token in tokens {
 //!     println!("{:?}", buffer.get_token_raw_text(token, &source));

@@ -590,7 +590,7 @@ impl ErrorTestCase for ErrorKind {
 
     fn last_token_idx(&self, buffer: &TokenizedBuffer) -> Option<TokenIdx> {
         buffer
-            .into_iter()
+            .iter_tokens()
             .filter(|t| buffer.get_token_type(*t).expect("wrong token") != TokenType::EOF)
             .last()
     }
@@ -607,7 +607,7 @@ impl ErrorTestCase for (ErrorKind, usize) {
 
     fn last_token_idx(&self, buffer: &TokenizedBuffer) -> Option<TokenIdx> {
         buffer
-            .into_iter()
+            .iter_tokens()
             .filter(|t| buffer.get_token_type(*t).expect("wrong token") != TokenType::EOF)
             .find(|&t| buffer.get_token_end(t).expect("wrong token").get() == self.1 as u32)
     }
@@ -710,7 +710,7 @@ pub(super) fn assert_lexing<TT: TokenTestCase, ET: ErrorTestCase>(
     let LexResult { buffer, errors, .. } = lex_program(&source).unwrap();
 
     // Check tokens
-    let tokens: Vec<TokenIdx> = buffer.into_iter().collect();
+    let tokens: Vec<TokenIdx> = buffer.iter_tokens().collect();
 
     // Check total token count
     assert_eq!(

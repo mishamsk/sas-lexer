@@ -595,7 +595,7 @@ impl TokenizedBuffer {
         self.string_literals_buffer.as_str()
     }
 
-    fn iter(&self) -> std::iter::Map<std::ops::Range<u32>, fn(u32) -> TokenIdx> {
+    pub fn iter_tokens(&self) -> std::iter::Map<std::ops::Range<u32>, fn(u32) -> TokenIdx> {
         (0..self.token_count()).map(TokenIdx::new)
     }
 
@@ -981,15 +981,6 @@ impl TokenizedBuffer {
     }
 }
 
-impl IntoIterator for &TokenizedBuffer {
-    type Item = TokenIdx;
-    type IntoIter = std::iter::Map<std::ops::Range<u32>, fn(u32) -> TokenIdx>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.iter()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1037,7 +1028,7 @@ mod tests {
         );
 
         let detached = buffer.into_detached(source);
-        let mut buf_iter = detached.iter();
+        let mut buf_iter = detached.iter_tokens();
         let token1 = buf_iter.next().expect("no token");
         let token2 = buf_iter.next().expect("no token");
 
@@ -1115,7 +1106,7 @@ mod tests {
         );
 
         let detached = buffer.into_detached(source);
-        let mut buf_iter = detached.iter();
+        let mut buf_iter = detached.iter_tokens();
         let token1 = buf_iter.next().expect("no token");
         let token2 = buf_iter.next().expect("no token");
 

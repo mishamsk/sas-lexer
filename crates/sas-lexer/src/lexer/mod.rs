@@ -5240,7 +5240,7 @@ impl Lexer<'_> {
 /// use sas_lexer::{lex_program, LexResult, TokenIdx};
 /// let source = "%let x = 42;";
 /// let LexResult { buffer, .. } = lex_program(&source).unwrap();
-/// let tokens: Vec<TokenIdx> = buffer.into_iter().collect();
+/// let tokens: Vec<TokenIdx> = buffer.iter_tokens().collect();
 /// assert_eq!(tokens.len(), 9);
 ///
 /// for token in tokens {

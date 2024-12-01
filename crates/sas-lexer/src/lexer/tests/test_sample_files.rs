@@ -39,7 +39,7 @@ fn test_snapshots(#[files("src/lexer/tests/samples/**/*.sas")] path: PathBuf) {
         ..
     } = lex_program(&contents).unwrap();
     let tokens: Vec<String> = tok_buffer
-        .into_iter()
+        .iter_tokens()
         .map(|tidx| token_to_string(tidx, &tok_buffer, &contents))
         .collect();
 
@@ -71,7 +71,7 @@ fn test_full_coverage(#[files("src/lexer/tests/samples/**/*.sas")] path: PathBuf
 
     let mut end = 0;
 
-    for token in &tok_buffer {
+    for token in tok_buffer.iter_tokens() {
         // Check that the token starts where the previous token ended
         assert_eq!(
             tok_buffer
