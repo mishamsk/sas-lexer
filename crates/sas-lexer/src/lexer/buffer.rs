@@ -816,7 +816,7 @@ impl TokenizedBuffer {
     ///
     /// Returns an error if the token index is out of bounds.
     pub fn get_token_raw_text<'a, S: AsRef<str> + 'a>(
-        &'a self,
+        &self,
         token: TokenIdx,
         source: &'a S,
     ) -> Result<Option<&'a str>, ErrorKind> {
@@ -847,6 +847,43 @@ impl TokenizedBuffer {
         }
 
         Ok(source.as_ref().get(text_range))
+    }
+
+    /// Returns the fully resolved text of the token.
+    ///
+    /// This is either the raw text or the unescaped string literal.
+    ///
+    /// If the range is empty, returns `None`, not an empty string!
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the token index is out of bounds.
+    pub fn get_token_resolved_text<'a, S: AsRef<str> + 'a>(
+        &'a self,
+        token: TokenIdx,
+        source: &'a S,
+    ) -> Result<Option<&'a str>, ErrorKind> {
+        let tidx = token.0 as usize;
+
+        debug_assert!(tidx < self.token_infos.len(), "Token index out of bounds");
+
+        let token_info = self
+            .token_infos
+            .get(tidx)
+            .ok_or(ErrorKind::TokenIdxOutOfBounds)?;
+
+        match token_info.payload {
+            Payload::StringLiteral(start, stop) => {
+                let start = start as usize;
+                let stop = stop as usize;
+
+                self.string_literals_buffer
+                    .get(start..stop)
+                    .map(Option::Some)
+                    .ok_or(ErrorKind::StringLiteralOutOfBounds)
+            }
+            _ => self.get_token_raw_text(token, source),
+        }
     }
 
     /// Returns the payload of the token.
@@ -929,7 +966,6 @@ impl TokenizedBuffer {
         // Now add the EOF token. cur_tok will point to it
         vec.push(ResolvedTokenInfo {
             channel: cur_tok.channel,
-            // This can't be EOF, so it is safe to cast
             token_type: cur_tok.token_type,
             token_index: tok_idx,
             start: cur_tok.start.get(),
@@ -1023,7 +1059,7 @@ mod tests {
     }
 
     #[test]
-    fn tokenized_buffer_get_token_text() {
+    fn tokenized_buffer_get_token_raw_text() {
         let (buffer, token1, token2) = get_two_tok_buffer();
 
         assert_eq!(
@@ -1039,6 +1075,73 @@ mod tests {
                 .unwrap()
                 .unwrap(),
             "his is a test."
+        );
+    }
+
+    #[test]
+    fn tokenized_buffer_get_token_resolved_text() {
+        let source = "Hello, world!\n\"This is a test.\"";
+        let mut buffer = WorkTokenizedBuffer::new(source);
+
+        let line1 = buffer.add_line(ByteOffset::default(), CharOffset::default());
+        buffer.add_token(
+            TokenChannel::DEFAULT,
+            TokenType::CatchAll,
+            ByteOffset::default(),
+            CharOffset::default(),
+            line1,
+            Payload::None,
+        );
+
+        let line2 = buffer.add_line(ByteOffset::new(14), CharOffset::new(14));
+        let (start, stop) = buffer.add_string_literal("This is a test.");
+        buffer.add_token(
+            TokenChannel::DEFAULT,
+            TokenType::StringLiteral,
+            ByteOffset::new(14),
+            CharOffset::new(14),
+            line2,
+            Payload::StringLiteral(start, stop),
+        );
+
+        // add EOF
+        buffer.add_token(
+            TokenChannel::DEFAULT,
+            TokenType::EOF,
+            ByteOffset::new(31),
+            CharOffset::new(31),
+            line2,
+            Payload::None,
+        );
+
+        let detached = buffer.into_detached(source);
+        let mut buf_iter = detached.iter();
+        let token1 = buf_iter.next().expect("no token");
+        let token2 = buf_iter.next().expect("no token");
+
+        // This one should be raw text from the source
+        assert_eq!(
+            detached
+                .get_token_resolved_text(token1, &source)
+                .unwrap()
+                .unwrap(),
+            "Hello, world!\n"
+        );
+
+        // This one should be the string literal, exlcude the quotes
+        assert_eq!(
+            detached
+                .get_token_resolved_text(token2, &source)
+                .unwrap()
+                .unwrap(),
+            "This is a test."
+        );
+        assert_eq!(
+            detached
+                .get_token_raw_text(token2, &source)
+                .unwrap()
+                .unwrap(),
+            "\"This is a test.\""
         );
     }
 

@@ -565,15 +565,7 @@ pub(super) fn check_token<S: AsRef<str>>(
 
     let expected_token_text = token_text.as_ref().map(std::convert::AsRef::as_ref);
 
-    let actual_token_text = if let Payload::StringLiteral(start, stop) = payload {
-        Some(
-            buffer
-                .get_string_literal(start, stop)
-                .expect("provided string literal range in the payload is incorrect"),
-        )
-    } else {
-        buffer.get_token_raw_text(token, &source).unwrap()
-    };
+    let actual_token_text = buffer.get_token_resolved_text(token, &source).unwrap();
 
     assert_eq!(
         expected_token_text, actual_token_text,

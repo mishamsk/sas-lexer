@@ -113,7 +113,7 @@ pub struct LexResult {
     pub max_mode_stack_depth: usize,
 }
 
-impl<'src> Lexer<'src> {
+impl Lexer<'_> {
     fn new(
         source: &str,
         init_mode: Option<LexerMode>,
