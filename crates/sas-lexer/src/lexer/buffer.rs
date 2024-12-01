@@ -85,7 +85,7 @@ impl LineInfo {
 
 /// A struct to hold information about the tokens in the tokenized buffer.
 #[derive(Debug, PartialEq, Clone, Copy)]
-pub(super) struct TokenInfo {
+pub struct TokenInfo {
     /// Channel of the token.
     pub(super) channel: TokenChannel,
 
@@ -108,6 +108,35 @@ pub(super) struct TokenInfo {
 
     // Extra data associated with the token
     pub(super) payload: Payload,
+}
+
+// Public read-only API
+impl TokenInfo {
+    pub fn channel(&self) -> TokenChannel {
+        self.channel
+    }
+
+    pub fn token_type(&self) -> TokenType {
+        self.token_type
+    }
+
+    pub fn byte_offset(&self) -> ByteOffset {
+        self.byte_offset
+    }
+
+    pub fn start(&self) -> CharOffset {
+        self.start
+    }
+
+    /// Returns the line number of the token, 1-based.
+    pub fn line(&self) -> u32 {
+        self.line.0 + 1
+    }
+
+    /// The token payload.
+    pub fn payload(&self) -> Payload {
+        self.payload
+    }
 }
 
 /// Specifies minimal initial capacity of `token_infos` & `line_infos` vectors
@@ -555,6 +584,11 @@ pub struct ResolvedTokenInfo {
     pub payload: Payload,
 }
 
+pub type TokenInfoIter<'a> = std::iter::Map<
+    std::iter::Enumerate<std::slice::Iter<'a, TokenInfo>>,
+    fn((usize, &TokenInfo)) -> (TokenIdx, &TokenInfo),
+>;
+
 /// A special structure produced by the lexer that stores the full information
 /// about lexed tokens and lines.
 /// A struct of arrays, used to optimize memory usage and cache locality.
@@ -595,8 +629,18 @@ impl TokenizedBuffer {
         self.string_literals_buffer.as_str()
     }
 
+    /// Iterates over token indexes that can be used to get token data.
     pub fn iter_tokens(&self) -> std::iter::Map<std::ops::Range<u32>, fn(u32) -> TokenIdx> {
         (0..self.token_count()).map(TokenIdx::new)
+    }
+
+    /// Iterates over tuples of token index and token info's.
+    pub fn iter_tokens_infos(&self) -> TokenInfoIter<'_> {
+        self.token_infos
+            .iter()
+            .enumerate()
+            // SAFETY: we maintain the invariant that the token index is always < u32::MAX
+            .map(|(idx, tok_info)| (TokenIdx::new(idx as u32), tok_info))
     }
 
     /// Returns byte offset of the token in the source string slice.
@@ -1009,8 +1053,8 @@ mod tests {
         );
         let line2 = buffer.add_line(ByteOffset::new(14), CharOffset::new(14));
         buffer.add_token(
-            TokenChannel::DEFAULT,
-            TokenType::CatchAll,
+            TokenChannel::COMMENT,
+            TokenType::CStyleComment,
             ByteOffset::new(15),
             CharOffset::new(15),
             line2,
@@ -1221,5 +1265,22 @@ mod tests {
             buf.get_token_channel(token).expect("wrong token"),
             TokenChannel::DEFAULT
         );
+    }
+
+    #[test]
+    fn test_iter_token_infos() {
+        let (buffer, token1, token2) = get_two_tok_buffer();
+
+        let mut iter = buffer.iter_tokens_infos();
+
+        let (idx1, tinfo) = iter.next().expect("no token");
+        assert_eq!(idx1, token1);
+        assert_eq!(tinfo.token_type(), TokenType::CatchAll);
+        assert_eq!(tinfo.channel(), TokenChannel::DEFAULT);
+
+        let (idx2, tinfo) = iter.next().expect("no token");
+        assert_eq!(idx2, token2);
+        assert_eq!(tinfo.token_type(), TokenType::CStyleComment);
+        assert_eq!(tinfo.channel(), TokenChannel::COMMENT);
     }
 }
