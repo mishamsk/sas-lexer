@@ -112,28 +112,38 @@ pub struct TokenInfo {
 
 // Public read-only API
 impl TokenInfo {
+    /// Returns the channel of the token.
+    #[must_use]
     pub fn channel(&self) -> TokenChannel {
         self.channel
     }
 
+    /// Returns the type of the token.
+    #[must_use]
     pub fn token_type(&self) -> TokenType {
         self.token_type
     }
 
+    /// Returns the byte offset of the token, 0-based.
+    #[must_use]
     pub fn byte_offset(&self) -> ByteOffset {
         self.byte_offset
     }
 
+    /// Returns the char offset of the token, 0-based.
+    #[must_use]
     pub fn start(&self) -> CharOffset {
         self.start
     }
 
     /// Returns the line number of the token, 1-based.
+    #[must_use]
     pub fn line(&self) -> u32 {
         self.line.0 + 1
     }
 
     /// The token payload.
+    #[must_use]
     pub fn payload(&self) -> Payload {
         self.payload
     }
@@ -635,6 +645,7 @@ impl TokenizedBuffer {
     }
 
     /// Iterates over tuples of token index and token info's.
+    #[allow(clippy::cast_possible_truncation)]
     pub fn iter_tokens_infos(&self) -> TokenInfoIter<'_> {
         self.token_infos
             .iter()
