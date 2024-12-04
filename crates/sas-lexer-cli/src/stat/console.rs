@@ -72,7 +72,7 @@ pub(super) fn gen_stats_for_console(samples: &PathBuf) {
                         token_count = Some(tok_buffer.token_count());
 
                         let unique_token_count = tok_buffer
-                            .into_iter()
+                            .iter_tokens()
                             .map(|t| tok_buffer.get_token_type(t).unwrap() as u32)
                             .collect::<HashSet<_>>()
                             .len();
