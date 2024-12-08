@@ -21,6 +21,8 @@ class Token(Struct, array_like=True, gc=False, frozen=True):
                           This is the column of the character immediately after the token.
         payload (int | float | tuple[int, int] | None): Extra data associated with the token.
             For integer and float literals, this will be the corresponding value.
+            For MacroVarResolve it is the inverterted precedence for the operator (&),
+            where number means the log2n of amp count.
             For [macro] string literals this may be not None and include the start and stop
             byte offsets into the string literal buffer. Taking a slice of the buffer with
             these offsets will give the encoded unquoted string value of the token.

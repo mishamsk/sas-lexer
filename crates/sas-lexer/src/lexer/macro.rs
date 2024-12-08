@@ -4,7 +4,7 @@ use unicode_ident::is_xid_continue;
 use super::{
     cursor::Cursor,
     error::ErrorKind,
-    sas_lang::is_valid_sas_name_start,
+    sas_lang::{is_valid_sas_name_continue, is_valid_unicode_sas_name_start},
     token_type::{
         parse_macro_keyword, TokenType, TokenTypeMacroCallOrStat,
         MACRO_QUOTE_CALL_TOKEN_TYPE_RANGE, MACRO_STAT_TOKEN_TYPE_RANGE, MAX_MKEYWORDS_LEN,
@@ -31,10 +31,26 @@ pub(super) fn is_macro_amp<I: Iterator<Item = char>>(mut chars: I) -> (bool, u32
                 amp_count += 1;
                 continue;
             }
-            Some(c) if is_valid_sas_name_start(c) => return (true, amp_count),
+            Some(c) if is_valid_unicode_sas_name_start(c) => return (true, amp_count),
             _ => return (false, amp_count),
         }
     }
+}
+
+pub(super) fn get_macro_resolve_ops_from_amps(amp_count: u32) -> Vec<u8> {
+    // The way SAS works, effectively (but how SAS engine process it in reality)
+    // the N consecutive amps become K resolve operations. From right to left
+    // each operation is some power of 2, starting from 0 (1 amp).
+    // E.g `&&&var._` is `&&((&var.)_)` and not `&(&(&var.))_`
+
+    // So we just need to collect bit positions of the amps to get the
+    // list of resolve operations with their corresponding powers of 2.
+    // These powers correspond to reverse precedence of the resolve operation.
+
+    (0..32u8)
+        .rev()
+        .filter(|i| (amp_count & (1 << i)) != 0)
+        .collect()
 }
 
 #[inline]
@@ -52,7 +68,9 @@ pub(super) fn is_macro_percent(follow_char: char, in_eval_context: bool) -> bool
     match follow_char {
         // Macro comment
         '*' => true,
-        c if is_valid_sas_name_start(c) || (in_eval_context && is_macro_eval_quotable_op(c)) => {
+        c if is_valid_unicode_sas_name_start(c)
+            || (in_eval_context && is_macro_eval_quotable_op(c)) =>
+        {
             true
         }
         _ => false,
@@ -158,7 +176,7 @@ pub(super) fn lex_macro_call_stat_or_label(
     cursor: &mut Cursor,
 ) -> Result<(TokenTypeMacroCallOrStat, u32), ErrorKind> {
     debug_assert!(
-        cursor.peek().is_some_and(is_valid_sas_name_start),
+        cursor.peek().is_some_and(is_valid_unicode_sas_name_start),
         "Unexpected first character in the cursor: {:?}",
         cursor.peek()
     );
@@ -170,14 +188,16 @@ pub(super) fn lex_macro_call_stat_or_label(
     // Start tracking whether the identifier is ASCII
     // It is necessary, as we need to upper case the identifier if it is ASCII
     // for checking against statement names, and if it is not ASCII,
-    // we know it is not a keyword and can skip the test right away
+    // we know it is not a keyword and can skip the test right away.
+    // And the only reason we even bother with unicode is because
+    // apparently unicode macro labels actually work in SAS despite the docs...
     let mut is_ascii = true;
 
     // Eat the identifier. We can safely use `is_xid_continue` because the caller
     // already checked that the first character is a valid start of an identifier
     cursor.eat_while(|c| {
         if c.is_ascii() {
-            matches!(c, 'a'..='z' | 'A'..='Z' | '0'..='9' | '_')
+            is_valid_sas_name_continue(c)
         } else if is_xid_continue(c) {
             is_ascii = false;
             true
@@ -298,7 +318,7 @@ pub(super) fn is_macro_stat(input: &str) -> bool {
     let pending_ident_len = input[1..]
         .find(|c: char| {
             if c.is_ascii() {
-                !matches!(c, 'a'..='z' | 'A'..='Z' | '0'..='9' | '_')
+                !is_valid_sas_name_continue(c)
             } else if is_xid_continue(c) {
                 is_ascii = false;
                 false

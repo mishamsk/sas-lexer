@@ -53,6 +53,8 @@ pub enum Payload {
     None,
     /// Stores parsed integer value. We do not parse -N as a single token
     /// so it is unsigned.
+    /// Also stores inverterted precedence for macro var resolve operator (&),
+    /// where number means the log2n of amp count.
     Integer(u64),
     /// Stores parsed float value
     Float(f64),
@@ -1174,7 +1176,7 @@ mod tests {
             "Hello, world!\n"
         );
 
-        // This one should be the string literal, exlcude the quotes
+        // This one should be the string literal, exclude the quotes
         assert_eq!(
             detached
                 .get_token_resolved_text(token2, &source)

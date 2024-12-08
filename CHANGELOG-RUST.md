@@ -9,19 +9,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [Unreleased] - ReleaseDate
 
 ### Added
--
+- ✨ Added two public iterator API's on `TokenizedBuffer`:
+  - `iter_tokens` - returns an iterator over token indexes
+  - `iter_tokens_infos` - returns an iterator over token infos
+    - It uses the new public type: `TokenInfoIter`
+- ✨ New buffer API to get fully resolved token text: `get_token_resolved_text` instead of manually checking for string payload
 
 ### Changed
--
+- ✨ Made `TokenInfo` public with read-only getters
 
 ### Deprecated
 -
 
 ### Removed
--
+- 🔥 remove IntoIterator impl for TokenizedBuffer
 
 ### Fixed
--
+- 💥 Reworked macro var expression lexing, to properly account for trailing terminating dots. This is a breaking change, as the token types emitted by the lexer have changed. Now instead of one token `MacroVarExpr` for the entire expression, a sequence of `MacroVarResolve`, `MacroString` and optional `MacroVarTerm` are emitted.
 
 ### Security
 -

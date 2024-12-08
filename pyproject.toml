@@ -46,6 +46,9 @@ strip = true
 profile = "release"
 features = ["pyo3/extension-module"]
 
+[tool.uv]
+cache-keys = [{ file = "crates/sas-lexer-py/Cargo.toml" }]
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"

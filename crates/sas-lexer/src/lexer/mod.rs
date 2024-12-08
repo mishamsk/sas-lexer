@@ -28,11 +28,15 @@ use numeric::{try_parse_decimal, try_parse_hex_integer, NumericParserResult};
 #[cfg(feature = "macro_sep")]
 use r#macro::needs_macro_sep;
 use r#macro::{
-    is_macro_amp, is_macro_eval_logical_op, is_macro_eval_mnemonic, is_macro_eval_quotable_op,
-    is_macro_percent, is_macro_quote_call_tok_type, is_macro_stat, is_macro_stat_tok_type,
+    get_macro_resolve_ops_from_amps, is_macro_amp, is_macro_eval_logical_op,
+    is_macro_eval_mnemonic, is_macro_eval_quotable_op, is_macro_percent,
+    is_macro_quote_call_tok_type, is_macro_stat, is_macro_stat_tok_type,
     lex_macro_call_stat_or_label,
 };
-use sas_lang::{is_valid_sas_name_start, StringLiteralQuote};
+use sas_lang::{
+    is_valid_sas_name_continue, is_valid_sas_name_start, is_valid_unicode_sas_name_start,
+    StringLiteralQuote,
+};
 use std::{cmp::min, num::NonZeroUsize};
 use text::{ByteOffset, CharOffset};
 use token_type::{
@@ -803,7 +807,7 @@ impl Lexer<'_> {
                     '*' => {
                         self.lex_macro_comment();
                     }
-                    c if is_valid_sas_name_start(c) => {
+                    c if is_valid_unicode_sas_name_start(c) => {
                         self.lex_macro_identifier(true);
                     }
                     _ => {
@@ -819,7 +823,7 @@ impl Lexer<'_> {
                 self.lex_numeric_literal(false);
                 self.set_pending_stat(true);
             }
-            c if is_valid_sas_name_start(c) => {
+            c if is_valid_unicode_sas_name_start(c) => {
                 self.lex_identifier();
                 self.set_pending_stat(true);
             }
@@ -1487,7 +1491,7 @@ impl Lexer<'_> {
                     }
                 }
             }
-            c if is_valid_sas_name_start(c) || (!first_token && is_xid_continue(c)) => {
+            c if is_valid_unicode_sas_name_start(c) || (!first_token && is_xid_continue(c)) => {
                 // A macro string in place of macro identifier
                 // Consume as identifier, no reserved words here,
                 // so we do not need the full lex_identifier logic
@@ -2054,7 +2058,7 @@ impl Lexer<'_> {
                         self.start_token();
                         self.lex_macro_comment();
                     }
-                    c if is_valid_sas_name_start(c) => {
+                    c if is_valid_unicode_sas_name_start(c) => {
                         // Either a nested macro stat or macro call
 
                         // We need to clear the checkpoint, for two reasons.
@@ -2160,7 +2164,7 @@ impl Lexer<'_> {
                 // or a macro string in this mode => the list of possible first tokens types used.
                 let first_token = !self.buffer.last_token_info().is_some_and(|ti| {
                     [
-                        TokenType::MacroVarExpr,
+                        TokenType::MacroVarTerm,
                         TokenType::MacroIdentifier,
                         TokenType::MacroString,
                         TokenType::RPAREN,
@@ -2168,7 +2172,7 @@ impl Lexer<'_> {
                     .contains(&ti.token_type)
                 });
 
-                if is_valid_sas_name_start(c) || (!first_token && is_xid_continue(c)) {
+                if is_valid_unicode_sas_name_start(c) || (!first_token && is_xid_continue(c)) {
                     // A macro string in place of macro identifier
                     // First checkpoint BEFORE consuming! See above why.
                     // If we do not have a bug, it may not be set yet, so this call
@@ -2255,7 +2259,7 @@ impl Lexer<'_> {
                         self.start_token();
                         self.lex_macro_comment();
                     }
-                    c if is_valid_sas_name_start(c) => {
+                    c if is_valid_unicode_sas_name_start(c) => {
                         // We allow both macro call & stats inside macro call args, so...
                         self.start_token();
                         self.lex_macro_identifier(false);
@@ -2613,7 +2617,7 @@ impl Lexer<'_> {
                 // Otherwise similar to other macro calls with caveats
                 match self.cursor.peek_next() {
                     // Macro comments do not seems to lex as comments inside `%str` calls
-                    c if is_valid_sas_name_start(c) => {
+                    c if is_valid_unicode_sas_name_start(c) => {
                         // We allow both macro call & stats inside macro call args, so...
                         // One difference with other macro calls though, is that %str()
                         // will efectivaly execute before the embedded statement, hence
@@ -3167,7 +3171,7 @@ impl Lexer<'_> {
             }
             '%' => {
                 match self.cursor.peek_next() {
-                    c if is_valid_sas_name_start(c) => {
+                    c if is_valid_unicode_sas_name_start(c) => {
                         if allow_stat {
                             self.lex_macro_identifier(false);
                         } else {
@@ -3401,8 +3405,10 @@ impl Lexer<'_> {
 
     /// Tries lexing a macro variable expression
     ///
-    /// Consumes input and generates a `MacroVarExpr` token only ig
-    /// the sequence is a valid macro var expr.
+    /// If it is one indeed, consumes input and generates 1+ tokens
+    /// constituting the macro var expr. Yes, this is another case
+    /// where the lexer can generate multiple tokens on a single
+    /// iteration.
     ///
     /// Otherwise, retains the input and does not generate a token.
     ///
@@ -3419,86 +3425,111 @@ impl Lexer<'_> {
         }
 
         // Ok, this is a macro expr for sure
-        // and we got the first character of the name
-        // Consume the ampersands and the first name character
-        self.cursor.advance_by(amp_count + 1);
 
-        while let Some(c) = self.cursor.peek() {
-            match c {
-                '.' => {
-                    // a dot, terminates a macro var expr, consume it
+        // First we extract resolve "operations" from the ampersands, see
+        // `get_macro_resolve_ops_from_amps` for details
+        let mut resolve_op_stack = get_macro_resolve_ops_from_amps(amp_count);
+
+        // Advance & emit the resolve ops
+        for rev_prec in resolve_op_stack.clone() {
+            self.cursor.advance_by(2u32.pow(u32::from(rev_prec)));
+
+            self.emit_token(
+                TokenChannel::DEFAULT,
+                TokenType::MacroVarResolve,
+                Payload::Integer(rev_prec.into()),
+            );
+            self.start_token();
+        }
+
+        // Now, we are looking at the start of the actual identifier that
+        // will be resolved, 0+ dot terminators and a possible tail of
+        // further macro var exprs (same thing recursively).
+
+        // Why we need to keep the stack of resolve ops? Because on the
+        // other end of the entire resolusion chain, we need to recognize
+        // matching termination dots and distinguish them from actual dots.
+        // E.g. a typical `&&prefix&counter..._` can be used to dynamically
+        // reolve into `&prefix1`, `&prefix2`, etc. macro vars in a do-loop
+        // and generate the eventual two part name `[value from prefix1]._`
+        while !resolve_op_stack.is_empty() {
+            // Check the follower to dispatch the next step
+            match self.cursor.peek() {
+                // Even though unicode macro vars doesn't seem possible, it is
+                // not a hard error, so we lex unicode anyway
+                Some(c) if is_valid_unicode_sas_name_start(c) => {
+                    // Eat the identifier portion
+                    self.cursor.eat_while(is_xid_continue);
+
+                    // Emit the identifier portion as macro string
+                    self.emit_token(TokenChannel::DEFAULT, TokenType::MacroString, Payload::None);
+                    self.start_token();
+                }
+                Some('.') => {
+                    // a dot, terminates the current resolve op on the stack.
+                    // Eat the dot and emit the term token
                     self.cursor.advance();
 
-                    // Add the token
                     self.emit_token(
                         TokenChannel::DEFAULT,
-                        TokenType::MacroVarExpr,
+                        TokenType::MacroVarTerm,
                         Payload::None,
                     );
+                    self.start_token();
 
-                    // Report we lexed a token
-                    return true;
+                    // Pop the resolve op from the stack
+                    resolve_op_stack.pop();
                 }
-                '&' => {
+                Some('&') => {
                     // Ok, we got at least some portion of the macro var expr. But the next amp
                     // can either be the continuation (like in `&&var&c``)
                     //                                               ^^
-                    // which we treat as part of the same macro var expr token
+                    // which we lex in this same iteration
                     // or a trailing amp (like in `&&var&& other stuff``)
                     //                                  ^^
-                    // Unfortunately, now an arbitrary number of lookahead is needed to
-                    // figure out which case it is as arbitrary number of & characters
-                    // are treated as a single one.
-                    // Thus we do a lookahead predicate on a cloned iterator to avoid consuming
-                    // the original
+                    // What happens is we basically repeat the same logic as in the beginning
                     let (is_macro, amp_count) = is_macro_amp(self.cursor.chars());
 
                     if !is_macro {
                         // The following & characters are not part of the macro var expr
-
-                        // Add the token without consuming the following amp
-                        self.emit_token(
-                            TokenChannel::DEFAULT,
-                            TokenType::MacroVarExpr,
-                            Payload::None,
-                        );
-
-                        // Report we lexed a token
+                        // Return immediately, as we've already emitted the identifier
                         return true;
                     }
 
-                    // Ok we know that the amp is part of the macro var expr
-                    // we can skip the `amp_count` characters
-                    self.cursor.advance_by(amp_count);
-                }
-                c if is_xid_continue(c) => {
-                    // Still a name
-                    self.cursor.advance();
+                    // Extract following resolve "operations" from the ampersands
+                    let following_resolves = get_macro_resolve_ops_from_amps(amp_count);
+
+                    // Advance & emit the resolve ops
+                    for rev_prec in following_resolves.clone() {
+                        self.cursor.advance_by(2u32.pow(u32::from(rev_prec)));
+
+                        self.emit_token(
+                            TokenChannel::DEFAULT,
+                            TokenType::MacroVarResolve,
+                            Payload::Integer(rev_prec.into()),
+                        );
+                        self.start_token();
+                    }
+
+                    // And here comes the magic ;-) We need to pop all resolves from
+                    // the stack that are <= of the max (lowest precedence) of the following
+                    // resolves.
+                    let Some(&max_following_prec) = following_resolves.first() else {
+                        // SAFETY: we only get into this arm if the follower is an amp,
+                        // so there must be at least one resolve op
+                        unreachable!()
+                    };
+
+                    resolve_op_stack.retain(|&prec| prec > max_following_prec);
+                    resolve_op_stack.extend(following_resolves);
                 }
                 _ => {
-                    // Reached the end of the macro var expr
-
-                    // Add the token without consuming the following character
-                    self.emit_token(
-                        TokenChannel::DEFAULT,
-                        TokenType::MacroVarExpr,
-                        Payload::None,
-                    );
-
-                    // Report we lexed a token
+                    // Reached the end of the macro var expr.
+                    // Just return immediately
                     return true;
                 }
             }
         }
-
-        // Reached the end of the macro var expr
-
-        // Add the token without consuming the following character
-        self.emit_token(
-            TokenChannel::DEFAULT,
-            TokenType::MacroVarExpr,
-            Payload::None,
-        );
 
         // Report we lexed a token
         true
@@ -3520,7 +3551,7 @@ impl Lexer<'_> {
         // already checked that the first character is a valid start of an identifier
         self.cursor.eat_while(|c| {
             if c.is_ascii() {
-                matches!(c, 'a'..='z' | 'A'..='Z' | '0'..='9' | '_')
+                is_valid_sas_name_continue(c)
             } else if is_xid_continue(c) {
                 is_ascii = false;
                 true
@@ -3591,11 +3622,10 @@ impl Lexer<'_> {
             LexerMode::MacroDefName | LexerMode::MacroDefArg
         ));
 
-        if matches!(next_char, 'a'..='z' | 'A'..='Z' | '_') {
+        if is_valid_sas_name_start(next_char) {
             // Eat the identifier. We can safely use all continuation chars because
             // we already checked that the first character is a valid start of an identifier
-            self.cursor
-                .eat_while(|c| matches!(c, 'a'..='z' | 'A'..='Z' | '0'..='9' | '_'));
+            self.cursor.eat_while(is_valid_sas_name_continue);
 
             self.emit_token(TokenChannel::DEFAULT, TokenType::Identifier, Payload::None);
 
@@ -3929,7 +3959,11 @@ impl Lexer<'_> {
                 '\n' => {
                     self.add_line();
                 }
-                '%' if self.cursor.peek().is_some_and(is_valid_sas_name_start) => {
+                '%' if self
+                    .cursor
+                    .peek()
+                    .is_some_and(is_valid_unicode_sas_name_start) =>
+                {
                     // Ok, we hit a macro call or a macro stat. Rollback and return
                     // We assume the following usage possible:
                     // ```sas
@@ -4189,7 +4223,7 @@ impl Lexer<'_> {
 
         // Start by trying to eat a possible start char of a SAS name
         // Unicode IS allowed in custom formats...
-        if is_valid_sas_name_start(next_char) {
+        if is_valid_unicode_sas_name_start(next_char) {
             la_cursor.advance();
             la_cursor.eat_while(is_xid_continue);
         };
@@ -4242,7 +4276,7 @@ impl Lexer<'_> {
     ) -> MacroKwType {
         debug_assert_eq!(self.cursor.peek(), Some('%'));
 
-        if !is_valid_sas_name_start(self.cursor.peek_next()) {
+        if !is_valid_unicode_sas_name_start(self.cursor.peek_next()) {
             // Not followed by an identifier char
             return MacroKwType::None;
         }
@@ -4347,7 +4381,7 @@ impl Lexer<'_> {
 
     fn lex_macro_identifier(&mut self, allow_macro_label: bool) {
         debug_assert_eq!(self.cursor.peek(), Some('%'));
-        debug_assert!(is_valid_sas_name_start(self.cursor.peek_next()));
+        debug_assert!(is_valid_unicode_sas_name_start(self.cursor.peek_next()));
 
         // Pass the actual cursor so it will not only be lexed into
         // a token type but also consumed
@@ -4392,7 +4426,7 @@ impl Lexer<'_> {
                 // We know that the following WS may not be significant
                 self.push_mode(LexerMode::WsOrCStyleCommentOnly);
             }
-            '%' if is_valid_sas_name_start(self.cursor.peek_next()) => {
+            '%' if is_valid_unicode_sas_name_start(self.cursor.peek_next()) => {
                 self.start_token();
                 self.lex_macro_identifier(false);
 

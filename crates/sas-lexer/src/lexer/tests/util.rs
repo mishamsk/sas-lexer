@@ -83,7 +83,7 @@ pub(super) fn error_to_string<S: AsRef<str>>(
 pub(super) trait TokenTestCase {
     fn token_type(&self) -> TokenType;
     fn token_channel(&self) -> TokenChannel;
-    fn payload(&self) -> Payload;
+    fn payload<S: AsRef<str>>(&self, source: S) -> Payload;
     fn raw_text<S: AsRef<str>>(&self, source: S) -> Option<String>;
     fn text<S: AsRef<str>>(&self, source: S) -> Option<String> {
         self.raw_text(source)
@@ -99,8 +99,15 @@ impl TokenTestCase for (&str, TokenType, TokenChannel) {
         self.2
     }
 
-    fn payload(&self) -> Payload {
-        Payload::None
+    fn payload<S: AsRef<str>>(&self, _: S) -> Payload {
+        match self.1 {
+            TokenType::IntegerLiteral => Payload::Integer(self.0.parse().unwrap()),
+            TokenType::FloatLiteral | TokenType::FloatExponentLiteral => {
+                Payload::Float(self.0.parse().unwrap())
+            }
+            TokenType::MacroVarResolve => Payload::Integer(self.0.len().ilog2().into()),
+            _ => Payload::None,
+        }
     }
 
     fn raw_text<S: AsRef<str>>(&self, _source: S) -> Option<String> {
@@ -127,8 +134,15 @@ impl TokenTestCase for (&str, TokenType) {
         }
     }
 
-    fn payload(&self) -> Payload {
-        Payload::None
+    fn payload<S: AsRef<str>>(&self, _: S) -> Payload {
+        match self.1 {
+            TokenType::IntegerLiteral => Payload::Integer(self.0.parse().unwrap()),
+            TokenType::FloatLiteral | TokenType::FloatExponentLiteral => {
+                Payload::Float(self.0.parse().unwrap())
+            }
+            TokenType::MacroVarResolve => Payload::Integer(self.0.len().ilog2().into()),
+            _ => Payload::None,
+        }
     }
 
     fn raw_text<S: AsRef<str>>(&self, _source: S) -> Option<String> {
@@ -155,7 +169,7 @@ impl TokenTestCase for (&str, TokenType, Payload) {
         }
     }
 
-    fn payload(&self) -> Payload {
+    fn payload<S: AsRef<str>>(&self, _: S) -> Payload {
         self.2
     }
 
@@ -183,7 +197,7 @@ impl TokenTestCase for (&str, TokenType, Payload, &str) {
         }
     }
 
-    fn payload(&self) -> Payload {
+    fn payload<S: AsRef<str>>(&self, _: S) -> Payload {
         self.2
     }
 
@@ -213,7 +227,7 @@ impl TokenTestCase for (&str, TokenType, TokenChannel, Payload, &str) {
         self.2
     }
 
-    fn payload(&self) -> Payload {
+    fn payload<S: AsRef<str>>(&self, _: S) -> Payload {
         self.3
     }
 
@@ -249,7 +263,7 @@ impl TokenTestCase for (TokenType, Payload, &str) {
         }
     }
 
-    fn payload(&self) -> Payload {
+    fn payload<S: AsRef<str>>(&self, _: S) -> Payload {
         self.1
     }
 
@@ -299,8 +313,19 @@ impl TokenTestCase for (TokenType, TokenChannel) {
         self.1
     }
 
-    fn payload(&self) -> Payload {
-        Payload::None
+    fn payload<S: AsRef<str>>(&self, source: S) -> Payload {
+        match self.0 {
+            TokenType::IntegerLiteral => {
+                Payload::Integer(self.raw_text(source).unwrap().parse().unwrap())
+            }
+            TokenType::FloatLiteral | TokenType::FloatExponentLiteral => {
+                Payload::Float(self.raw_text(source).unwrap().parse().unwrap())
+            }
+            TokenType::MacroVarResolve => {
+                Payload::Integer(self.raw_text(source).unwrap().len().ilog2().into())
+            }
+            _ => Payload::None,
+        }
     }
 
     fn raw_text<S: AsRef<str>>(&self, source: S) -> Option<String> {
@@ -329,8 +354,19 @@ impl TokenTestCase for TokenType {
         }
     }
 
-    fn payload(&self) -> Payload {
-        Payload::None
+    fn payload<S: AsRef<str>>(&self, source: S) -> Payload {
+        match self {
+            TokenType::IntegerLiteral => {
+                Payload::Integer(self.raw_text(source).unwrap().parse().unwrap())
+            }
+            TokenType::FloatLiteral | TokenType::FloatExponentLiteral => {
+                Payload::Float(self.raw_text(source).unwrap().parse().unwrap())
+            }
+            TokenType::MacroVarResolve => {
+                Payload::Integer(self.raw_text(source).unwrap().len().ilog2().into())
+            }
+            _ => Payload::None,
+        }
     }
 
     fn raw_text<S: AsRef<str>>(&self, source: S) -> Option<String> {
@@ -377,7 +413,7 @@ impl TokenTestCase for (TokenType, f64) {
         }
     }
 
-    fn payload(&self) -> Payload {
+    fn payload<S: AsRef<str>>(&self, _: S) -> Payload {
         Payload::Float(self.1)
     }
 
@@ -407,7 +443,7 @@ impl TokenTestCase for (TokenType, u64) {
         }
     }
 
-    fn payload(&self) -> Payload {
+    fn payload<S: AsRef<str>>(&self, _: S) -> Payload {
         Payload::Integer(self.1)
     }
 
@@ -787,7 +823,7 @@ pub(super) fn assert_lexing<TT: TokenTestCase, ET: ErrorTestCase>(
             cur_end_column,
             expected_tok.token_type(),
             expected_tok.token_channel(),
-            expected_tok.payload(),
+            expected_tok.payload(source),
             expected_tok.text(source).as_ref(),
         );
 

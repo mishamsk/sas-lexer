@@ -50,7 +50,7 @@ pub enum TokenType {
     CatchAll,
     WS,
     SEMI,       // ';'
-    AMP,        // '&'+
+    AMP,        // '&'+ (except if it is a macro var resolve operator)
     PERCENT,    // '%'
     LPAREN,     // '('
     RPAREN,     // ')'
@@ -125,7 +125,8 @@ pub enum TokenType {
     CharFormat, // $charformat.
     // ----------------MACRO TOKENS----------------
     MacroComment,     // %* ...;
-    MacroVarExpr,     // &&mvar&another. etc.
+    MacroVarResolve,  // &+ (when it is a macro var resolve operator)
+    MacroVarTerm,     // The "." in "&mv.". Unlike DOT, we emit this one separately to ease parsing
     MacroString,      // %let var = macro_string;
     MacroStringEmpty, // implicit empty macro string in logical expr `%eval(= rhs)`
     MacroLabel,       // %macro_label: without :. Colon is lexed as colon on hidden channel

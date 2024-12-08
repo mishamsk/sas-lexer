@@ -9,9 +9,9 @@ from sas_lexer import lex_program_from_str
 from sas_lexer.token import Token
 from sas_lexer.token_type import TokenType
 
-RUST_TESTS_BASE_PATH = Path(__file__).parent.parent / "crates/sas-lexer/src/lexer/tests"
-TEST_SAMPLES = RUST_TESTS_BASE_PATH / "samples"
-TEST_SNAPSHOTS = RUST_TESTS_BASE_PATH / "snapshots"
+TESTS_BASE_PATH = Path(__file__).parent
+TEST_SAMPLES = TESTS_BASE_PATH / "samples"
+TEST_SNAPSHOTS = TESTS_BASE_PATH / "snapshots"
 
 
 def _get_snapshot_path(sample_file: Path) -> Path:
@@ -122,7 +122,7 @@ snapshot_kind: text
     TEST_SAMPLES.rglob("*.sas"),
     ids=lambda p: str(p.relative_to(TEST_SAMPLES)) if isinstance(p, Path) else "None",
 )
-def test_wip(sample_file: Path) -> None:
+def test_snapshots(sample_file: Path) -> None:
     """Tests that python lexer generates exactly the same output as rust."""
     source = sample_file.read_text()
 
