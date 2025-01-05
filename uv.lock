@@ -360,7 +360,7 @@ wheels = [
 
 [[package]]
 name = "sas-lexer"
-version = "1.0.0b1"
+version = "1.0.0b2"
 source = { editable = "." }
 dependencies = [
     { name = "msgspec" },
