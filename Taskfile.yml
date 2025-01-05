@@ -185,3 +185,38 @@ tasks:
       # Compare the performance of the current build with the given SHA
       - hyperfine -w 10 "tmpdir/sas-lexer lex {{.SAS_LEX_SAMPLES}}" "target/release/sas-lexer lex {{.SAS_LEX_SAMPLES}}"
       - hyperfine -w 5 "tmpdir/sas-lexer lex {{.PERF_LARGE_SAMPLE}}" "target/release/sas-lexer lex {{.PERF_LARGE_SAMPLE}}"
+
+  # Release tasks
+  release-rust:
+    desc: Release a new version of the main sas-lexer crate
+    vars:
+      RELEASE_LEVEL:
+        sh: |
+          printf "major\nminor\npatch\nrelease\nrc\nbeta\nalpha" | fzf --prompt="Select release level: "
+      DRY_RUN:
+        sh: |
+          printf "yes\nno" | fzf --prompt="Dry run? "
+    cmds:
+      - |
+        if [ "{{.DRY_RUN}}" = "yes" ]; then
+          cargo release -p sas-lexer --level {{.RELEASE_LEVEL}}
+        else
+          cargo release -p sas-lexer -x --level {{.RELEASE_LEVEL}}
+        fi
+
+  release-py:
+    desc: Release a new version of the python package
+    vars:
+      RELEASE_LEVEL:
+        sh: |
+          printf "major\nminor\npatch\nrelease\nrc\nbeta\nalpha" | fzf --prompt="Select release level: "
+      DRY_RUN:
+        sh: |
+          printf "yes\nno" | fzf --prompt="Dry run? "
+    cmds:
+      - |
+        if [ "{{.DRY_RUN}}" = "yes" ]; then
+          cargo release -p sas-lexer-py --level {{.RELEASE_LEVEL}}
+        else
+          cargo release -p sas-lexer-py -x --level {{.RELEASE_LEVEL}}
+        fi
