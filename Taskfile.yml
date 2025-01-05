@@ -199,9 +199,9 @@ tasks:
     cmds:
       - |
         if [ "{{.DRY_RUN}}" = "yes" ]; then
-          cargo release -p sas-lexer --level {{.RELEASE_LEVEL}}
+          cargo release -p sas-lexer {{.RELEASE_LEVEL}}
         else
-          cargo release -p sas-lexer -x --level {{.RELEASE_LEVEL}}
+          cargo release -p sas-lexer -x {{.RELEASE_LEVEL}}
         fi
 
   release-py:
@@ -216,7 +216,7 @@ tasks:
     cmds:
       - |
         if [ "{{.DRY_RUN}}" = "yes" ]; then
-          cargo release -p sas-lexer-py --level {{.RELEASE_LEVEL}}
+          cargo release -p sas-lexer-py {{.RELEASE_LEVEL}}
         else
-          cargo release -p sas-lexer-py -x --level {{.RELEASE_LEVEL}}
+          cargo release -p sas-lexer-py -x {{.RELEASE_LEVEL}}
         fi
