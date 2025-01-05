@@ -109,7 +109,6 @@ def _get_expected_snap_content_from_tokens(
 ---
 source: crates/sas-lexer/src/lexer/tests/test_sample_files.rs
 expression: tokens
-snapshot_kind: text
 ---
 - "\
 """
