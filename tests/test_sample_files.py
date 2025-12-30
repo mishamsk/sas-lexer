@@ -3,7 +3,7 @@ from json import dumps
 from pathlib import Path
 
 import pytest
-from cases import to_pascal
+from anycase import to_pascal
 
 from sas_lexer import lex_program_from_str
 from sas_lexer.token import Token

@@ -175,18 +175,6 @@ wheels = [
 ]
 
 [[package]]
-name = "pycases"
-version = "0.1.4"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "py-anycase" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/d0/de/89993d65917ce67221183e8ec9da692a64f2957386d531205ec42a97a8e8/pycases-0.1.4.tar.gz", hash = "sha256:bc84c6fc14dcdfcd2a724d62cbd311eceb6405dab080fd7f643d0bb234d3edc5", size = 3178, upload-time = "2025-04-23T18:36:17.047Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/78/4d/d24051665c468a4b5e5817daa0389dcc3de6e14526263d648cd4476e1ddf/pycases-0.1.4-py3-none-any.whl", hash = "sha256:97d58dec2fac5e2eff72c7360b3f603d0d15f822139692bde10293df328a321a", size = 3359, upload-time = "2025-04-23T18:36:15.412Z" },
-]
-
-[[package]]
 name = "pygments"
 version = "2.19.2"
 source = { registry = "https://pypi.org/simple" }
@@ -250,7 +238,7 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "prek" },
-    { name = "pycases" },
+    { name = "py-anycase" },
     { name = "pytest" },
     { name = "ruff" },
     { name = "ty" },
@@ -263,7 +251,7 @@ requires-dist = [{ name = "msgspec", specifier = ">=0.18.0" }]
 [package.metadata.requires-dev]
 dev = [
     { name = "prek", specifier = ">=0.2.25,<0.3" },
-    { name = "pycases", specifier = ">=0.1.3" },
+    { name = "py-anycase", specifier = ">=0.1.0,<0.2" },
     { name = "pytest", specifier = ">=9.0.2,<9.1" },
     { name = "ruff", specifier = ">=0.14.10,<0.15" },
     { name = "ty", specifier = ">=0.0.8" },
