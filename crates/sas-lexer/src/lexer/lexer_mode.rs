@@ -18,7 +18,7 @@ pub(super) enum MacroEvalNumericMode {
 /// - a regular macro argument (e.g. in `%scan`)
 /// - another expression (e.g. in `%SUBSTR`).
 /// - unlimited number of expressions (specifically for arguments
-///     of functions called via `%sysfunc`)
+///   of functions called via `%sysfunc`)
 ///
 /// `None` implies that `,` is lexed as a macro string while
 /// for other cases it is lexed as a terminator.
@@ -52,19 +52,19 @@ const fn macro_eval_next_arg_mode_from_u8(val: u8) -> MacroEvalNextArgumentMode 
 ///
 /// The following flags are packed into a single byte:
 /// - Numeric mode: integer or loat mode (enabled in `%sysevalf` and contexts
-///     that use float arithmetic - sysfunc, syscall)
+///   that use float arithmetic - sysfunc, syscall)
 /// - Next argument mode: `None`, `SingleEvalExpr`, `EvalExpr`, `MacroArg`
-///     see enum for explanation
+///   see enum for explanation
 /// - Terminate on comma (enabled automatically based on follower argument
-///     type)
+///   type)
 /// - Terminate on statement (enabled for expr after `%if`, `%to`, etc.)
 /// - Terminate on semicolon (enabled for expr after `%if`, `%by`, etc.)
-///     `%if` is there despite semi being a session error, because
-///     SAS will behave this way when trying to recover from error.
+///   `%if` is there despite semi being a session error, because
+///   SAS will behave this way when trying to recover from error.
 /// - Parens mask comma. In contexts with multiple expressions, comma
-///     is not a terminator inside parens, except for`%sysevalf` which
-///     is a special case. Note that semi is never masked, unlike regular
-///     macro arguments.
+///   is not a terminator inside parens, except for`%sysevalf` which
+///   is a special case. Note that semi is never masked, unlike regular
+///   macro arguments.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct MacroEvalExprFlags(u8);
 
@@ -166,7 +166,7 @@ const MACRO_DEF_CONTEXT: u8 = MacroArgContext::MacroDef as u8;
 /// The following flags are packed into a single byte:
 /// - The type of the macro call. Built-ins do not support named arguments.
 /// - Whether to auto populate next argument stack or leave
-///    it to the caller to do so.
+///   it to the caller to do so.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct MacroArgNameValueFlags(u8);
 

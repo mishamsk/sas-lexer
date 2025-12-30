@@ -227,7 +227,7 @@ impl WorkTokenizedBuffer {
         if !self
             .token_infos
             .last()
-            .map_or(false, |t| t.token_type == TokenType::EOF)
+            .is_some_and(|t| t.token_type == TokenType::EOF)
         {
             self.token_infos.push(TokenInfo {
                 channel: TokenChannel::DEFAULT,

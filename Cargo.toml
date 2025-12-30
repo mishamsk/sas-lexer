@@ -44,6 +44,7 @@ pedantic = { level = "warn", priority = -2 }
 module_name_repetitions = "allow"
 single_match_else = "allow"
 comparison_chain = "allow"
+needless_continue = "allow"
 # Disallowed restriction lints
 print_stdout = "warn"
 print_stderr = "warn"

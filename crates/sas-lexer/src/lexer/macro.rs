@@ -19,7 +19,7 @@ use super::{
 /// Consumes the iterator! Pass a clone if you need to keep the original.
 /// Returns a tuple of:
 /// - `bool`: `true` if the ampersand is a start of macro variable reference/expr,
-///     `false` otherwise.
+///   `false` otherwise.
 /// - `u32`: number of ampersands encountered.
 pub(super) fn is_macro_amp<I: Iterator<Item = char>>(mut chars: I) -> (bool, u32) {
     // SAFETY: lexer guarantees that there are at max u32 chars in the input
@@ -251,7 +251,7 @@ pub(super) fn lex_macro_call_stat_or_label(
 /// Consumes the iterator! Pass a clone if you need to keep the original.
 /// Returns a tuple of:
 /// - `Option<TokenType>`: `Some(TokenType)` if the mnemonic is a macro logical
-///    expression mnemonic, `None` otherwise.
+///   expression mnemonic, `None` otherwise.
 /// - `u32`: number of symbols in mnemonic besides the start char.
 pub(super) fn is_macro_eval_mnemonic<I: Iterator<Item = char>>(
     mut chars: I,
@@ -308,7 +308,7 @@ pub(super) fn is_macro_eval_mnemonic<I: Iterator<Item = char>>(
 ///
 /// Must be passed a slice that starts with the first % character
 pub(super) fn is_macro_stat(input: &str) -> bool {
-    debug_assert!(input.as_bytes().iter().next().map_or(false, |&c| c == b'%'));
+    debug_assert!(input.as_bytes().iter().next().is_some_and(|&c| c == b'%'));
 
     // Unfortunately this one needs a very inefficient lookahead
     // to check if we have any statement upfront.

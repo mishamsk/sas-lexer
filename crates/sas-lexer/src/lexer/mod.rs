@@ -274,7 +274,7 @@ impl Lexer<'_> {
         if self.mode_stack.pop().is_none() {
             self.emit_error(ErrorKind::InternalErrorEmptyModeStack);
             self.push_mode(LexerMode::default());
-        };
+        }
     }
 
     fn mode(&mut self) -> LexerMode {
@@ -299,7 +299,7 @@ impl Lexer<'_> {
         // statements
         if self.pending_stat_stack.len() > 1 {
             self.pending_stat_stack.pop();
-        };
+        }
     }
 
     fn pending_stat(&mut self) -> bool {
@@ -395,7 +395,7 @@ impl Lexer<'_> {
         token_type: TokenType,
         payload: Payload,
     ) {
-        if !self.buffer.last_token_info_mut().map_or(false, |t| {
+        if !self.buffer.last_token_info_mut().is_some_and(|t| {
             t.channel = channel;
             t.token_type = token_type;
             t.payload = payload;
@@ -412,7 +412,7 @@ impl Lexer<'_> {
                 self.cur_token_line,
                 payload,
             );
-        };
+        }
     }
 
     fn prep_error_info_at_cur_offset(&self, error: ErrorKind) -> ErrorInfo {
@@ -485,7 +485,7 @@ impl Lexer<'_> {
                             errors: self.errors,
                         };
                     }
-                };
+                }
                 self.last_state = new_state;
             }
         }
@@ -748,13 +748,13 @@ impl Lexer<'_> {
             }
         };
 
-        if next_char.map_or(true, |c| c != expected_char) {
+        if next_char == Some(expected_char) {
+            // Consume the expected content
+            self.cursor.advance();
+        } else {
             // Expected token not found. Emit an error which will point at previous token
             // The token itself is emitted below
             self.emit_error(error_kind);
-        } else {
-            // Consume the expected content
-            self.cursor.advance();
         }
 
         self.emit_token(tok_channel, tok_type, Payload::None);
@@ -833,10 +833,10 @@ impl Lexer<'_> {
                 if self
                     .buffer
                     .last_token_info()
-                    .map_or(false, |t| t.token_type != TokenType::PredictedCommentStat)
+                    .is_some_and(|t| t.token_type != TokenType::PredictedCommentStat)
                 {
                     self.set_pending_stat(true);
-                };
+                }
             }
         }
     }
@@ -1017,7 +1017,7 @@ impl Lexer<'_> {
                     debug_assert!(*parens_nesting_level > 0);
                     *parens_nesting_level = parens_nesting_level.saturating_sub(1);
                 }
-            };
+            }
         };
 
         let (tok_type, extra_advance_by) = match next_char {
@@ -1318,7 +1318,7 @@ impl Lexer<'_> {
                                 Payload::None,
                             );
                         }
-                    };
+                    }
                 } else {
                     // Try integer/float depending on the flag
                     match try_parse_decimal(macro_string, true, macro_eval_flags.float_mode()) {
@@ -1346,7 +1346,7 @@ impl Lexer<'_> {
                                 Payload::None,
                             );
                         }
-                    };
+                    }
                 }
             } else {
                 // Not trying to lex as a number, emit as macro string
@@ -1457,7 +1457,7 @@ impl Lexer<'_> {
                 *found_name = true;
             } else {
                 lexer.emit_error(ErrorKind::InternalErrorUnexpectedModeStack);
-            };
+            }
         };
 
         // Dispatch the "big" categories
@@ -1475,7 +1475,7 @@ impl Lexer<'_> {
 
                 if first_token {
                     update_mode(self);
-                };
+                }
             }
             '%' => {
                 match self.lex_macro_call(false, false) {
@@ -1487,7 +1487,7 @@ impl Lexer<'_> {
                     MacroKwType::MacroCall => {
                         if first_token {
                             update_mode(self);
-                        };
+                        }
                     }
                 }
             }
@@ -1508,7 +1508,7 @@ impl Lexer<'_> {
 
                 if first_token {
                     update_mode(self);
-                };
+                }
             }
             _ => {
                 // Something else. pop mode without consuming the character
@@ -1837,7 +1837,7 @@ impl Lexer<'_> {
                 if !self
                     .buffer
                     .last_token_info_on_default_channel_mut()
-                    .map_or(false, |t| {
+                    .is_some_and(|t| {
                         if t.token_type != TokenType::MacroIdentifier {
                             // This would mean a bug in the lexer
                             return false;
@@ -1849,7 +1849,7 @@ impl Lexer<'_> {
                 {
                     // This is an internal error, we should always have a token to replace
                     self.emit_error(ErrorKind::InternalErrorNoTokenToReplace);
-                };
+                }
 
                 #[cfg(feature = "macro_sep")]
                 {
@@ -1879,7 +1879,7 @@ impl Lexer<'_> {
                                 last_ti.line,
                                 Payload::None,
                             );
-                        };
+                        }
                     }
                 }
 
@@ -2348,7 +2348,7 @@ impl Lexer<'_> {
                         }
                         _ => unreachable!(),
                     }
-                };
+                }
             }
         };
 
@@ -2693,7 +2693,7 @@ impl Lexer<'_> {
                             }
                             _ => unreachable!(),
                         }
-                    };
+                    }
                 }
             };
 
@@ -2847,14 +2847,14 @@ impl Lexer<'_> {
     }
 
     fn lex_ws(&mut self) {
-        debug_assert!(self.cursor.peek().map_or(false, char::is_whitespace));
+        debug_assert!(self.cursor.peek().is_some_and(char::is_whitespace));
 
         loop {
             if let Some('\n') = self.cursor.advance() {
                 self.add_line();
             }
 
-            if !self.cursor.peek().map_or(false, char::is_whitespace) {
+            if !self.cursor.peek().is_some_and(char::is_whitespace) {
                 break;
             }
         }
@@ -3035,11 +3035,11 @@ impl Lexer<'_> {
     ///
     /// * `lit_start_idx` - The index of the start of the literal in the buffer
     /// * `cur_lit_end_idx` - The index of the end of the literal in the buffer
-    ///     It is used to determine if a payload is needed
+    ///   It is used to determine if a payload is needed
     /// * `last_lit_end_byte_offset` - The byte offset of the end of the last literal
-    ///     section already added to the buffer
+    ///   section already added to the buffer
     /// * `str_text_end_byte_offset` - The byte offset of the end of the string text
-    ///    that is being lexed. Not including closing quote or anything after it.
+    ///   that is being lexed. Not including closing quote or anything after it.
     ///   If `None`, the current byte offset is used.
     fn resolve_string_literal_payload(
         &mut self,
@@ -3539,7 +3539,7 @@ impl Lexer<'_> {
         debug_assert!(self
             .cursor
             .peek()
-            .map_or(false, |c| c == '_' || is_xid_start(c)));
+            .is_some_and(|c| c == '_' || is_xid_start(c)));
 
         // Start tracking whether the identifier is ASCII
         // It is necessary, as we need to upper case the identifier if it is ASCII
@@ -3591,12 +3591,12 @@ impl Lexer<'_> {
             "DATALINES" | "CARDS" | "LINES" => {
                 if !self.lex_datalines(false) {
                     self.emit_token(TokenChannel::DEFAULT, TokenType::Identifier, Payload::None);
-                };
+                }
             }
             "DATALINES4" | "CARDS4" | "LINES4" => {
                 if !self.lex_datalines(true) {
                     self.emit_token(TokenChannel::DEFAULT, TokenType::Identifier, Payload::None);
-                };
+                }
             }
             _ => {
                 // genuine user defined identifier
@@ -3638,7 +3638,7 @@ impl Lexer<'_> {
                 self.emit_error(ErrorKind::InvalidMacroDefArgName);
             } else {
                 self.emit_error(ErrorKind::InvalidMacroDefName);
-            };
+            }
 
             // Report that we did not lex a token
             false
@@ -3671,7 +3671,7 @@ impl Lexer<'_> {
             if tok_info.token_type != TokenType::SEMI {
                 // the previous character is not a semicolon
                 return false;
-            };
+            }
         }
 
         // Now the forward check
@@ -3774,7 +3774,7 @@ impl Lexer<'_> {
         debug_assert!(self
             .cursor
             .peek()
-            .map_or(false, |c| c.is_ascii_digit() || c == '.'));
+            .is_some_and(|c| c.is_ascii_digit() || c == '.'));
         // First, SAS supports 3 notations for numeric literals:
         // 1. Standard decimal notation (base 10)
         // 2. Hexadecimal notation (base 16)
@@ -3866,7 +3866,7 @@ impl Lexer<'_> {
 
         // If this is a possible HEX literal, we need to check for the trailing x/X
         if check_trailing_hex_terminator {
-            if self.cursor.peek().map_or(false, |c| matches!(c, 'x' | 'X')) {
+            if self.cursor.peek().is_some_and(|c| matches!(c, 'x' | 'X')) {
                 // Ok, as expected, we have a trailing x/X. Consume it
                 self.cursor.advance();
             } else {
@@ -4226,7 +4226,7 @@ impl Lexer<'_> {
         if is_valid_unicode_sas_name_start(next_char) {
             la_cursor.advance();
             la_cursor.eat_while(is_xid_continue);
-        };
+        }
 
         // Name can be followed by digits (width)
         la_cursor.eat_while(|c| c.is_ascii_digit());
@@ -4260,9 +4260,9 @@ impl Lexer<'_> {
     ///
     /// Arguments:
     /// - `allow_quote_call`: bool - if `false`, macro quote functions will
-    ///     not be lexed as macro calls.
+    ///   not be lexed as macro calls.
     /// - `allow_stat_to_follow`: bool - if `false`, automatically emits an
-    ///     error if a statement is encountered, without consuming the statement itself.
+    ///   error if a statement is encountered, without consuming the statement itself.
     ///
     /// Returns `MacroKwType`, which will indicate which token type was lexed:
     /// a macro call or a macro statement keyword. `MacroKwType::None` means
