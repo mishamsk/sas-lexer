@@ -3,26 +3,52 @@ default_install_hook_types:
   - pre-push
 exclude: ".*\\.sas$|.*\\.snap$"
 repos:
-  - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v5.0.0
+  # General hooks
+  - repo: builtin
     hooks:
       - id: check-json
         exclude: ^.vscode/.*$
+      - id: check-toml
       - id: check-yaml
       - id: check-merge-conflict
+      - id: detect-private-key
       - id: end-of-file-fixer
+      - id: mixed-line-ending
       - id: trailing-whitespace
         args: [--markdown-linebreak-ext=md]
       - id: check-added-large-files
+  # Python hooks
   - repo: https://github.com/astral-sh/ruff-pre-commit
     # Ruff version.
-    rev: v0.7.2
+    rev: v0.14.10
     hooks:
       # Run the linter.
-      - id: ruff
+      - id: ruff-check
         args: ["--fix", "--exit-non-zero-on-fix"]
+        always_run: true
+        priority: 10
       # Run the formatter.
       - id: ruff-format
+  - repo: https://github.com/astral-sh/uv-pre-commit
+    # uv version.
+    rev: 0.9.19
+    hooks:
+      # Check the uv lockfile
+      - id: uv-lock
+        args: [--check]
+        always_run: true
+        priority: 10
+  - repo: local
+    hooks:
+      # Run ty type checker.
+      - id: ty
+        name: Type check py
+        language: system
+        types: [python]
+        pass_filenames: false
+        entry: uv run ty check
+        priority: 10
+  # Rust hooks
   - repo: local
     hooks:
       - id: rustfmt
@@ -39,6 +65,7 @@ repos:
         types: [rust]
         args: ["--workspace", "--all-features", "--locked"]
         pass_filenames: false
+        priority: 10
       - id: clippy
         name: Clippy
         entry: cargo clippy

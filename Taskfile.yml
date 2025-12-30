@@ -26,7 +26,7 @@ tasks:
       # Sync dependencies
       - task: py:sync
       # Set up pre-commit
-      - pre-commit install
+      - prek install
       - echo "Done"
 
   py:init:
@@ -53,7 +53,7 @@ tasks:
   lint:
     desc: "Run linters"
     cmds:
-      - uv run pre-commit run --all-files
+      - uv run prek run --all-files
       - typos
 
   # Cleanup tasks
@@ -77,9 +77,8 @@ tasks:
       - rm -fr testtemp/
 
   clean-lint-caches:
-    desc: remove lint (mypy, ruff) caches
+    desc: remove lint (ruff) caches
     cmds:
-      - rm -fr .mypy_cache
       - rm -fr .ruff_cache
 
   clean-all-caches:
