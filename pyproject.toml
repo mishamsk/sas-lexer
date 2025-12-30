@@ -30,11 +30,12 @@ dependencies = ["msgspec>=0.18.0"]
 
 [dependency-groups]
 dev = [
-    "prek>=0.2.25",
+    "prek>=0.2.25,<0.3",
     "pycases>=0.1.3",
-    "pytest>=8.3.3",
-    "ruff>=0.14.10",
+    "pytest>=9.0.2,<9.1",
+    "ruff>=0.14.10,<0.15",
     "ty>=0.0.8",
+    "uv>=0.9.18,<0.10",
 ]
 
 [tool.maturin]

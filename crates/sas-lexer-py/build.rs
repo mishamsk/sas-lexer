@@ -1,4 +1,4 @@
-use std::{env, fs};
+use std::{env, fmt::Write as _, fs};
 
 use anyhow::{anyhow, Result};
 use convert_case::{Boundary, Case, Converter};
@@ -17,7 +17,7 @@ const LINE_FEED: &str = "\n";
 fn generate_token_type_python_enum() -> Result<()> {
     let mut enum_str = String::with_capacity(TokenType::COUNT * 40);
 
-    enum_str.push_str(&format!("class TokenType(IntEnum):{LINE_FEED}"));
+    write!(enum_str, "class TokenType(IntEnum):{LINE_FEED}")?;
 
     let conv = Converter::new()
         .from_case(Case::Pascal)
@@ -25,14 +25,12 @@ fn generate_token_type_python_enum() -> Result<()> {
         .to_case(Case::UpperSnake);
 
     for token_type in TokenType::iter() {
-        enum_str.push_str(
-            format!(
-                "    {} = {}{LINE_FEED}",
-                conv.convert(token_type.to_string()),
-                token_type as u16
-            )
-            .as_str(),
-        );
+        write!(
+            enum_str,
+            "    {} = {}{LINE_FEED}",
+            conv.convert(token_type.to_string()),
+            token_type as u16
+        )?;
     }
 
     // Now write the enum to a file
@@ -62,12 +60,14 @@ fn generate_token_type_python_enum() -> Result<()> {
 fn generate_token_channel_python_enum() -> Result<()> {
     let mut enum_str = String::with_capacity(TokenChannel::COUNT * 40);
 
-    enum_str.push_str(&format!("class TokenChannel(IntEnum):{LINE_FEED}"));
+    write!(enum_str, "class TokenChannel(IntEnum):{LINE_FEED}")?;
 
     for token_channel in TokenChannel::iter() {
-        enum_str.push_str(
-            format!("    {} = {}{LINE_FEED}", token_channel, token_channel as u8).as_str(),
-        );
+        write!(
+            enum_str,
+            "    {} = {}{LINE_FEED}",
+            token_channel, token_channel as u8
+        )?;
     }
 
     // Now write the enum to a file
@@ -108,7 +108,7 @@ fn generate_error_kind_python_module() -> Result<()> {
     // First generate the enum
     let mut enum_str = String::with_capacity(ErrorKind::COUNT * 40);
 
-    enum_str.push_str(&format!("class ErrorKind(IntEnum):{LINE_FEED}"));
+    write!(enum_str, "class ErrorKind(IntEnum):{LINE_FEED}")?;
 
     let conv = Converter::new()
         .from_case(Case::Pascal)
@@ -120,14 +120,12 @@ fn generate_error_kind_python_module() -> Result<()> {
     error_kinds.sort_by_key(|error_kind| *error_kind as u16);
 
     for error_kind in &error_kinds {
-        enum_str.push_str(
-            format!(
-                "    {} = {}{LINE_FEED}",
-                conv.convert(error_kind.to_string()),
-                *error_kind as u16
-            )
-            .as_str(),
-        );
+        write!(
+            enum_str,
+            "    {} = {}{LINE_FEED}",
+            conv.convert(error_kind.to_string()),
+            *error_kind as u16
+        )?;
     }
 
     // Find the position where the current class code starts
@@ -149,25 +147,24 @@ fn generate_error_kind_python_module() -> Result<()> {
     // Now the ERROR_MESSAGE dictionary
     let mut error_message_str = String::with_capacity(ErrorKind::COUNT * 100);
 
-    error_message_str.push_str(&format!(
+    write!(
+        error_message_str,
         "ERROR_MESSAGE: dict[ErrorKind, str] = {{{LINE_FEED}"
-    ));
+    )?;
 
     for error_kind in error_kinds {
-        error_message_str.push_str(
-            format!(
-                "    ErrorKind.{}: \"{}\",{LINE_FEED}",
-                conv.convert(error_kind.to_string()),
-                error_kind
-                    .get_message()
-                    .unwrap_or_default()
-                    .replace('\\', "\\\\")
-                    .replace('"', "\\\"")
-                    .replace('\n', "\\n")
-                    .replace('\t', "\\t")
-            )
-            .as_str(),
-        );
+        write!(
+            error_message_str,
+            "    ErrorKind.{}: \"{}\",{LINE_FEED}",
+            conv.convert(error_kind.to_string()),
+            error_kind
+                .get_message()
+                .unwrap_or_default()
+                .replace('\\', "\\\\")
+                .replace('"', "\\\"")
+                .replace('\n', "\\n")
+                .replace('\t', "\\t")
+        )?;
     }
 
     error_message_str.push('}');

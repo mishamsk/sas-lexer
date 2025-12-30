@@ -119,10 +119,10 @@ pub struct LexResult {
 
 impl Lexer<'_> {
     fn new(
-        source: &str,
+        source: &'_ str,
         init_mode: Option<LexerMode>,
         macro_nesting_level: Option<u32>,
-    ) -> Result<Lexer, ErrorKind> {
+    ) -> Result<Lexer<'_>, ErrorKind> {
         let Ok(source_len) = u32::try_from(source.len()) else {
             return Err(ErrorKind::FileTooLarge);
         };

@@ -33,7 +33,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           # Use Python static 3.11 to build the sdist, since
           # we are not linking against Python.
@@ -69,7 +69,7 @@ jobs:
         python-version: ${{ fromJSON(needs.define-py-matrix.outputs.py-matrix) }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
           architecture: ${{ matrix.platform.target == 'x86_64' && 'x64' || 'arm64' }}
@@ -105,7 +105,7 @@ jobs:
         python-version: ${{ fromJSON(needs.define-py-matrix.outputs.py-matrix) }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
           architecture: ${{ matrix.platform.arch }}
@@ -140,7 +140,7 @@ jobs:
           - x86_64-unknown-linux-gnu
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
           architecture: x64
@@ -181,7 +181,7 @@ jobs:
           - x86_64-unknown-linux-musl
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python.version }}
           architecture: x64
