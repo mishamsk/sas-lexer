@@ -56,6 +56,11 @@ tasks:
       - uv run prek run --all-files
       - typos
 
+  lint:fix:
+    desc: "Run lint auto-fixes (clippy --fix)"
+    cmds:
+      - cargo clippy --fix --allow-dirty --allow-staged --workspace --all-features --locked -- -D warnings
+
   # Cleanup tasks
   clean-pyc:
     desc: remove Python file artifacts

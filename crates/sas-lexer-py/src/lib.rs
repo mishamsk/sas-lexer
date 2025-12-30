@@ -1,3 +1,5 @@
+#![allow(clippy::useless_conversion)]
+
 use pyo3::{
     exceptions::PyRuntimeError,
     prelude::*,

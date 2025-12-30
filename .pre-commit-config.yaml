@@ -71,5 +71,6 @@ repos:
         entry: cargo clippy
         language: system
         types: [rust]
-        args: ["--workspace", "--all-features", "--locked"]
+        args:
+          ["--workspace", "--all-features", "--locked", "--", "-D", "warnings"]
         pass_filenames: false
