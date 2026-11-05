@@ -50,10 +50,6 @@ strip = true
 profile = "release"
 features = ["pyo3/extension-module"]
 include = [{ path = "LICENSE", format = "sdist" }]
-exclude = [
-    { path = "Cargo.lock", format = "sdist" },
-    { path = "Cargo.toml", format = "sdist" },
-]
 
 [tool.uv]
 cache-keys = [{ file = "crates/sas-lexer-py/Cargo.toml" }]
