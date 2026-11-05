@@ -3,7 +3,6 @@ from json import dumps
 from pathlib import Path
 
 import pytest
-from anycase import to_pascal
 
 from sas_lexer import lex_program_from_str
 from sas_lexer.token import Token
@@ -21,8 +20,14 @@ def _get_snapshot_path(sample_file: Path) -> Path:
     return TEST_SNAPSHOTS / f"sas_lexer__lexer__tests__test_sample_files__tokens@{fname}.snap"
 
 
+def _to_pascal(name: str, acronyms: dict[str, str]) -> str:
+    return "".join(
+        acronyms.get(word.lower(), word.capitalize()) for word in name.split("_") if word
+    )
+
+
 def _token_type_to_rust_str(token_type: TokenType) -> str:
-    return to_pascal(
+    return _to_pascal(
         token_type.name,
         {
             "eof": "EOF",

@@ -1,5 +1,3 @@
-#![allow(clippy::useless_conversion)]
-
 use pyo3::{
     exceptions::PyRuntimeError,
     prelude::*,
@@ -14,7 +12,7 @@ fn _lex_program_from_str<'py>(
     py: Python<'py>,
     src: &Bound<'py, PyString>,
 ) -> PyResult<Bound<'py, PyBytes>> {
-    let src: &str = src.extract()?;
+    let src: &str = src.to_str()?;
 
     let LexResult { buffer, errors, .. } =
         lex_program(&src).map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
@@ -28,7 +26,7 @@ fn _lex_program_from_str<'py>(
     ))
     .map_err(|e| PyRuntimeError::new_err(format!("Failed to serialize to msgpack: {e}")))?;
 
-    Ok(PyBytes::new_bound(py, &data))
+    Ok(PyBytes::new(py, &data))
 }
 
 #[pymodule]
