@@ -27,7 +27,7 @@ jobs:
       - name: Set up Python matrix
         id: matrix
         run: |
-          echo 'matrix=["3.10", "3.11", "3.12"]' >> "$GITHUB_OUTPUT"
+          echo 'matrix=["3.10", "3.11", "3.12", "3.13", "3.14"]' >> "$GITHUB_OUTPUT"
 
   sdist:
     runs-on: ubuntu-latest
@@ -62,9 +62,9 @@ jobs:
     strategy:
       matrix:
         platform:
-          - runner: macos-13
+          - runner: macos-15-intel
             target: x86_64
-          - runner: macos-14
+          - runner: macos-15
             target: aarch64
         python-version: ${{ fromJSON(needs.define-py-matrix.outputs.py-matrix) }}
     steps:
@@ -170,43 +170,36 @@ jobs:
     needs: define-py-matrix
     strategy:
       matrix:
-        python:
-          - version: "3.10"
-            alpine: "3.17"
-          - version: "3.11"
-            alpine: "3.19"
-          - version: "3.12"
-            alpine: "3.20"
+        python-version: ${{ fromJSON(needs.define-py-matrix.outputs.py-matrix) }}
         target:
           - x86_64-unknown-linux-musl
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v6
         with:
-          python-version: ${{ matrix.python.version }}
+          python-version: ${{ matrix.python-version }}
           architecture: x64
       - name: "Build wheels"
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.target }}
-          args: --release --locked --out dist -i python${{ matrix.python.version }}
+          args: --release --locked --out dist -i python${{ matrix.python-version }}
           sccache: 'true'
           manylinux: musllinux_1_2
       - name: "Test wheel"
         if: matrix.target == 'x86_64-unknown-linux-musl'
         uses: addnab/docker-run-action@v3
         with:
-          image: alpine:${{ matrix.python.alpine }}
+          image: python:${{ matrix.python-version }}-alpine
           options: -v ${{ github.workspace }}:/io -w /io
           run: |
             set -e
-            apk add py3-pip py3-virtualenv
-            python3 -m virtualenv .venv
+            python3 -m venv .venv
             source .venv/bin/activate
             pip install ${{ env.PACKAGE_NAME }} --find-links dist --force-reinstall
             python -c "import ${{ env.MODULE_NAME }}; print(${{ env.MODULE_NAME }}.__version__)"
       - name: "Upload wheels"
         uses: actions/upload-artifact@v4
         with:
-          name: wheels-${{ matrix.target }}-${{ matrix.python.version }}
+          name: wheels-${{ matrix.target }}-${{ matrix.python-version }}
           path: dist

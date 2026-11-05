@@ -9,10 +9,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [Unreleased] - ReleaseDate
 
 ### Added
--
+- Support for Python 3.13 and 3.14; wheels are now built for 3.10 through 3.14
 
 ### Changed
--
+- Upgraded PyO3 from 0.22 to 0.30
 
 ### Deprecated
 -
