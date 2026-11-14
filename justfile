@@ -194,6 +194,8 @@ perf-check $base="origin/main":
     configs=(default macro_sep)
     # Nothing from the environment (or .env) may filter or reconfigure the gated runs.
     while IFS= read -r var; do unset "$var"; done < <(compgen -e | grep '^GUNGRAUN_' || true)
+    # Only the base build below may select the base API adapter (cfg(perf_base)).
+    unset SAS_LEXER_PERF_BASE
     # Tool versions: the runner must match the gungraun crate, valgrind the pinned major.minor.
     gungraun="$(sed -n 's/^gungraun = "=\(.*\)"$/\1/p' "$perf/Cargo.toml")"
     runner="$(gungraun-runner --version | awk '{print $2}')"
