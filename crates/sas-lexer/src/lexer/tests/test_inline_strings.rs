@@ -4690,6 +4690,51 @@ fn test_comment_prediction(
     assert_lexing(contents, expected_token, expected_error);
 }
 
+/// Issue #14 (synthetic equivalent of the reported input): an inline `** ... ;`
+/// comment ends at its first `;` even when a standalone `**;` comment follows on
+/// a later line. There is no "balanced" `** ... **;` form that spans semicolons,
+/// so the code in between must stay code.
+#[rstest]
+#[case::lf("\n")]
+#[case::crlf("\r\n")]
+fn test_inline_star2_comment_before_later_star2_semi(#[case] eol: &str) {
+    let source = [
+        "ELSE  DO;   **  NOTE: FOR 4<=score<=5;",
+        "        grp = 'AA0';  ",
+        "        IF flag = 1 THEN grp2='AA2';",
+        "        ELSE              grp2='AA1';",
+        "END;",
+        "                                                   **;",
+        "** Classification complete ;",
+        "IF grp = 'BBB' THEN res = 111;",
+    ]
+    .join(eol);
+
+    let LexResult { buffer, errors, .. } = lex_program(&source).unwrap();
+
+    assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+
+    let comments: Vec<&str> = buffer
+        .iter_tokens()
+        .filter(|t| buffer.get_token_channel(*t).expect("wrong token") == TokenChannel::COMMENT)
+        .map(|t| {
+            buffer
+                .get_token_raw_text(t, &source)
+                .expect("wrong token")
+                .unwrap()
+        })
+        .collect();
+
+    assert_eq!(
+        comments,
+        vec![
+            "**  NOTE: FOR 4<=score<=5;",
+            "**;",
+            "** Classification complete ;",
+        ]
+    );
+}
+
 // This tests that macro sep is inserted before all the expected macro statements.
 // The fact that it is not inserted in other context is implicitly tested by
 // the other tests with the said macro stats/identifiers.
