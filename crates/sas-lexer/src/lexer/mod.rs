@@ -277,15 +277,23 @@ impl Lexer<'_> {
         }
     }
 
+    // Hot: called for nearly every token. Keep the empty-stack recovery out of line. From rustc
+    // 1.97, `mode()` with the recovery inlined is no longer inlined into the lexer loop, and its
+    // prologue spills registers on every call (~+9% instructions on macro-heavy input).
     fn mode(&mut self) -> LexerMode {
         match self.mode_stack.last() {
             Some(mode) => mode.clone(),
-            None => {
-                self.emit_error(ErrorKind::InternalErrorEmptyModeStack);
-                self.push_mode(LexerMode::default());
-                LexerMode::default()
-            }
+            None => self.recover_empty_mode_stack(),
         }
+    }
+
+    /// Never expected: the mode stack always holds at least the initial mode.
+    #[cold]
+    #[inline(never)]
+    fn recover_empty_mode_stack(&mut self) -> LexerMode {
+        self.emit_error(ErrorKind::InternalErrorEmptyModeStack);
+        self.push_mode(LexerMode::default());
+        LexerMode::default()
     }
 
     // Pending stat stack manipulation
