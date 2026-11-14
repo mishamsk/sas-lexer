@@ -831,8 +831,10 @@ impl Lexer<'_> {
                 self.set_pending_stat(true);
             }
             c if is_valid_unicode_sas_name_start(c) => {
-                self.lex_identifier();
+                // Set before lexing: `lex_identifier` may consume an entire
+                // datalines block, which ends the statement and resets this
                 self.set_pending_stat(true);
+                self.lex_identifier();
             }
             _ => {
                 // Something else must be a symbol or some unknown character
@@ -3754,6 +3756,10 @@ impl Lexer<'_> {
 
         // Add the datalines end token
         self.emit_token(TokenChannel::DEFAULT, TokenType::SEMI, Payload::None);
+
+        // The datalines end terminates the statement, so whatever follows
+        // starts a new one (e.g. a `* comment;`)
+        self.set_pending_stat(false);
 
         true
     }
