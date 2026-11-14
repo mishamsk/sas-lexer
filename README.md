@@ -138,6 +138,18 @@ THIS SECTION IS WIP. PLANNED CONTENT:
 
 Why build a modern lexer specifically for the SAS language? Mostly for fun! SAS is possibly the most complicated programming language for static parsing in the world. I have worked with it for many years as part of my day job, which eventually included a transpiler from SAS to PySpark. I wanted to see how fast a complex context-aware lexer can theoretically be, and SAS seemed like a perfect candidate for this experiment.
 
+## Development
+
+All dev tasks are [just](https://github.com/casey/just) recipes, and CI calls the same recipes (`just --list` shows them all).
+
+### Performance regression guard
+
+Every PR runs `.github/workflows/perf.yml`. It builds the lexer at the PR base and at the PR head in the same job and runs the [gungraun](https://github.com/gungraun/gungraun) (Valgrind/Callgrind) benchmarks from `crates/sas-lexer-perf` against both. The benchmarks lex a real-world corpus plus deterministic synthetic inputs (macro, strings, comments, datalines, numerics), with default features and with `macro_sep`. Instruction counts and estimated cycles are deterministic, so runner noise doesn't affect them. The check fails if any benchmark gets ≥ 10% worse, and the comparison table goes to the job summary.
+
+- `just perf-check <base-ref>` runs the same check locally: it compares `<base-ref>` with the working tree. The base is built in a throwaway git worktree with this branch's benchmark harness. It needs Linux, `valgrind` and `gungraun-runner` (same version as the `gungraun` dev-dependency). `PERF_THRESHOLD=5 just perf-check ...` sets a different threshold.
+- On macOS, `just perf-docker perf-check <base-ref>` runs it in a Linux container (needs Docker).
+- `just perf-bench` runs the Callgrind benchmarks alone. `just perf-profile`, `just perf-cur` and `just perf-compare` are wall-clock tools for local tuning.
+
 ## License
 
 This project is licensed under the [AGPL-3.0](LICENSE). If you are interested in using the lexer for commercial purposes, please reach out to me for further discussion.
@@ -159,5 +171,5 @@ Prerequisites (base tooling, install them yourself): [just](https://github.com/c
 ## Acknowledgments
 
 - The lexer is inspired by the the [Carbon language parser](https://github.com/carbon-language/carbon-lang), particularly as described in the talk "Modernizing Compiler Design for Carbon Toolchain" by Chandler Carruth at CppNow 2023. You can find the talk [here](https://www.youtube.com/watch?v=ZI198eFghJk).
-- Cargo benchmark and an end-2-end test use SAS code from the [SAS Enlighten Apply GitHub repository](https://github.com/sassoftware/enlighten-apply), which is licensed under Apache-2.0. The code is included in the `tests` directory without modifications.
+- Cargo benchmark and an end-2-end test use SAS code from the [SAS Enlighten Apply GitHub repository](https://github.com/sassoftware/enlighten-apply), which is licensed under Apache-2.0. The code is included in `crates/sas-lexer-perf/corpus` without modifications.
 - The Python package utilizes the amazing [msgspec library](https://github.com/jcrist/msgspec) for (de)serialization, which is licensed under BSD-3-Clause.

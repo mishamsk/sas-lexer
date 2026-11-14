@@ -1,0 +1,78 @@
+name: Performance regression guard
+
+# Builds the lexer at the base and at the head of a change in the same job and
+# compares Callgrind instruction counts and estimated cycles (deterministic, so
+# runner noise doesn't matter). Fails on a >= 10% regression in any benchmark.
+# Same command locally: `just perf-check <base>` (or `just perf-docker perf-check <base>` on macOS).
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      base:
+        description: "Base ref to compare HEAD against"
+        required: false
+        default: "HEAD~1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref_name }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+env:
+  CARGO_NET_RETRY: 10
+  CARGO_TERM_COLOR: always
+  RUSTUP_MAX_RETRIES: 10
+
+jobs:
+  perf-check:
+    name: "perf check (callgrind)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The base commit must be available to build it in a worktree.
+          fetch-depth: 0
+      - name: Select base commit
+        id: base
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          INPUT_BASE: ${{ inputs.base }}
+        run: |
+          case "$EVENT" in
+            # HEAD is the PR merge commit, so this measures exactly the PR's change.
+            pull_request) base="$PR_BASE" ;;
+            push) base="$PUSH_BEFORE" ;;
+            *) base="$INPUT_BASE" ;;
+          esac
+          if [ -z "$base" ] || ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            echo "No usable base commit ('$base'); skipping the comparison." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "sha=" >> "$GITHUB_OUTPUT"
+          else
+            echo "sha=$(git rev-parse "${base}^{commit}")" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Read gungraun version
+        id: gungraun
+        shell: bash
+        run: echo "version=$(sed -n 's/^gungraun = "=\(.*\)"$/\1/p' crates/sas-lexer-perf/Cargo.toml)" >> "$GITHUB_OUTPUT"
+      - name: Install Rust
+        uses: ./.github/actions/setup-rust
+      - uses: Swatinem/rust-cache@v2
+      - name: Install valgrind
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends valgrind
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just,gungraun-runner@${{ steps.gungraun.outputs.version }}
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+      - name: Compare base vs head
+        if: steps.base.outputs.sha != ''
+        run: just perf-check ${{ steps.base.outputs.sha }}
