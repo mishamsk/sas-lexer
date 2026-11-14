@@ -63,10 +63,18 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+      # The dated nightly is pinned once, in the justfile (`nightly := ...`).
+      - name: Read nightly pin
+        id: nightly
+        shell: bash
+        run: |
+          toolchain=$(sed -n 's/^nightly := "\(.*\)"$/\1/p' justfile)
+          test -n "$toolchain" || { echo "::error::nightly pin not found in justfile"; exit 1; }
+          echo "toolchain=$toolchain" >> "$GITHUB_OUTPUT"
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: nightly-2025-12-30
+          toolchain: ${{ steps.nightly.outputs.toolchain }}
       - name: "Install cargo udeps"
         uses: taiki-e/install-action@v2
         with:
@@ -118,17 +126,26 @@ jobs:
       - name: Install Rust (pinned)
         if: matrix.rust == 'stable'
         uses: ./.github/actions/setup-rust
+      # The dated nightly is pinned once, in the justfile (`nightly := ...`).
+      - name: Read nightly pin
+        if: matrix.rust == 'nightly'
+        id: nightly
+        shell: bash
+        run: |
+          toolchain=$(sed -n 's/^nightly := "\(.*\)"$/\1/p' justfile)
+          test -n "$toolchain" || { echo "::error::nightly pin not found in justfile"; exit 1; }
+          echo "toolchain=$toolchain" >> "$GITHUB_OUTPUT"
       # rust-toolchain.toml would override the nightly default, so also select
       # the dated nightly via RUSTUP_TOOLCHAIN for the following steps.
       - name: Install Rust (pinned nightly)
         if: matrix.rust == 'nightly'
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: nightly-2025-12-30
+          toolchain: ${{ steps.nightly.outputs.toolchain }}
       - name: Select pinned nightly
         if: matrix.rust == 'nightly'
         shell: bash
-        run: echo "RUSTUP_TOOLCHAIN=nightly-2025-12-30" >> "$GITHUB_ENV"
+        run: echo "RUSTUP_TOOLCHAIN=${{ steps.nightly.outputs.toolchain }}" >> "$GITHUB_ENV"
       - uses: taiki-e/install-action@v2
         with:
           tool: just

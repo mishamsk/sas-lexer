@@ -3,8 +3,8 @@ set windows-shell := ["pwsh", "-NoLogo", "-Command"]
 # Loads .env (if present) for SAS_LEX_SAMPLES, PERF_LARGE_SAMPLE, etc.
 set dotenv-load
 
-# Dated nightly used for udeps and the nightly test job. Keep in sync with CI.
-nightly := "nightly-2025-12-30"
+# Dated nightly used for udeps and the nightly test job. Single source of truth: CI reads it from here.
+nightly := "nightly-2026-11-04"
 
 # Show help (same as just running just)
 help:
