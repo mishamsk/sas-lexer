@@ -37,6 +37,10 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      # The runner's default Python (3.14) is newer than PyO3 0.22 supports.
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
       - name: Install Rust
         uses: ./.github/actions/setup-rust
       - uses: Swatinem/rust-cache@v2
@@ -49,6 +53,10 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      # The runner's default Python (3.14) is newer than PyO3 0.22 supports.
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
