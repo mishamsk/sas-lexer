@@ -39,9 +39,8 @@ pub use sas_lexer;
 ///    ```
 /// 2. drop the `perf_base` branch in a follow-up PR once the change is on main.
 ///
-/// The `perf_base` side is only compiled by `just perf-check` (CI's perf job), so check
-/// it locally with `SAS_LEXER_PERF_BASE=1 cargo check -p sas-lexer-perf --benches` on a
-/// checkout of the base, or just run `just perf-check`.
+/// The `perf_base` side is only compiled by `just perf-check` (locally or in CI's perf
+/// job), which copies HEAD's harness into a base worktree; run it to check that side.
 ///
 /// A brand-new entry point with no base equivalent isn't comparable: benchmark it in a
 /// follow-up PR once it exists on main, rather than skipping the gate.
