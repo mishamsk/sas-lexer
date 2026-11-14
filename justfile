@@ -180,19 +180,20 @@ perf_threshold := env("PERF_THRESHOLD", "10")
 perf_image := "sas-lexer-perf:local"
 
 # Run the Callgrind benchmarks for the working tree, both feature configs. Extra args go to gungraun.
+[positional-arguments]
 [unix]
 perf-bench *args:
-    cargo bench -p sas-lexer-perf --bench lexer -- --home="{{ justfile_directory() }}/target/gungraun/default" {{ args }}
-    cargo bench -p sas-lexer-perf --bench lexer --features macro_sep -- --home="{{ justfile_directory() }}/target/gungraun/macro_sep" {{ args }}
+    cargo bench -p sas-lexer-perf --bench lexer -- --home="{{ justfile_directory() }}/target/gungraun/default" "$@"
+    cargo bench -p sas-lexer-perf --bench lexer --features macro_sep -- --home="{{ justfile_directory() }}/target/gungraun/macro_sep" "$@"
 
 # Regression gate: the lexer at `base` vs the working tree, same harness and inputs. Fails on >= perf_threshold% regressions.
 [unix]
-perf-check base="origin/main":
+perf-check $base="origin/main":
     #!/usr/bin/env bash
     set -euo pipefail
     root="{{ justfile_directory() }}"
     out="$root/target/perf-check"
-    base_sha="$(git rev-parse --verify "{{ base }}^{commit}")"
+    base_sha="$(git rev-parse --verify --end-of-options "${base}^{commit}")"
     head_desc="$(git rev-parse --short HEAD)$(git diff --quiet HEAD -- || echo '+dirty')"
     rm -rf "$out"
     mkdir -p "$out"
@@ -235,6 +236,7 @@ perf-docker-image:
         crates/sas-lexer-perf
 
 # Run any just recipe in the Linux perf container, e.g. `just perf-docker perf-check origin/main`.
+[positional-arguments]
 [unix]
 perf-docker *recipe: perf-docker-image
     #!/usr/bin/env bash
@@ -244,12 +246,12 @@ perf-docker *recipe: perf-docker-image
     # Same absolute paths inside the container so git worktrees resolve. Linux build output goes
     # to a named volume over target/ so it never mixes with host builds. seccomp=unconfined lets
     # gungraun disable ASLR (setarch), which the default Docker profile forbids.
-    docker run --rm -t --security-opt seccomp=unconfined \
+    docker run --rm --security-opt seccomp=unconfined \
         -v "$root:$root" -v "$git_dir:$git_dir" \
         -v sas-lexer-perf-target:"$root/target" \
         -v sas-lexer-perf-cargo:/usr/local/cargo/registry \
         -e PERF_THRESHOLD="{{ perf_threshold }}" \
-        -w "$root" {{ perf_image }} just {{ recipe }}
+        -w "$root" {{ perf_image }} just "$@"
 
 # Profile the criterion wall-clock benchmark (flamegraph).
 perf-profile:
