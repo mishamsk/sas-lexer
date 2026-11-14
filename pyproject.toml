@@ -45,7 +45,10 @@ python-source = "src"
 strip = true
 profile = "release"
 features = ["pyo3/extension-module"]
-include = [{ path = "LICENSE", format = "sdist" }]
+include = [
+    { path = "LICENSE", format = "sdist" },
+    { path = "rust-toolchain.toml", format = "sdist" },
+]
 exclude = [
     { path = "Cargo.lock", format = "sdist" },
     { path = "Cargo.toml", format = "sdist" },
