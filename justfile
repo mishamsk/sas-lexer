@@ -33,6 +33,11 @@ lint:
 lint-fix:
     cargo clippy --fix --allow-dirty --allow-staged --workspace --all-features --locked -- -D warnings
 
+# Python lint and format check (CI "ruff"). Ruff version matches uv.lock and the pre-commit hook.
+ruff:
+    uvx ruff@0.14.10 check src
+    uvx ruff@0.14.10 format --check src
+
 # Unused dependencies, on the pinned nightly (CI "cargo udeps").
 udeps:
     cargo +{{ nightly }} udeps --workspace --all-features --release
@@ -61,7 +66,7 @@ build-stats-polars:
 
 # Build and install the python extension into the current venv.
 build-dev:
-    maturin develop --uv -r
+    uvx maturin develop --uv -r
 
 # ---------------------------------------------------------------------------
 # Tests
@@ -85,8 +90,8 @@ test-python-ci:
 # All tests: Rust doc/unit/integration, then Python.
 test: test-rust test-python
 
-# Run everything CI runs, locally (Rust + Python tests on the pinned toolchain).
-ci: fmt-check clippy udeps msrv build doc test
+# Run everything CI runs, locally, with the same recipes as the CI jobs.
+ci: fmt-check clippy udeps msrv ruff build doc test-rust test-python-ci
 
 # ---------------------------------------------------------------------------
 # Python environment
@@ -109,7 +114,7 @@ py-init:
     uv venv --python python
     test -f .env || cp .env.sample .env
     just py-sync
-    prek install
+    uv run prek install
     echo Done
 
 # DESTRUCTIVE: remove caches and .venv, then recreate the environment (asks for confirmation).
@@ -188,24 +193,45 @@ perf-compare sha: build-rel
 # Release (cargo-release). Plain recipes are DRY RUNS; the -execute ones really release.
 # ---------------------------------------------------------------------------
 
-# Dry run: release the main sas-lexer crate. level: major|minor|patch|release|rc|beta|alpha
+# Dry run: release the main sas-lexer crate. level: major|minor|patch|release|rc|beta|alpha or an explicit semver
 [unix]
-release-rust level:
-    cargo release -p sas-lexer {{ level }}
+release-rust $level:
+    @just _release sas-lexer "$level" dry
 
 # EXECUTES: release the main sas-lexer crate (commit, tag, publish).
 [confirm("Really release sas-lexer (not a dry run)?")]
 [unix]
-release-rust-execute level:
-    cargo release -p sas-lexer -x {{ level }}
+release-rust-execute $level:
+    @just _release sas-lexer "$level" execute
 
-# Dry run: release the python package. level: major|minor|patch|release|rc|beta|alpha
+# Dry run: release the python package. level: major|minor|patch|release|rc|beta|alpha or an explicit semver
 [unix]
-release-py level:
-    cargo release -p sas-lexer-py {{ level }}
+release-py $level:
+    @just _release sas-lexer-py "$level" dry
 
 # EXECUTES: release the python package (commit, tag).
 [confirm("Really release sas-lexer-py (not a dry run)?")]
 [unix]
-release-py-execute level:
-    cargo release -p sas-lexer-py -x {{ level }}
+release-py-execute $level:
+    @just _release sas-lexer-py "$level" execute
+
+# Shared cargo-release wrapper. Only an allow-listed level or a plain semver is accepted,
+# so flags such as --execute cannot be smuggled in; only mode=execute adds -x.
+[private]
+[unix]
+_release package $level mode:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "$level" in
+        major|minor|patch|release|rc|beta|alpha) ;;
+        *)
+            if ! [[ "$level" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+                echo "invalid release level: $level (expected major|minor|patch|release|rc|beta|alpha or a semver)" >&2
+                exit 1
+            fi
+            ;;
+    esac
+    if [ "{{ mode }}" = execute ]; then
+        exec cargo release -p "{{ package }}" -x "$level"
+    fi
+    exec cargo release -p "{{ package }}" "$level"

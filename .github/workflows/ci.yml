@@ -145,15 +145,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Lint with Ruff
-        uses: astral-sh/ruff-action@v3
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+      - uses: taiki-e/install-action@v2
         with:
-          src: "src"
-      - name: Check formatting with Ruff
-        uses: astral-sh/ruff-action@v3
-        with:
-          args: format --check
-          src: "src"
+          tool: just
+      - name: Lint and check formatting with Ruff
+        run: just ruff
 
   # Python tests.
   test-python:
