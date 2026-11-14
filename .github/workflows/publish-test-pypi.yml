@@ -14,6 +14,8 @@ jobs:
     environment:
       name: testpypi
     permissions:
+      # For the checkout step.
+      contents: read
       # For PyPI's trusted publishing.
       id-token: write
     steps:
