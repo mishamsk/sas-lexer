@@ -1,0 +1,29 @@
+[package]
+name = "sas-lexer-perf"
+description = "Deterministic (Valgrind/Callgrind) performance regression benchmarks for sas-lexer. Not published."
+authors = { workspace = true }
+edition = { workspace = true }
+repository = { workspace = true }
+# gungraun needs 1.88+. The crate is private, so the workspace MSRV check skips it.
+rust-version = "1.88"
+version = { workspace = true }
+license = { workspace = true }
+publish = false
+
+[dependencies]
+sas-lexer = { workspace = true }
+zip = { workspace = true }
+
+[dev-dependencies]
+# Pinned exactly: the gungraun-runner binary installed in CI/locally must match.
+gungraun = "=0.20.0"
+
+[features]
+macro_sep = ["sas-lexer/macro_sep"]
+
+[lints]
+workspace = true
+
+[[bench]]
+name = "lexer"
+harness = false

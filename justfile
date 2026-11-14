@@ -159,21 +159,98 @@ clean: clean-all-caches clean-test
     cargo clean
 
 # ---------------------------------------------------------------------------
-# Performance (need SAS_LEX_SAMPLES / PERF_LARGE_SAMPLE, see .env.sample; hyperfine)
+# Performance regression guard (Callgrind instruction counts; Linux + valgrind +
+# gungraun-runner; on macOS use the -docker variants). CI runs `just perf-check`.
 # ---------------------------------------------------------------------------
 
-# Profile the lexer benchmark.
+# Fail the check when a gated metric (instructions, estimated cycles) is this much (%) worse.
+perf_threshold := env("PERF_THRESHOLD", "10")
+perf_image := "sas-lexer-perf:local"
+
+# Run the Callgrind benchmarks for the working tree, both feature configs. Extra args go to gungraun.
+[unix]
+perf-bench *args:
+    cargo bench -p sas-lexer-perf --bench lexer -- --home="{{ justfile_directory() }}/target/gungraun/default" {{ args }}
+    cargo bench -p sas-lexer-perf --bench lexer --features macro_sep -- --home="{{ justfile_directory() }}/target/gungraun/macro_sep" {{ args }}
+
+# Regression gate: the lexer at `base` vs the working tree, same harness and inputs. Fails on >= perf_threshold% regressions.
+[unix]
+perf-check base="origin/main":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    root="{{ justfile_directory() }}"
+    out="$root/target/perf-check"
+    base_sha="$(git rev-parse --verify "{{ base }}^{commit}")"
+    head_desc="$(git rev-parse --short HEAD)$(git diff --quiet HEAD -- || echo '+dirty')"
+    rm -rf "$out"
+    mkdir -p "$out"
+    # The base lives in an isolated, throwaway worktree; the current checkout is never touched.
+    src="$out/base-src"
+    cleanup() { git worktree remove --force "$src" >/dev/null 2>&1 || true; }
+    trap cleanup EXIT
+    git worktree add --detach "$src" "$base_sha"
+    # Measure the base library with HEAD's harness and inputs, so both sides run identical
+    # benchmarks (this also works when the base has no perf crate yet). The base keeps its own
+    # Cargo.lock and profiles, so dependency or profile changes in the PR are measured too.
+    rm -rf "$src/crates/sas-lexer-perf"
+    cp -R "$root/crates/sas-lexer-perf" "$src/crates/sas-lexer-perf"
+    results=()
+    for cfg in default macro_sep; do
+        features=()
+        if [ "$cfg" = macro_sep ]; then features=(--features macro_sep); fi
+        home="$out/gungraun-$cfg"
+        echo "::group::perf-check: base ${base_sha:0:10} [$cfg]"
+        (cd "$src" && cargo bench -p sas-lexer-perf --bench lexer "${features[@]}" \
+            --target-dir "$root/target/perf-base" -- --home="$home" --save-baseline=base)
+        echo "::endgroup::"
+        echo "::group::perf-check: head $head_desc [$cfg]"
+        cargo bench -p sas-lexer-perf --bench lexer --locked "${features[@]}" -- \
+            --home="$home" --baseline=base --output-format=json > "$out/$cfg.jsonl"
+        echo "::endgroup::"
+        results+=("$cfg=$out/$cfg.jsonl")
+    done
+    uv run --no-project "$root/crates/sas-lexer-perf/report.py" \
+        --threshold "{{ perf_threshold }}" --output "$out/summary.md" \
+        --title "Performance check: base \`${base_sha:0:10}\` vs head \`$head_desc\`" \
+        "${results[@]}"
+
+# Build the Linux image used by the -docker perf recipes (pinned Rust, valgrind, gungraun-runner).
+[unix]
+perf-docker-image:
+    docker build -t {{ perf_image }} \
+        --build-arg RUST_VERSION="$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)" \
+        --build-arg GUNGRAUN_VERSION="$(sed -n 's/^gungraun = "=\(.*\)"$/\1/p' crates/sas-lexer-perf/Cargo.toml)" \
+        crates/sas-lexer-perf
+
+# Run any just recipe in the Linux perf container, e.g. `just perf-docker perf-check origin/main`.
+[unix]
+perf-docker *recipe: perf-docker-image
+    #!/usr/bin/env bash
+    set -euo pipefail
+    root="{{ justfile_directory() }}"
+    git_dir="$(cd "$(git rev-parse --git-common-dir)" && pwd)"
+    # Same absolute paths inside the container so git worktrees resolve. Linux build output goes
+    # to a named volume over target/ so it never mixes with host builds. seccomp=unconfined lets
+    # gungraun disable ASLR (setarch), which the default Docker profile forbids.
+    docker run --rm -t --security-opt seccomp=unconfined \
+        -v "$root:$root" -v "$git_dir:$git_dir" \
+        -v sas-lexer-perf-target:"$root/target" \
+        -v sas-lexer-perf-cargo:/usr/local/cargo/registry \
+        -e PERF_THRESHOLD="{{ perf_threshold }}" \
+        -w "$root" {{ perf_image }} just {{ recipe }}
+
+# Profile the criterion wall-clock benchmark (flamegraph).
 perf-profile:
-    cargo bench --bench lexer -- --profile-time 5
+    cargo bench -p sas-lexer --bench lexer -- --profile-time 5
     @echo "Path to the profile: target/criterion/lex/lex/profile/flamegraph.svg"
 
-# Benchmark the current release build.
+# Wall-clock: benchmark the release CLI on private corpora (SAS_LEX_SAMPLES / PERF_LARGE_SAMPLE in .env; hyperfine).
 [unix]
 perf-cur: build-rel
     hyperfine -N -w 10 "target/release/sas-lexer lex ${SAS_LEX_SAMPLES:?set SAS_LEX_SAMPLES in .env}"
     hyperfine -N -w 5 "target/release/sas-lexer lex ${PERF_LARGE_SAMPLE:?set PERF_LARGE_SAMPLE in .env}"
 
-# Compare the current release build with the given commit, built in an isolated git worktree.
+# Wall-clock: compare the release CLI with the given commit (built in an isolated git worktree) on private corpora.
 [unix]
 perf-compare sha: build-rel
     #!/usr/bin/env bash

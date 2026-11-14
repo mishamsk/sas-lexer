@@ -26,8 +26,11 @@ fn read_sas_files_from_zip<P: AsRef<Path>>(path: P) -> io::Result<String> {
 }
 
 fn benchmark_lex(c: &mut Criterion) {
-    let source = read_sas_files_from_zip("benches/enlighten-apply-code-only.zip")
-        .expect("Failed to read SAS files from zip");
+    let source = read_sas_files_from_zip(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../sas-lexer-perf/corpus/enlighten-apply-code-only.zip"
+    ))
+    .expect("Failed to read SAS files from zip");
 
     let source_len = source.len() as u64;
 
