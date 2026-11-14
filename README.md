@@ -80,6 +80,8 @@ For Python, install the package using pip:
 pip install sas-lexer
 ```
 
+The Python package supports CPython 3.11–3.15. Wheels are published for macOS (x86_64 and arm64), Windows (x86_64) and Linux x86_64 (manylinux and musllinux). On other platforms pip builds the package from the source distribution, which requires a Rust toolchain (via [rustup](https://rustup.rs)).
+
 ### Usage (Rust)
 
 ```rust

@@ -3,7 +3,6 @@ from json import dumps
 from pathlib import Path
 
 import pytest
-from anycase import to_pascal
 
 from sas_lexer import lex_program_from_str
 from sas_lexer.token import Token
@@ -21,49 +20,55 @@ def _get_snapshot_path(sample_file: Path) -> Path:
     return TEST_SNAPSHOTS / f"sas_lexer__lexer__tests__test_sample_files__tokens@{fname}.snap"
 
 
+# Words of the Python UPPER_SNAKE token type names that stay upper case in the Rust
+# (PascalCase) variant names. Keys are lower case.
+_UPPER_CASE_WORDS = {
+    "eof": "EOF",
+    "ws": "WS",
+    "semi": "SEMI",
+    "amp": "AMP",
+    "percent": "PERCENT",
+    "lparen": "LPAREN",
+    "rparen": "RPAREN",
+    "lcurly": "LCURLY",
+    "rcurly": "RCURLY",
+    "lbrack": "LBRACK",
+    "rbrack": "RBRACK",
+    "star": "STAR",
+    "excl": "EXCL",
+    "excl2": "EXCL2",
+    "bpipe": "BPIPE",
+    "bpipe2": "BPIPE2",
+    "pipe2": "PIPE2",
+    "star2": "STAR2",
+    "not": "NOT",
+    "fslash": "FSLASH",
+    "plus": "PLUS",
+    "minus": "MINUS",
+    "gtlt": "GTLT",
+    "ltgt": "LTGT",
+    "lt": "LT",
+    "le": "LE",
+    "ne": "NE",
+    "gt": "GT",
+    "ge": "GE",
+    "pipe": "PIPE",
+    "dot": "DOT",
+    "comma": "COMMA",
+    "colon": "COLON",
+    "assign": "ASSIGN",
+    "dollar": "DOLLAR",
+    "at": "AT",
+    "hash": "HASH",
+    "question": "QUESTION",
+}
+
+
 def _token_type_to_rust_str(token_type: TokenType) -> str:
-    return to_pascal(
-        token_type.name,
-        {
-            "eof": "EOF",
-            "ws": "WS",
-            "semi": "SEMI",
-            "amp": "AMP",
-            "percent": "PERCENT",
-            "lparen": "LPAREN",
-            "rparen": "RPAREN",
-            "lcurly": "LCURLY",
-            "rcurly": "RCURLY",
-            "lbrack": "LBRACK",
-            "rbrack": "RBRACK",
-            "star": "STAR",
-            "excl": "EXCL",
-            "excl2": "EXCL2",
-            "bpipe": "BPIPE",
-            "bpipe2": "BPIPE2",
-            "pipe2": "PIPE2",
-            "star2": "STAR2",
-            "not": "NOT",
-            "fslash": "FSLASH",
-            "plus": "PLUS",
-            "minus": "MINUS",
-            "gtlt": "GTLT",
-            "ltgt": "LTGT",
-            "lt": "LT",
-            "le": "LE",
-            "ne": "NE",
-            "gt": "GT",
-            "ge": "GE",
-            "pipe": "PIPE",
-            "dot": "DOT",
-            "comma": "COMMA",
-            "colon": "COLON",
-            "assign": "ASSIGN",
-            "dollar": "DOLLAR",
-            "at": "AT",
-            "hash": "HASH",
-            "question": "QUESTION",
-        },
+    """Converts an UPPER_SNAKE token type name back to its Rust PascalCase variant name."""
+    return "".join(
+        _UPPER_CASE_WORDS.get(word.lower(), word.capitalize())
+        for word in token_type.name.split("_")
     )
 
 
