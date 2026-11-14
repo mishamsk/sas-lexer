@@ -20,8 +20,6 @@ gungraun = "=0.20.0"
 
 [features]
 macro_sep = ["sas-lexer/macro_sep"]
-# Enabled only for the BASE build by `just perf-check`; see `sas_lexer_perf::api`.
-perf-base = []
 
 [lints]
 workspace = true

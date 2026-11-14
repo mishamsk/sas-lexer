@@ -150,7 +150,7 @@ Every PR runs `.github/workflows/perf.yml`. It builds the lexer at the PR base a
 - `just perf-check <base-ref>` runs the same check locally: it compares `<base-ref>` with the working tree. The base is built in a throwaway git worktree with this branch's benchmark harness. It needs Linux, Valgrind 3.26 (as on the `ubuntu-26.04` CI runner) and `gungraun-runner` (same version as the `gungraun` dev-dependency). `PERF_THRESHOLD=5 just perf-check ...` sets a different threshold.
 - On macOS, `just perf-docker perf-check <base-ref>` runs it in a Linux container (needs Docker).
 - `just perf-test` checks the benchmark inputs and the gate logic. `just perf-bench` runs the Callgrind benchmarks alone. `just perf-profile`, `just perf-cur` and `just perf-compare` are wall-clock tools for local tuning.
-- PRs that change the lexer API used by the benchmarks must adapt `sas_lexer_perf::api`, which has to compile against both the base and the head. The module docs describe the `perf-base` feature pattern for this.
+- PRs that change the lexer API used by the benchmarks must adapt `sas_lexer_perf::api`, which has to compile against both the base and the head. The old call goes under `#[cfg(perf_base)]` and the new one under `#[cfg(not(perf_base))]`. Only `perf-check` sets that cfg, for the base build (`SAS_LEXER_PERF_BASE=1`). It isn't a Cargo feature, so the `--all-features` workspace checks (clippy, udeps) still compile the head side. Drop the old branch once the change is on main. The module docs have the details.
 
 ## License
 

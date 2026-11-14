@@ -24,12 +24,24 @@ pub use sas_lexer;
 /// The only calls into the lexer that the benchmarks make (the timed workload).
 ///
 /// `just perf-check` builds this crate from HEAD against both the base and the head
-/// lexer, so this module must compile against both. The base build always enables the
-/// `perf-base` feature. When a PR changes the lexer API used here:
+/// lexer, so this module must compile against both. Only the base build sets
+/// `cfg(perf_base)` (via `SAS_LEXER_PERF_BASE=1`, see `build.rs`); every other build,
+/// including the `--all-features` workspace checks, compiles the head side. When a PR
+/// changes the lexer API used here:
 ///
-/// 1. keep the old call under `#[cfg(feature = "perf-base")]` and add the new call under
-///    `#[cfg(not(feature = "perf-base"))]`, doing the same work on the same input;
-/// 2. drop the `perf-base` branch in a follow-up PR once the change is on main.
+/// 1. keep the old call under `#[cfg(perf_base)]` and put the new call under
+///    `#[cfg(not(perf_base))]`, doing the same work on the same input, e.g.
+///    ```ignore
+///    #[cfg(perf_base)]
+///    use crate::sas_lexer::lex_program;
+///    #[cfg(not(perf_base))]
+///    use crate::sas_lexer::lex_source as lex_program;
+///    ```
+/// 2. drop the `perf_base` branch in a follow-up PR once the change is on main.
+///
+/// The `perf_base` side is only compiled by `just perf-check` (CI's perf job), so check
+/// it locally with `SAS_LEXER_PERF_BASE=1 cargo check -p sas-lexer-perf --benches` on a
+/// checkout of the base, or just run `just perf-check`.
 ///
 /// A brand-new entry point with no base equivalent isn't comparable: benchmark it in a
 /// follow-up PR once it exists on main, rather than skipping the gate.
