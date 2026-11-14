@@ -45,7 +45,7 @@ impl LineIdx {
     }
 }
 
-/// Enum representing varios types of extra data associated with a token.
+/// Enum representing various types of extra data associated with a token.
 #[derive(Debug, PartialEq, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(Serialize))]
 #[cfg_attr(feature = "serde", serde(untagged))]
@@ -154,13 +154,13 @@ impl TokenInfo {
 /// Specifies minimal initial capacity of `token_infos` & `line_infos` vectors
 const MIN_CAPACITY: usize = 4;
 
-/// Heursitic for determining an optimal initial capactiy for `line_infos` vector
+/// Heuristic for determining an optimal initial capactiy for `line_infos` vector
 const LINE_INFO_CAPACITY_DIVISOR: usize = 20;
 
-/// Heursitic for determining an optimal initial capactiy for `token_infos` vector
+/// Heuristic for determining an optimal initial capactiy for `token_infos` vector
 const TOKEN_INFO_CAPACITY_DIVISOR: usize = 3;
 
-/// Heursitic for determining an optimal initial capactiy for unescaped string literals vector
+/// Heuristic for determining an optimal initial capactiy for unescaped string literals vector
 /// I didn't do a scientific test of the frequency of quote usage, but between
 /// %nrstr, %str, 'string with '' quote', "string with "" quote" and the fact
 /// that one occurrence of smth. like %% inside %nrstr will put the whole contents
