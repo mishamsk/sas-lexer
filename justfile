@@ -213,8 +213,10 @@ perf-check $base="origin/main":
         if [ "$cfg" = macro_sep ]; then features=(--features macro_sep); fi
         home="$out/gungraun-$cfg"
         echo "::group::perf-check: base ${base_sha:0:10} [$cfg]"
+        # Same target dir as head: shared deps are built once, and both bench binaries get
+        # equally long paths (the path length shifts the initial stack and can change counts).
         (cd "$src" && cargo bench -p sas-lexer-perf --bench lexer "${features[@]}" \
-            --target-dir "$root/target/perf-base" -- --home="$home" --save-baseline=base)
+            --target-dir "$root/target" -- --home="$home" --save-baseline=base)
         echo "::endgroup::"
         echo "::group::perf-check: head $head_desc [$cfg]"
         cargo bench -p sas-lexer-perf --bench lexer --locked "${features[@]}" -- \
