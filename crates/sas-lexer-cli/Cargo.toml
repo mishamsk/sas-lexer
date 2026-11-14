@@ -35,3 +35,7 @@ polars = ["dep:polars"]
 
 [package.metadata.release]
 release = false
+
+# TODO: inherit the workspace lints (`[lints] workspace = true`) once its 63 clippy findings
+# (mostly print_stdout/eprintln, casts, unwrap) are fixed. Empty table = explicit opt-out.
+[lints]
