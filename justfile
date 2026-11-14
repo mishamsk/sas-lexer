@@ -43,9 +43,11 @@ ruff:
 udeps:
     cargo +{{ nightly }} udeps --workspace --all-features --release
 
-# Check declared per-package MSRVs over the feature powerset (CI "Check MSRV").
+# Check declared per-package MSRVs (CI "Check MSRV"): the public crates over the feature
+# powerset, then the private Python binding crate, whose floor PyO3 sets (needs a Python 3.11+).
 msrv:
     cargo hack check --feature-powerset --locked --rust-version --ignore-private --workspace --all-targets --skip opti_stats
+    cargo hack check --locked --rust-version --package sas-lexer-py --all-targets
 
 # ---------------------------------------------------------------------------
 # Build

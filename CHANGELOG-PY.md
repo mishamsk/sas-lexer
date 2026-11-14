@@ -9,19 +9,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [Unreleased] - ReleaseDate
 
 ### Added
--
+- 🛠️ Support for Python 3.13, 3.14 and 3.15. Wheels are built for CPython 3.11–3.15 on all supported platforms.
 
 ### Changed
--
+- 🛠️ The Python bindings are now built with PyO3 0.30 (was 0.22) and maturin 1.16.
 
 ### Deprecated
 -
 
 ### Removed
--
+- 💥 Dropped support for Python 3.10, which reached end of life on 2026-10-01. Python 3.11 is now the minimum supported version. This is a breaking change: Python 3.10 environments will not install this or later releases.
 
 ### Fixed
--
+- 🛠️ The source distribution was missing the Python binding crate's `Cargo.toml` and the `Cargo.lock`, so it could not be built. It now builds and installs from source.
 
 ### Security
 -

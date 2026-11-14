@@ -40,10 +40,10 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
-      # The runner's default Python (3.14) is newer than PyO3 0.22 supports.
+      # PyO3 builds against this Python: pin a supported minor rather than the runner default.
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.12"
+          python-version: "3.11"
       - name: Install Rust
         uses: ./.github/actions/setup-rust
       - uses: Swatinem/rust-cache@v2
@@ -59,10 +59,10 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
-      # The runner's default Python (3.14) is newer than PyO3 0.22 supports.
+      # PyO3 builds against this Python: pin a supported minor rather than the runner default.
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.12"
+          python-version: "3.11"
       # The dated nightly is pinned once, in the justfile (`nightly := ...`).
       - name: Read nightly pin
         id: nightly
@@ -88,6 +88,10 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@v7
+    # The binding crate's MSRV check builds PyO3 against this Python.
+    - uses: actions/setup-python@v7
+      with:
+        python-version: "3.11"
     - name: Install Rust
       uses: ./.github/actions/setup-rust
     - uses: Swatinem/rust-cache@v2
@@ -181,10 +185,13 @@ jobs:
           - ubuntu-latest
           - windows-latest
           - macos-latest
+        # Supported CPython minors; keep in sync with pyproject.toml and build-py-wheels.yml.
         python-version:
-          - "3.10"
           - "3.11"
           - "3.12"
+          - "3.13"
+          - "3.14"
+          - "3.15"
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7

@@ -4,7 +4,9 @@ description = "Python bindings for sas-lexer crate."
 authors = { workspace = true }
 edition = { workspace = true }
 repository = { workspace = true }
-rust-version = { workspace = true }
+# PyO3 0.30 requires Rust 1.85. This crate is private (publish = false), so it does not
+# constrain the public crates, which keep the workspace MSRV.
+rust-version = "1.85"
 version = "1.0.0-beta.2"
 license = { workspace = true }
 keywords = { workspace = true }
@@ -17,7 +19,7 @@ crate-type = ["cdylib"]
 
 
 [dependencies]
-pyo3 = "0.22.2"
+pyo3 = "0.30.1"
 rmp-serde = { workspace = true }
 sas-lexer = { version = "1.0.0-beta.4", features = ["serde", "macro_sep"] }
 serde_bytes = "0.11.15"
