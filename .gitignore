@@ -2,8 +2,6 @@
 /target
 profile.json
 
-# Taskfile
-.task
 
 # Environments
 .env

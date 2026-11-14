@@ -29,7 +29,10 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install Rust
         uses: ./.github/actions/setup-rust
-      - run: cargo fmt --all --check
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+      - run: just fmt-check
 
   cargo-clippy:
     name: "cargo clippy"
@@ -44,8 +47,11 @@ jobs:
       - name: Install Rust
         uses: ./.github/actions/setup-rust
       - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
       - name: "Clippy"
-        run: cargo clippy --workspace --all-features --locked -- -D warnings
+        run: just clippy
 
   cargo-udeps:
     name: "cargo udeps"
@@ -64,9 +70,9 @@ jobs:
       - name: "Install cargo udeps"
         uses: taiki-e/install-action@v2
         with:
-          tool: cargo-udeps
+          tool: cargo-udeps,just
       - name: "Udeps release"
-        run: cargo +nightly-2025-12-30 udeps --workspace --all-features --release
+        run: just udeps
 
   msrv:
     name: "Check MSRV"
@@ -77,16 +83,11 @@ jobs:
     - name: Install Rust
       uses: ./.github/actions/setup-rust
     - uses: Swatinem/rust-cache@v2
-    - uses: taiki-e/install-action@cargo-hack
+    - uses: taiki-e/install-action@v2
+      with:
+        tool: cargo-hack,just
     - name: Default features
-      run: "cargo hack check
-        --feature-powerset
-        --locked
-        --rust-version
-        --ignore-private
-        --workspace
-        --all-targets
-        --skip opti_stats"
+      run: just msrv
 
   # Rust tests for supported platforms.
   test-rust:
@@ -108,7 +109,7 @@ jobs:
             os: windows-latest
             rust: stable
     env:
-      TEST_TARGET: ${{ matrix.build == 'stable' && '--all-targets' || '--lib' }}
+      TEST_TARGET: ${{ matrix.build == 'stable' && 'all-targets' || 'lib' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -128,16 +129,16 @@ jobs:
         if: matrix.rust == 'nightly'
         shell: bash
         run: echo "RUSTUP_TOOLCHAIN=nightly-2025-12-30" >> "$GITHUB_ENV"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
       - name: Basic build
-        run: cargo build --verbose
+        run: just build
       - name: Build docs
-        run: cargo doc --verbose
-      - name: Tests docs
-        run: cargo test -p sas-lexer --doc
-      - name: Tests with default features
-        run: cargo test -p sas-lexer $TEST_TARGET
-      - name: Tests with macro_sep, serde features
-        run: cargo test -p sas-lexer $TEST_TARGET --features macro_sep --features serde
+        run: just doc
+      # Doc tests, then tests with default features, then with macro_sep, serde.
+      - name: Tests
+        run: just test-rust ${{ env.TEST_TARGET }}
 
   # Python linting / formatting.
   ruff:
@@ -176,7 +177,8 @@ jobs:
         uses: ./.github/actions/setup-rust
       - name: Install uv
         uses: astral-sh/setup-uv@v7
-      - name: Sync & build project
-        run: uv sync --no-editable --locked
-      - name: Run tests
-        run: uv run pytest
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+      - name: Sync, build project & run tests
+        run: just test-python-ci
