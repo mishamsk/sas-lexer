@@ -13,6 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 - 🛠️ The Python bindings are now built with PyO3 0.30 (was 0.22) and maturin 1.16.
+- 🛠️ The minimum msgspec version now depends on the Python version (0.18.0 on 3.11, 0.18.3 on 3.12, 0.19.0 on 3.13, 0.20.0 on 3.14, 0.22.0 on 3.15): the first release with wheels for that Python.
 
 ### Deprecated
 -
