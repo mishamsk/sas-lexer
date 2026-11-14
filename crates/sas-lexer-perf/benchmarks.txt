@@ -1,0 +1,11 @@
+# Benchmarks gated by `just perf-check`, as `function/id` (see benches/lexer.rs).
+# The check is INVALID unless the base and head runs of every feature config produce
+# exactly this set, so adding or removing a benchmark is always a visible, intentional
+# change to this file.
+lex/real
+lex/macros
+lex/strings
+lex/comments
+lex/datalines
+lex/numerics
+lex_resolve/real

@@ -145,11 +145,12 @@ All dev tasks are [just](https://github.com/casey/just) recipes, and CI calls th
 
 ### Performance regression guard
 
-Every PR runs `.github/workflows/perf.yml`. It builds the lexer at the PR base and at the PR head in the same job and runs the [gungraun](https://github.com/gungraun/gungraun) (Valgrind/Callgrind) benchmarks from `crates/sas-lexer-perf` against both. The benchmarks lex a real-world corpus plus deterministic synthetic inputs (macro, strings, comments, datalines, numerics), with default features and with `macro_sep`. Instruction counts and estimated cycles are deterministic, so runner noise doesn't affect them. The check fails if any benchmark gets ≥ 10% worse, and the comparison table goes to the job summary.
+Every PR runs `.github/workflows/perf.yml`. It builds the lexer at the PR base and at the PR head in the same job and runs the [gungraun](https://github.com/gungraun/gungraun) (Valgrind/Callgrind) benchmarks from `crates/sas-lexer-perf` against both. The benchmarks lex a real-world corpus plus deterministic synthetic inputs (macro, strings, comments, datalines, numerics), with default features and with `macro_sep`. Instruction counts and estimated cycles are deterministic, so runner noise doesn't affect them. The check fails if any benchmark gets ≥ 10% worse, and the comparison table goes to the job summary. It also fails, as INVALID, if any expected measurement is missing. The gated benchmark list is `crates/sas-lexer-perf/benchmarks.txt`.
 
-- `just perf-check <base-ref>` runs the same check locally: it compares `<base-ref>` with the working tree. The base is built in a throwaway git worktree with this branch's benchmark harness. It needs Linux, `valgrind` and `gungraun-runner` (same version as the `gungraun` dev-dependency). `PERF_THRESHOLD=5 just perf-check ...` sets a different threshold.
+- `just perf-check <base-ref>` runs the same check locally: it compares `<base-ref>` with the working tree. The base is built in a throwaway git worktree with this branch's benchmark harness. It needs Linux, Valgrind 3.26 (as on the `ubuntu-26.04` CI runner) and `gungraun-runner` (same version as the `gungraun` dev-dependency). `PERF_THRESHOLD=5 just perf-check ...` sets a different threshold.
 - On macOS, `just perf-docker perf-check <base-ref>` runs it in a Linux container (needs Docker).
-- `just perf-bench` runs the Callgrind benchmarks alone. `just perf-profile`, `just perf-cur` and `just perf-compare` are wall-clock tools for local tuning.
+- `just perf-test` checks the benchmark inputs and the gate logic. `just perf-bench` runs the Callgrind benchmarks alone. `just perf-profile`, `just perf-cur` and `just perf-compare` are wall-clock tools for local tuning.
+- PRs that change the lexer API used by the benchmarks must adapt `sas_lexer_perf::api`, which has to compile against both the base and the head. The module docs describe the `perf-base` feature pattern for this.
 
 ## License
 

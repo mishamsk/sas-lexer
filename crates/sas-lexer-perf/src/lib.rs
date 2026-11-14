@@ -7,6 +7,9 @@
 //!
 //! Each synthetic input stresses one area of the lexer, so a regression in that area
 //! is not diluted by the rest of the corpus.
+//!
+//! The benchmarks call the lexer only through [`api`], so a PR that changes the
+//! lexer API has a single place to adapt (see the module docs).
 
 use std::fmt::Write as _;
 use std::fs::File;
@@ -17,6 +20,42 @@ use zip::ZipArchive;
 
 /// The lexer under test. The `macro_sep` feature of this crate enables the same lexer feature.
 pub use sas_lexer;
+
+/// The only calls into the lexer that the benchmarks make (the timed workload).
+///
+/// `just perf-check` builds this crate from HEAD against both the base and the head
+/// lexer, so this module must compile against both. The base build always enables the
+/// `perf-base` feature. When a PR changes the lexer API used here:
+///
+/// 1. keep the old call under `#[cfg(feature = "perf-base")]` and add the new call under
+///    `#[cfg(not(feature = "perf-base"))]`, doing the same work on the same input;
+/// 2. drop the `perf-base` branch in a follow-up PR once the change is on main.
+///
+/// A brand-new entry point with no base equivalent isn't comparable: benchmark it in a
+/// follow-up PR once it exists on main, rather than skipping the gate.
+pub mod api {
+    use crate::sas_lexer::lex_program;
+
+    /// Lexes `source`; returns the token plus error count.
+    ///
+    /// # Panics
+    /// Panics if the source can't be lexed at all (larger than 4 GB).
+    #[must_use]
+    pub fn lex(source: &str) -> usize {
+        let result = lex_program(&source).expect("lexing failed");
+        result.buffer.token_count() as usize + result.errors.len()
+    }
+
+    /// Lexes `source` and resolves every token, as the Python binding does.
+    ///
+    /// # Panics
+    /// Panics if the source can't be lexed at all (larger than 4 GB).
+    #[must_use]
+    pub fn lex_resolve(source: &str) -> usize {
+        let result = lex_program(&source).expect("lexing failed");
+        result.buffer.into_resolved_token_vec().len()
+    }
+}
 
 /// Approximate size of each synthetic input.
 const SYNTHETIC_TARGET_BYTES: usize = 128 * 1024;
@@ -45,6 +84,10 @@ pub fn read_sas_files_from_zip<P: AsRef<Path>>(path: P) -> io::Result<String> {
             file.read_to_end(&mut contents)?;
             if let Ok(contents) = String::from_utf8(contents) {
                 combined.push_str(&contents);
+                // Keep file boundaries: some files lack a trailing newline.
+                if !combined.ends_with('\n') {
+                    combined.push('\n');
+                }
             }
         }
     }
@@ -277,6 +320,8 @@ pub fn synthetic_numerics() -> String {
 mod tests {
     use super::*;
     use sas_lexer::lex_program;
+
+    // `lex/*` benchmark inputs that must stay large and error-free.
 
     #[test]
     fn synthetic_inputs_are_valid_sas() {
