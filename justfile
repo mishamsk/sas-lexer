@@ -241,7 +241,8 @@ perf-check $base="origin/main":
         echo "::group::perf-check: base ${base_sha:0:10} [$cfg]"
         # Same target dir as head: shared deps are built once, and both bench binaries get
         # equally long paths (the path length shifts the initial stack and can change counts).
-        (cd "$src" && cargo bench -p sas-lexer-perf --bench lexer "${features[@]}" --features perf-base \
+        # SAS_LEXER_PERF_BASE=1 selects the base side of `sas_lexer_perf::api` (cfg(perf_base)).
+        (cd "$src" && SAS_LEXER_PERF_BASE=1 cargo bench -p sas-lexer-perf --bench lexer "${features[@]}" \
             --target-dir "$root/target" -- --home="$home" --save-baseline=base --output-format=json) \
             > "$out/$cfg.base.jsonl"
         echo "::endgroup::"
