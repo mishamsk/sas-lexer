@@ -33,10 +33,11 @@ lint:
 lint-fix:
     cargo clippy --fix --allow-dirty --allow-staged --workspace --all-features --locked -- -D warnings
 
-# Python lint and format check (CI "ruff"). Ruff version matches uv.lock and the pre-commit hook.
+# Python lint and format check (CI "ruff"). Runs the locked Ruff from the dev group (matches the
+# pre-commit hook rev) without building the extension.
 ruff:
-    uvx ruff@0.14.10 check src
-    uvx ruff@0.14.10 format --check src
+    uv run --locked --only-group dev ruff check src
+    uv run --locked --only-group dev ruff format --check src
 
 # Unused dependencies, on the pinned nightly (CI "cargo udeps").
 udeps:

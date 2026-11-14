@@ -108,9 +108,7 @@ fn main() {
 ```python
 from sas_lexer import lex_program_from_str
 
-tokens, errors, str_lit_buf = lex_program_from_str(
-    "data mydata; set mydataset; run;"
-)
+tokens, errors, str_lit_buf = lex_program_from_str("data mydata; set mydataset; run;")
 
 for token in tokens:
     print(token)

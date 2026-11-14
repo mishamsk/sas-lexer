@@ -25,15 +25,21 @@ jobs:
       # Used to generate artifact attestation
       attestations: write
     steps:
+      # Needed so setup-uv can read the pinned uv version from pyproject.toml.
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - name: "Install uv"
-        uses: astral-sh/setup-uv@v7
-      - uses: actions/download-artifact@v4
+        uses: astral-sh/setup-uv@v10.3.3
+        with:
+          version-file: pyproject.toml
+      - uses: actions/download-artifact@v8
         with:
           pattern: wheels-*
           path: wheels
           merge-multiple: true
       - name: Generate artifact attestation
-        uses: actions/attest-build-provenance@v1
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: "wheels/*"
       - name: Publish to PyPi
@@ -52,7 +58,7 @@ jobs:
           echo "current_version=${GITHUB_REF#refs/tags/py-v}" >> $GITHUB_OUTPUT
         shell: bash
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Get Changelog Entry
         id: changelog_reader
@@ -62,7 +68,7 @@ jobs:
           version: ${{ steps.tag_name.outputs.current_version }}
           path: ./CHANGELOG-PY.md
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: wheels-*
           path: wheels

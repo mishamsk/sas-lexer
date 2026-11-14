@@ -30,12 +30,12 @@ dependencies = ["msgspec>=0.18.0"]
 
 [dependency-groups]
 dev = [
-    "prek>=0.2.25,<0.3",
+    "prek>=0.5.10,<0.6",
     "py-anycase>=0.1.0,<0.2",
     "pytest>=9.0.2,<9.1",
-    "ruff>=0.14.10,<0.15",
+    "ruff==0.17.5",
     "ty>=0.0.8",
-    "uv>=0.9.18,<0.10",
+    "uv==0.13.8",
 ]
 
 [tool.maturin]
@@ -55,7 +55,24 @@ exclude = [
 ]
 
 [tool.uv]
-cache-keys = [{ file = "crates/sas-lexer-py/Cargo.toml" }]
+# Single source of truth for the uv version: CI (setup-uv version-file) reads it too, and the
+# uv dev dependency and the uv-pre-commit hook rev must match it.
+required-version = "==0.13.8"
+# Replaces uv's defaults, so pyproject.toml is listed explicitly. Everything that goes into the
+# extension build must be here, otherwise `uv sync` reuses a stale cached build. The generated
+# src/sas_lexer/*.py files (written by build.rs) are deliberately NOT listed: they would
+# invalidate the cache on every build.
+cache-keys = [
+    { file = "pyproject.toml" },
+    { file = "Cargo.toml" },
+    { file = "Cargo.lock" },
+    { file = "rust-toolchain.toml" },
+    { file = "crates/*/Cargo.toml" },
+    { file = "crates/*/build.rs" },
+    { file = "crates/sas-lexer/**/*.rs" },
+    { file = "crates/sas-lexer-macro/**/*.rs" },
+    { file = "crates/sas-lexer-py/**/*.rs" },
+]
 
 [tool.ruff]
 line-length = 100

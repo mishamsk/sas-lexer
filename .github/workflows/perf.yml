@@ -36,7 +36,7 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # The base commit must be available to build it in a worktree.
           fetch-depth: 0
@@ -87,7 +87,9 @@ jobs:
         with:
           tool: just,gungraun-runner@${{ steps.gungraun.outputs.version }}
       - name: Install uv
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@v10.3.3
+        with:
+          version-file: pyproject.toml
       # Benchmark inputs are still large and error-free, and the gate logic fails closed.
       - name: Validate the perf harness
         run: just perf-test

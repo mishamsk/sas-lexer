@@ -17,9 +17,15 @@ jobs:
       # For PyPI's trusted publishing.
       id-token: write
     steps:
+      # Needed so setup-uv can read the pinned uv version from pyproject.toml.
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - name: "Install uv"
-        uses: astral-sh/setup-uv@v7
-      - uses: actions/download-artifact@v4
+        uses: astral-sh/setup-uv@v10.3.3
+        with:
+          version-file: pyproject.toml
+      - uses: actions/download-artifact@v8
         with:
           pattern: wheels-*
           path: wheels

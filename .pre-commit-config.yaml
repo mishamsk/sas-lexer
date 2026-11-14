@@ -20,7 +20,7 @@ repos:
   # Python hooks
   - repo: https://github.com/astral-sh/ruff-pre-commit
     # Ruff version.
-    rev: v0.14.10
+    rev: v0.17.5
     hooks:
       # Run the linter.
       - id: ruff-check
@@ -31,7 +31,7 @@ repos:
       - id: ruff-format
   - repo: https://github.com/astral-sh/uv-pre-commit
     # uv version.
-    rev: 0.9.19
+    rev: 0.13.8
     hooks:
       # Check the uv lockfile
       - id: uv-lock
