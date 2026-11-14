@@ -31,7 +31,9 @@ env:
 jobs:
   perf-check:
     name: "perf check (callgrind)"
-    runs-on: ubuntu-latest
+    # Pinned image: its apt Valgrind must match `perf_valgrind` in the justfile, and the
+    # perf Docker image (crates/sas-lexer-perf/Dockerfile) uses the same distribution.
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -53,12 +55,25 @@ jobs:
             push) base="$PUSH_BEFORE" ;;
             *) base="$INPUT_BASE" ;;
           esac
-          if [ -z "$base" ] || ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
-            echo "No usable base commit ('$base'); skipping the comparison." | tee -a "$GITHUB_STEP_SUMMARY"
+          # The only legitimate "no base": the first push of a new branch/history.
+          if [ "$EVENT" = push ] && [ "$base" = 0000000000000000000000000000000000000000 ]; then
+            echo "Push has no predecessor commit (new branch or history); nothing to compare." | tee -a "$GITHUB_STEP_SUMMARY"
             echo "sha=" >> "$GITHUB_OUTPUT"
-          else
-            echo "sha=$(git rev-parse "${base}^{commit}")" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+          if [ -z "$base" ]; then
+            echo "::error::No base commit for event '$EVENT'."
+            exit 1
+          fi
+          # E.g. a force-push to main can leave the old tip outside the checkout: fetch it.
+          if ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            git fetch --no-tags origin "$base" || true
+          fi
+          if ! sha="$(git rev-parse --verify --end-of-options "${base}^{commit}")"; then
+            echo "::error::Base '$base' is not available; refusing to report a pass without a comparison."
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
       - name: Read gungraun version
         id: gungraun
         shell: bash
@@ -73,6 +88,9 @@ jobs:
           tool: just,gungraun-runner@${{ steps.gungraun.outputs.version }}
       - name: Install uv
         uses: astral-sh/setup-uv@v7
+      # Benchmark inputs are still large and error-free, and the gate logic fails closed.
+      - name: Validate the perf harness
+        run: just perf-test
       - name: Compare base vs head
         if: steps.base.outputs.sha != ''
         run: just perf-check ${{ steps.base.outputs.sha }}

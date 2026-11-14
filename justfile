@@ -102,8 +102,9 @@ test-python-ci *args:
 # All tests: Rust doc/unit/integration, then Python.
 test: test-rust test-python
 
-# Run everything CI runs, locally, with the same recipes as the CI jobs.
-ci: fmt-check clippy udeps msrv ruff build doc test-rust test-python-ci
+# Run everything CI runs, locally, with the same recipes as the CI jobs (except the
+# Linux-only `perf-check` gate; run `just perf-check` or `just perf-docker perf-check` for it).
+ci: fmt-check clippy udeps msrv ruff build doc test-rust test-python-ci perf-test
 
 # ---------------------------------------------------------------------------
 # Python environment
@@ -177,6 +178,8 @@ clean: clean-all-caches clean-test
 
 # Fail the check when a gated metric (instructions, estimated cycles) is this much (%) worse.
 perf_threshold := env("PERF_THRESHOLD", "10")
+# Valgrind major.minor that CI (ubuntu-26.04) and the perf Docker image ship; perf-check refuses others.
+perf_valgrind := "3.26"
 perf_image := "sas-lexer-perf:local"
 
 # Run the Callgrind benchmarks for the working tree, both feature configs. Extra args go to gungraun.
@@ -186,13 +189,34 @@ perf-bench *args:
     cargo bench -p sas-lexer-perf --bench lexer -- --home="{{ justfile_directory() }}/target/gungraun/default" "$@"
     cargo bench -p sas-lexer-perf --bench lexer --features macro_sep -- --home="{{ justfile_directory() }}/target/gungraun/macro_sep" "$@"
 
+# Validate the perf harness: benchmark inputs (both feature configs) and the report/gate logic.
+perf-test:
+    cargo test -p sas-lexer-perf --lib --locked
+    cargo test -p sas-lexer-perf --lib --locked --features macro_sep
+    uv run --no-project --directory crates/sas-lexer-perf python -m unittest -v test_report
+
 # Regression gate: the lexer at `base` vs the working tree, same harness and inputs. Fails on >= perf_threshold% regressions.
 [unix]
 perf-check $base="origin/main":
     #!/usr/bin/env bash
     set -euo pipefail
     root="{{ justfile_directory() }}"
+    perf="$root/crates/sas-lexer-perf"
     out="$root/target/perf-check"
+    configs=(default macro_sep)
+    # Nothing from the environment (or .env) may filter or reconfigure the gated runs.
+    while IFS= read -r var; do unset "$var"; done < <(compgen -e | grep '^GUNGRAUN_' || true)
+    # Tool versions: the runner must match the gungraun crate, valgrind the pinned major.minor.
+    gungraun="$(sed -n 's/^gungraun = "=\(.*\)"$/\1/p' "$perf/Cargo.toml")"
+    runner="$(gungraun-runner --version | awk '{print $2}')"
+    valgrind="$(valgrind --version | sed 's/^valgrind-//')"
+    if [ "$runner" != "$gungraun" ]; then
+        echo "gungraun-runner $runner does not match the gungraun crate $gungraun" >&2; exit 2
+    fi
+    case "$valgrind" in
+        "{{ perf_valgrind }}" | "{{ perf_valgrind }}".*) ;;
+        *) echo "valgrind $valgrind, expected {{ perf_valgrind }}.x (update perf_valgrind with the CI image)" >&2; exit 2 ;;
+    esac
     base_sha="$(git rev-parse --verify --end-of-options "${base}^{commit}")"
     head_desc="$(git rev-parse --short HEAD)$(git diff --quiet HEAD -- || echo '+dirty')"
     rm -rf "$out"
@@ -204,30 +228,35 @@ perf-check $base="origin/main":
     git worktree add --detach "$src" "$base_sha"
     # Measure the base library with HEAD's harness and inputs, so both sides run identical
     # benchmarks (this also works when the base has no perf crate yet). The base keeps its own
-    # Cargo.lock and profiles, so dependency or profile changes in the PR are measured too.
+    # toolchain, profiles and Cargo.lock; its build is unlocked, so the harness's own deps may
+    # be added to (or bump build-time deps in) the base lock. See `sas_lexer_perf::api` for
+    # PRs that change the lexer API.
     rm -rf "$src/crates/sas-lexer-perf"
-    cp -R "$root/crates/sas-lexer-perf" "$src/crates/sas-lexer-perf"
-    results=()
-    for cfg in default macro_sep; do
+    cp -R "$perf" "$src/crates/sas-lexer-perf"
+    report_args=()
+    for cfg in "${configs[@]}"; do
         features=()
         if [ "$cfg" = macro_sep ]; then features=(--features macro_sep); fi
         home="$out/gungraun-$cfg"
         echo "::group::perf-check: base ${base_sha:0:10} [$cfg]"
         # Same target dir as head: shared deps are built once, and both bench binaries get
         # equally long paths (the path length shifts the initial stack and can change counts).
-        (cd "$src" && cargo bench -p sas-lexer-perf --bench lexer "${features[@]}" \
-            --target-dir "$root/target" -- --home="$home" --save-baseline=base)
+        (cd "$src" && cargo bench -p sas-lexer-perf --bench lexer "${features[@]}" --features perf-base \
+            --target-dir "$root/target" -- --home="$home" --save-baseline=base --output-format=json) \
+            > "$out/$cfg.base.jsonl"
         echo "::endgroup::"
         echo "::group::perf-check: head $head_desc [$cfg]"
         cargo bench -p sas-lexer-perf --bench lexer --locked "${features[@]}" -- \
-            --home="$home" --baseline=base --output-format=json > "$out/$cfg.jsonl"
+            --home="$home" --baseline=base --output-format=json > "$out/$cfg.head.jsonl"
         echo "::endgroup::"
-        results+=("$cfg=$out/$cfg.jsonl")
+        report_args+=(--config "$cfg" "$out/$cfg.base.jsonl" "$out/$cfg.head.jsonl")
     done
-    uv run --no-project "$root/crates/sas-lexer-perf/report.py" \
+    uv run --no-project "$perf/report.py" \
         --threshold "{{ perf_threshold }}" --output "$out/summary.md" \
+        --expected "$perf/benchmarks.txt" --expect-configs "${configs[@]}" \
         --title "Performance check: base \`${base_sha:0:10}\` vs head \`$head_desc\`" \
-        "${results[@]}"
+        --note "Tools: valgrind $valgrind, gungraun $gungraun, base $(cd "$src" && rustc --version), head $(rustc --version)." \
+        "${report_args[@]}"
 
 # Build the Linux image used by the -docker perf recipes (pinned Rust, valgrind, gungraun-runner).
 [unix]

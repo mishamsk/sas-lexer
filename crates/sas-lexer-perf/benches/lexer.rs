@@ -12,8 +12,8 @@ use gungraun::{
     library_benchmark, library_benchmark_group, main, Callgrind, LibraryBenchmarkConfig,
 };
 use sas_lexer_perf::{
-    real_corpus, sas_lexer::lex_program, synthetic_comments, synthetic_datalines, synthetic_macro,
-    synthetic_numerics, synthetic_strings,
+    api, real_corpus, synthetic_comments, synthetic_datalines, synthetic_macro, synthetic_numerics,
+    synthetic_strings,
 };
 
 // `lex_program` alone: the core lexer hot path.
@@ -25,16 +25,14 @@ use sas_lexer_perf::{
 #[bench::datalines(setup = synthetic_datalines)]
 #[bench::numerics(setup = synthetic_numerics)]
 fn lex(source: String) -> usize {
-    let result = lex_program(black_box(&source)).expect("lexing failed");
-    black_box(result.buffer.token_count() as usize + result.errors.len())
+    black_box(api::lex(black_box(&source)))
 }
 
 // `lex_program` plus resolving every token, as the Python binding does.
 #[library_benchmark]
 #[bench::real(setup = real_corpus)]
 fn lex_resolve(source: String) -> usize {
-    let result = lex_program(black_box(&source)).expect("lexing failed");
-    black_box(result.buffer.into_resolved_token_vec().len())
+    black_box(api::lex_resolve(black_box(&source)))
 }
 
 library_benchmark_group!(name = lexer, benchmarks = [lex, lex_resolve]);
