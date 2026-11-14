@@ -2,7 +2,11 @@
 # Same distribution as the CI perf job (runs-on: ubuntu-26.04), so both get the same apt
 # Valgrind; `just perf-check` refuses a Valgrind other than `perf_valgrind` in the justfile.
 # Rust and gungraun-runner versions come from rust-toolchain.toml and Cargo.toml (see
-# `just perf-docker-image`).
+# `just perf-docker-image`). The uv version comes from `[tool.uv] required-version` in
+# pyproject.toml, which every uv run in the container enforces.
+ARG UV_VERSION=0.13.8
+FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv
+
 FROM ubuntu:26.04
 
 ARG RUST_VERSION=1.92.0
@@ -22,6 +26,6 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
 RUN cargo install gungraun-runner --version "${GUNGRAUN_VERSION}" --locked \
     && cargo install just --version "${JUST_VERSION}" --locked \
     && rm -rf /usr/local/cargo/registry
-COPY --from=ghcr.io/astral-sh/uv:0.13.7 /uv /usr/local/bin/uv
+COPY --from=uv /uv /usr/local/bin/uv
 # The repository is bind-mounted with the host's ownership.
 RUN git config --system --add safe.directory '*'

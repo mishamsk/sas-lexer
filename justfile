@@ -255,6 +255,7 @@ perf-check $base="origin/main":
 perf-docker-image:
     docker build -t {{ perf_image }} \
         --build-arg RUST_VERSION="$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)" \
+        --build-arg UV_VERSION="$(sed -n 's/^required-version = "==\(.*\)"$/\1/p' pyproject.toml)" \
         --build-arg GUNGRAUN_VERSION="$(sed -n 's/^gungraun = "=\(.*\)"$/\1/p' crates/sas-lexer-perf/Cargo.toml)" \
         crates/sas-lexer-perf
 
