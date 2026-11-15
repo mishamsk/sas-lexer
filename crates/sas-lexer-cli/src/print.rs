@@ -2,7 +2,7 @@ use sas_lexer::error::ErrorInfo;
 /// Functions to print the token
 use sas_lexer::{Payload, ResolvedTokenInfo};
 use std::cmp::Ordering;
-use std::io::Write;
+use std::io::{self, Write};
 
 pub(crate) fn get_token_raw_text(token: &ResolvedTokenInfo, source: &str) -> String {
     let token_start = token.start as usize;
@@ -99,10 +99,10 @@ pub(crate) fn error_to_string(
     let last_token_str = match error.last_token() {
         Some(last_token_idx) => {
             let last_token_idx = last_token_idx.get() as usize;
-            tokens
-                .get(last_token_idx)
-                .map(|token| token_to_string(token, string_literals_buffer, source))
-                .unwrap_or("<invalid token idx>".to_string())
+            tokens.get(last_token_idx).map_or_else(
+                || "<invalid token idx>".to_string(),
+                |token| token_to_string(token, string_literals_buffer, source),
+            )
         }
         None => "<no last token>".to_string(),
     };
@@ -126,15 +126,15 @@ pub(crate) fn print_tokens(
     tokens: &Vec<ResolvedTokenInfo>,
     string_literals_buffer: &str,
     source: &str,
-) {
+) -> io::Result<()> {
     for token in tokens {
         writeln!(
             dst,
             "{}",
             token_to_string(token, string_literals_buffer, source)
-        )
-        .unwrap();
+        )?;
     }
+    Ok(())
 }
 
 pub(crate) fn print_errors(
@@ -144,13 +144,13 @@ pub(crate) fn print_errors(
     string_literals_buffer: &str,
     source: &str,
     context_lines: Option<usize>,
-) {
+) -> io::Result<()> {
     for error in errors {
         writeln!(
             dst,
             "{}",
             error_to_string(error, tokens, string_literals_buffer, source, context_lines)
-        )
-        .unwrap();
+        )?;
     }
+    Ok(())
 }

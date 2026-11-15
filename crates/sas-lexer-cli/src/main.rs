@@ -1,3 +1,9 @@
+#![allow(
+    clippy::print_stdout,
+    clippy::print_stderr,
+    reason = "a console tool: printing to stdout and stderr is its output"
+)]
+
 mod lex;
 mod print;
 mod stat;
@@ -111,7 +117,7 @@ fn main() -> io::Result<()> {
                                 // Never print tokens or errors if a folder is provided
                                 if let Some(durations) = lex_and_print(
                                     &contents,
-                                    LexPrintConfig {
+                                    &LexPrintConfig {
                                         print_file_name: *print_file_name,
                                         print_tokens: *print_tokens,
                                         print_token_totals: *print_totals,
@@ -122,7 +128,7 @@ fn main() -> io::Result<()> {
                                         context_lines: *context_lines,
                                     },
                                     Some(entry_path.display().to_string()),
-                                ) {
+                                )? {
                                     total_lex_duration += durations.lex_duration;
                                     total_gen_tok_vec_duration += durations.gen_tok_vec_duration;
                                 }
@@ -136,8 +142,9 @@ fn main() -> io::Result<()> {
 
                     if *print_durations {
                         // Print total time, file read time, lex time, and token generation time
-                        let file_read_time =
-                            total_time - total_lex_duration - total_gen_tok_vec_duration;
+                        let file_read_time = total_time
+                            .saturating_sub(total_lex_duration)
+                            .saturating_sub(total_gen_tok_vec_duration);
 
                         println!("Total time: {}ms", total_time.as_millis());
                         println!("File read time: {}ms", file_read_time.as_millis());
@@ -150,7 +157,7 @@ fn main() -> io::Result<()> {
                 } else if let Ok(contents) = fs::read_to_string(source_path) {
                     if let Some(dur) = lex_and_print(
                         &contents,
-                        LexPrintConfig {
+                        &LexPrintConfig {
                             print_file_name: *print_file_name,
                             print_tokens: *print_tokens,
                             print_token_totals: *print_totals,
@@ -161,13 +168,14 @@ fn main() -> io::Result<()> {
                             context_lines: *context_lines,
                         },
                         Some(source_path.display().to_string()),
-                    ) {
+                    )? {
                         let total_time = start.elapsed();
 
                         if *print_durations {
                             // Print total time, file read time, lex time, and token generation time
-                            let file_read_time =
-                                total_time - dur.lex_duration - dur.gen_tok_vec_duration;
+                            let file_read_time = total_time
+                                .saturating_sub(dur.lex_duration)
+                                .saturating_sub(dur.gen_tok_vec_duration);
 
                             println!("Total time: {}ms", total_time.as_millis());
                             println!("File read time: {}ms", file_read_time.as_millis());
@@ -192,7 +200,7 @@ fn main() -> io::Result<()> {
                         Ok(0) => {
                             lex_and_print(
                                 &buffer,
-                                LexPrintConfig {
+                                &LexPrintConfig {
                                     print_file_name: *print_file_name,
                                     print_tokens: *print_tokens,
                                     print_token_totals: *print_totals,
@@ -203,7 +211,7 @@ fn main() -> io::Result<()> {
                                     context_lines: *context_lines,
                                 },
                                 None,
-                            );
+                            )?;
 
                             buffer.clear();
                         }
@@ -222,7 +230,7 @@ fn main() -> io::Result<()> {
         } => gen_stats(
             samples,
             #[cfg(feature = "polars")]
-            output,
+            output.as_ref(),
             #[cfg(feature = "polars")]
             error_context_lines.unwrap_or(1),
         ),

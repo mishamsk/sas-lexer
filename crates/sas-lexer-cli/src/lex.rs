@@ -1,7 +1,7 @@
 use sas_lexer::{error::ErrorInfo, lex_program, LexResult, TokenizedBuffer};
 use std::panic::catch_unwind;
 use std::{
-    io::Write,
+    io::{self, Write},
     time::{Duration, Instant},
 };
 use strum::EnumMessage;
@@ -41,7 +41,7 @@ pub(crate) fn safe_lex(
                     println!("Panic occurred while lexing: {s}");
                 } else {
                     println!("Panic occurred, but can't read the message");
-                };
+                }
             }
 
             None
@@ -55,6 +55,10 @@ pub(super) struct LexDurations {
     pub(super) gen_tok_vec_duration: Duration,
 }
 
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "independent output toggles, one per CLI flag"
+)]
 pub(super) struct LexPrintConfig {
     pub(super) print_file_name: bool,
     pub(super) print_tokens: bool,
@@ -68,9 +72,9 @@ pub(super) struct LexPrintConfig {
 
 pub(super) fn lex_and_print(
     source: &String,
-    print_config: LexPrintConfig,
+    print_config: &LexPrintConfig,
     file_name: Option<String>,
-) -> Option<LexDurations> {
+) -> io::Result<Option<LexDurations>> {
     let source_str = if let Some(file_name) = file_name {
         format!("file: {file_name}")
     } else {
@@ -120,12 +124,12 @@ pub(super) fn lex_and_print(
                 let string_literals_buffer = tok_buffer.string_literals_buffer();
 
                 if print_config.print_tokens && !tokens.is_empty() {
-                    writeln!(lock, "Tokens:").unwrap();
-                    print_tokens(&mut lock, &tokens, string_literals_buffer, source);
+                    writeln!(lock, "Tokens:")?;
+                    print_tokens(&mut lock, &tokens, string_literals_buffer, source)?;
                 }
 
                 if print_config.print_errors && !errors.is_empty() {
-                    writeln!(lock, "Errors:").unwrap();
+                    writeln!(lock, "Errors:")?;
                     print_errors(
                         &mut lock,
                         &errors,
@@ -133,7 +137,7 @@ pub(super) fn lex_and_print(
                         string_literals_buffer,
                         source,
                         print_config.context_lines,
-                    );
+                    )?;
                 }
             }
 
@@ -151,10 +155,10 @@ pub(super) fn lex_and_print(
                 }
             }
 
-            Some(LexDurations {
+            Ok(Some(LexDurations {
                 lex_duration,
                 gen_tok_vec_duration,
-            })
+            }))
         }
         None => {
             if !print_config.print_file_name
@@ -163,7 +167,7 @@ pub(super) fn lex_and_print(
                 println!("During lexing {source_str}");
             }
 
-            None
+            Ok(None)
         }
     }
 }

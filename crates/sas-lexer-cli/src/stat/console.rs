@@ -12,6 +12,14 @@ use walkdir::WalkDir;
 use crate::lex::safe_lex;
 
 #[allow(clippy::cast_possible_truncation)]
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "byte, token and file counts are far below 2^52; the ratios are display-only"
+)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one linear pipeline: lex all files, aggregate, print the report"
+)]
 pub(super) fn gen_stats_for_console(samples: &PathBuf) {
     let all_files = WalkDir::new(samples)
         .into_iter()
@@ -38,7 +46,7 @@ pub(super) fn gen_stats_for_console(samples: &PathBuf) {
     pb.set_style(
         ProgressStyle::default_bar()
             .template("{msg} [{bar:40.cyan/blue}] {pos}/{len} ({eta})")
-            .unwrap()
+            .expect("static progress bar template is valid")
             .progress_chars("#>-"),
     );
 
@@ -73,7 +81,12 @@ pub(super) fn gen_stats_for_console(samples: &PathBuf) {
 
                         let unique_token_count = tok_buffer
                             .iter_tokens()
-                            .map(|t| tok_buffer.get_token_type(t).unwrap() as u32)
+                            .map(|t| {
+                                tok_buffer
+                                    .get_token_type(t)
+                                    .expect("iter_tokens yields indices within the buffer")
+                                    as u32
+                            })
                             .collect::<HashSet<_>>()
                             .len();
 
@@ -158,7 +171,7 @@ pub(super) fn gen_stats_for_console(samples: &PathBuf) {
         .zip(file_lex_duration)
         .filter_map(|(tokens, duration)| match (tokens, duration) {
             (Some(tokens), Some(duration)) => {
-                Some(tokens as f64 / duration.as_secs_f64() / 10_f64.powf(6.0))
+                Some(f64::from(tokens) / duration.as_secs_f64() / 10_f64.powf(6.0))
             }
             _ => None,
         })
@@ -181,28 +194,28 @@ pub(super) fn gen_stats_for_console(samples: &PathBuf) {
             .clone()
             .into_iter()
             .reduce(f64::max)
-            .unwrap(),
+            .unwrap_or(f64::NAN),
         bmin = file_lex_bytes_throughput
             .clone()
             .into_iter()
             .reduce(f64::min)
-            .unwrap(),
+            .unwrap_or(f64::NAN),
         mavg = file_lex_bytes_throughput.into_iter().sum::<f64>() / total_lexed as f64,
         tmax = file_lex_token_throughput
             .clone()
             .into_iter()
             .reduce(f64::max)
-            .unwrap(),
+            .unwrap_or(f64::NAN),
         tmin = file_lex_token_throughput
             .clone()
             .into_iter()
             .reduce(f64::min)
-            .unwrap(),
+            .unwrap_or(f64::NAN),
         tavg = file_lex_token_throughput.into_iter().sum::<f64>() / total_lexed as f64,
     );
 
     if let Some(file_name) = file_name_with_most_unique_tokens {
-        println!("File with most unique tokens: {file_name} ({most_unique_tokens} unique tokens)",);
+        println!("File with most unique tokens: {file_name} ({most_unique_tokens} unique tokens)");
     }
 
     // Error statistics
