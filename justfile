@@ -11,8 +11,8 @@ set dotenv-load
 # mise.toml and run via `mise x --`. Python tools (ruff, ty, pytest) come from the pyproject dev
 # group / uv.lock and run via `uv run`.
 
-# Dated nightly used for udeps and the nightly test job. Keep in sync with CI.
-nightly := "nightly-2025-12-30"
+# Dated nightly for udeps, pinned in rust-toolchain-nightly.toml (CI reads the same file).
+nightly := `sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain-nightly.toml`
 
 # ---------------------------------------------------------------------------
 # Formatting, linting, checks (same commands as CI)

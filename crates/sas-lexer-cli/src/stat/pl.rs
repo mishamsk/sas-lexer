@@ -18,17 +18,21 @@ use crate::{
     print::{get_error_context, get_string_literal, get_token_raw_text},
 };
 
-/// Debug function to print the schema of a DataFrame
-fn _print_schema(df_name: &str, df: &mut LazyFrame) {
-    println!("{} DataFrame schema:", df_name);
-    for col in df.collect_schema().unwrap().iter_fields() {
-        println!("{:?}", col);
+/// Debug function to print the schema of a `DataFrame`
+fn _print_schema(df_name: &str, df: &mut LazyFrame) -> PolarsResult<()> {
+    println!("{df_name} DataFrame schema:");
+    for col in df.collect_schema()?.iter_fields() {
+        println!("{col:?}");
     }
+    Ok(())
 }
 
 fn write_df_to_disk(df: &LazyFrame, path: &PathBuf) -> PolarsResult<()> {
     let file = fs::File::create(path)?;
-    let file_name = path.file_name().map(OsStr::to_string_lossy).unwrap();
+    let file_name = path
+        .file_name()
+        .map(OsStr::to_string_lossy)
+        .unwrap_or_default();
     let mut df = df.clone().collect()?;
     ParquetWriter::new(file)
         .finish(&mut df)
@@ -90,7 +94,7 @@ fn create_error_df(
         on_line.push(error.on_line());
         at_column.push(error.at_column());
 
-        last_token.push(error.last_token().map(|idx| idx.get()));
+        last_token.push(error.last_token().map(sas_lexer::TokenIdx::get));
         context.push(get_error_context(error, source, context_lines));
     }
 
@@ -167,7 +171,7 @@ fn create_token_df(
                     stop,
                 )));
             }
-        };
+        }
     }
 
     let df = DataFrame::new(vec![
@@ -192,8 +196,16 @@ fn create_token_df(
 }
 
 #[allow(clippy::cast_possible_truncation)]
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "file counts are far below 2^52; the ratios are display-only percentages"
+)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one linear pipeline: lex all files, build the frames, print the report"
+)]
 pub(super) fn gen_stats_with_polars(
-    output: &Option<PathBuf>,
+    output: Option<&PathBuf>,
     samples: &PathBuf,
     error_context_lines: usize,
 ) -> Result<(), PolarsError> {
@@ -222,7 +234,7 @@ pub(super) fn gen_stats_with_polars(
     pb.set_style(
         ProgressStyle::default_bar()
             .template("{msg} [{bar:40.cyan/blue}] {pos}/{len} ({eta})")
-            .unwrap()
+            .expect("static progress bar template is valid")
             .progress_chars("#>-"),
     );
 

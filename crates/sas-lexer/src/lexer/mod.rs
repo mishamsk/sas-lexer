@@ -277,15 +277,22 @@ impl Lexer<'_> {
         }
     }
 
+    // Hot path: called for nearly every token. The empty-stack recovery lives in the
+    // out-of-line `#[cold]` `recover_empty_mode_stack`.
     fn mode(&mut self) -> LexerMode {
         match self.mode_stack.last() {
             Some(mode) => mode.clone(),
-            None => {
-                self.emit_error(ErrorKind::InternalErrorEmptyModeStack);
-                self.push_mode(LexerMode::default());
-                LexerMode::default()
-            }
+            None => self.recover_empty_mode_stack(),
         }
+    }
+
+    /// Never expected: the mode stack always holds at least the initial mode.
+    #[cold]
+    #[inline(never)]
+    fn recover_empty_mode_stack(&mut self) -> LexerMode {
+        self.emit_error(ErrorKind::InternalErrorEmptyModeStack);
+        self.push_mode(LexerMode::default());
+        LexerMode::default()
     }
 
     // Pending stat stack manipulation
@@ -1287,7 +1294,7 @@ impl Lexer<'_> {
                 // Try parsing.
                 // Safety: we've checked above that the string is not empty
                 #[allow(clippy::indexing_slicing)]
-                if [b'x', b'X'].contains(&macro_string.as_bytes()[macro_string.len() - 1])
+                if b"xX".contains(&macro_string.as_bytes()[macro_string.len() - 1])
                     && macro_string.as_bytes()[0].is_ascii_digit()
                 {
                     // Try hex
@@ -1298,20 +1305,11 @@ impl Lexer<'_> {
                             token: (tok_type, payload),
                             length,
                             error,
-                        }) => {
-                            if error.is_none() && length.get() == macro_string.len() - 1 {
-                                self.emit_token(TokenChannel::DEFAULT, tok_type, payload);
-                            } else {
-                                // Emit as macro string
-                                self.emit_token(
-                                    TokenChannel::DEFAULT,
-                                    TokenType::MacroString,
-                                    Payload::None,
-                                );
-                            }
+                        }) if error.is_none() && length.get() == macro_string.len() - 1 => {
+                            self.emit_token(TokenChannel::DEFAULT, tok_type, payload);
                         }
-                        None => {
-                            // Emit as macro string
+                        _ => {
+                            // Not a complete, error-free number: emit as macro string
                             self.emit_token(
                                 TokenChannel::DEFAULT,
                                 TokenType::MacroString,
@@ -1326,20 +1324,11 @@ impl Lexer<'_> {
                             token: (tok_type, payload),
                             length,
                             error,
-                        }) => {
-                            if error.is_none() && length.get() == macro_string.len() {
-                                self.emit_token(TokenChannel::DEFAULT, tok_type, payload);
-                            } else {
-                                // Emit as macro string
-                                self.emit_token(
-                                    TokenChannel::DEFAULT,
-                                    TokenType::MacroString,
-                                    Payload::None,
-                                );
-                            }
+                        }) if error.is_none() && length.get() == macro_string.len() => {
+                            self.emit_token(TokenChannel::DEFAULT, tok_type, payload);
                         }
-                        None => {
-                            // Emit as macro string
+                        _ => {
+                            // Not a complete, error-free number: emit as macro string
                             self.emit_token(
                                 TokenChannel::DEFAULT,
                                 TokenType::MacroString,
@@ -3814,7 +3803,7 @@ impl Lexer<'_> {
                     hex_result
                 } else {
                     // Tied lengths, we need to check for trailing x/X
-                    if [b'x', b'X'].contains(
+                    if b"xX".contains(
                         source_view
                             .as_bytes()
                             .get(hex_result.length.get())

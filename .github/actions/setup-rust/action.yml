@@ -1,14 +1,25 @@
 name: Set up pinned Rust
-description: Install the checked-in Rust toolchain using dtolnay/rust-toolchain.
+description: Install a checked-in Rust toolchain pin using dtolnay/rust-toolchain.
+inputs:
+  toolchain-file:
+    description: Toolchain file whose channel to install (rust-toolchain.toml by default; rust-toolchain-nightly.toml for the dated nightly).
+    default: rust-toolchain.toml
+outputs:
+  toolchain:
+    description: The installed channel, e.g. for RUSTUP_TOOLCHAIN.
+    value: ${{ steps.pin.outputs.channel }}
 runs:
   using: composite
   steps:
     - name: Read toolchain pin
       id: pin
       shell: bash
+      env:
+        TOOLCHAIN_FILE: ${{ inputs.toolchain-file }}
       run: |
-        channel=$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)
-        components=$(sed -n 's/^components = \[\(.*\)\]$/\1/p' rust-toolchain.toml | tr -d '" ')
+        channel=$(sed -n 's/^channel = "\(.*\)"$/\1/p' "$TOOLCHAIN_FILE")
+        components=$(sed -n 's/^components = \[\(.*\)\]$/\1/p' "$TOOLCHAIN_FILE" | tr -d '" ')
+        test -n "$channel" || { echo "::error::no channel in $TOOLCHAIN_FILE"; exit 1; }
         echo "channel=$channel" >> "$GITHUB_OUTPUT"
         echo "components=$components" >> "$GITHUB_OUTPUT"
     - uses: dtolnay/rust-toolchain@master

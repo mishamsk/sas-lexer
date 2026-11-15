@@ -862,9 +862,8 @@ pub(super) fn assert_lexing<TT: TokenTestCase, ET: ErrorTestCase>(
         format_errors_for_trace(errors, &buffer, &source)
     );
 
-    for (i, expected_err) in expected_errors.iter().enumerate() {
-        let lexed_err = &errors[i];
-
+    // Lengths are asserted equal above, so zip visits every pair.
+    for (expected_err, lexed_err) in expected_errors.iter().zip(errors.iter()) {
         let at_byte_offset = source
             .chars()
             .take(expected_err.at_char_offset(source) as usize)
