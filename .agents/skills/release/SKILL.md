@@ -51,11 +51,11 @@ If the invocation gives a version or level (`major`, `minor`, `patch`, `release`
 - Current version is a pre-release (e.g. `1.0.0-beta.4`): the next pre-release of that series (`beta` → `1.0.0-beta.5`).
 - Otherwise: anything under Removed or marked breaking (💥) → `major`; entries under Added → `minor`; only Fixed → `patch`.
 
-Preview the result with `mise x -- cargo release version <level> -p <package> 2>&1 | grep Upgrading`.
+Preview the result with `mise x -- cargo release version <level> -p <package>` (a dry run; it reports invalid levels too).
 
 `rust` only: if `git diff --quiet <last tag> HEAD -- crates/sas-lexer-macro` reports changes, `sas-lexer-macro` (versioned separately, `0.x`) needs a bump too: `patch` for fixes, `minor` for anything else.
 
-Show the changelog diff, the new version(s) and the inferred level. Ask the user to confirm.
+Show the changelog diff, the new version(s) and the inferred level. For `py`, say that the release commit goes to `main` before the TestPyPI check (the tag waits for Gate 2). Ask the user to confirm.
 
 ### Step 3: Bump, Commit and Tag
 
@@ -66,7 +66,7 @@ git commit -am "docs: update <CHANGELOG-RUST.md|CHANGELOG-PY.md> for release"
 mise x -- cargo release <level|version> -p <package> --execute --no-confirm --no-push
 ```
 
-The last command creates the signed `chore: Release <package> version X` commit and the signed tag locally.
+The last command creates the signed release commit and the signed tag locally.
 
 ### Step 4: Smoke Checks
 
@@ -76,15 +76,28 @@ cargo publish --dry-run --locked -p sas-lexer            # add `-p sas-lexer-mac
 just fmt-check clippy test
 ```
 
-`py`: TestPyPI builds from GitHub, so push the release commit (not the tag) first:
+`py`: TestPyPI builds from GitHub, so push the release commit (not the tag) first, then build and upload that exact commit:
 ```bash
 git push origin main
-gh workflow run publish-test-pypi.yml --ref main
-gh run watch "$(gh run list --workflow publish-test-pypi.yml -L 1 --json databaseId -q '.[0].databaseId')"
-uv run --isolated --no-project --refresh-package sas-lexer --index https://test.pypi.org/simple/ \
-  --with "sas-lexer==X" -- python -c "import sas_lexer; tokens, errors, _ = sas_lexer.lex_program_from_str('data a; x = 1; run;'); assert sas_lexer.__version__ == 'X' and tokens and not errors; print(len(tokens), 'tokens')"
+ref=$(git branch --show-current); sha=$(git rev-parse HEAD); start=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+gh workflow run publish-test-pypi.yml --ref "$ref"
+gh run list --workflow publish-test-pypi.yml --event workflow_dispatch --branch "$ref" --commit "$sha" \
+  --created ">=$start" --json databaseId,url -q '.[] | "\(.databaseId) \(.url)"'
 ```
-TestPyPI rejects a version it already has. If the upload fails for that reason, report it and ask whether to continue without the TestPyPI check.
+Repeat the `gh run list` command every few seconds until it prints the run, then `gh run watch <id> --exit-status`. Continue only if the run succeeds. Then install the uploaded version (`<test version>` = X) and smoke it:
+```bash
+uv run --isolated --no-project --refresh-package sas-lexer --index https://test.pypi.org/simple/ \
+  --with "sas-lexer==<test version>" -- python -c "import sas_lexer; tokens, errors, _ = sas_lexer.lex_program_from_str('data a; x = 1; run;'); assert sas_lexer.__version__ == 'X' and tokens and not errors; print(len(tokens), 'tokens')"
+```
+
+If the upload fails only because TestPyPI already has version X (`File already exists`), build a TestPyPI-only dev version of the release commit on a short-lived branch that changes only the `pyproject.toml` version. `<test version>` is the PEP 440 form of X plus the first `.devN` not listed at https://test.pypi.org/simple/sas-lexer/ (e.g. `1.0.0b3.dev1`).
+```bash
+git switch -c testpypi-<test version>
+sed -i.bak 's/^version = ".*"/version = "<test version>"/' pyproject.toml && rm pyproject.toml.bak
+git commit -am "chore: TestPyPI build <test version>"
+git push origin HEAD
+```
+Run the commands above from `ref=` on, from this branch, then the smoke with `<test version>`. Afterwards, whatever the result: `git switch main && git branch -D testpypi-<test version> && git push origin --delete testpypi-<test version>`.
 
 ### Step 5: Final Confirmation (Gate 2)
 
@@ -98,7 +111,7 @@ If the user confirms:
 mise x -- cargo release push -p <package> --execute --no-confirm
 ```
 
-This pushes `main` and the tag; the tag starts the train's CI workflow (tests, publish, draft GitHub release). Report the run link: `gh run list --workflow <release-rust.yml|release-python.yml> -L 1`. The user publishes the drafted GitHub release.
+This pushes `main` and the tag. The tag starts the train's CI workflow: tests, publishing, and a draft GitHub release. Find that run with `gh run list --workflow <release-rust.yml|release-python.yml> --branch <tag> --json databaseId,url`, then wait on it with `gh run watch <id> --exit-status`. Report the run link and the draft release link (`gh release view <tag> --json url -q .url`).
 
 If the user declines, stop. Nothing has been published; report the local commit and tag (and, for `py`, that the release commit is on `main`).
 

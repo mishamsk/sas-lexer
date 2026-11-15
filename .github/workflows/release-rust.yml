@@ -54,8 +54,9 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
         run: |
           macro_version=$(sed -n 's/^version = "\(.*\)"$/\1/p' crates/sas-lexer-macro/Cargo.toml)
-          curl -sSf https://index.crates.io/sa/s-/sas-lexer-macro | grep -q "\"vers\":\"$macro_version\"" \
-            || cargo publish --locked -p sas-lexer-macro
+          # A failed fetch fails the job (bash -e); only a fetched index without this version publishes.
+          index=$(curl -sSf --retry 3 https://index.crates.io/sa/s-/sas-lexer-macro)
+          grep -qF "\"vers\":\"$macro_version\"" <<< "$index" || cargo publish --locked -p sas-lexer-macro
           cargo publish --locked -p sas-lexer
 
   release:
