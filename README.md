@@ -26,6 +26,16 @@ Let me break it down for you:
             - [Crate Features](#crate-features)
         - [Usage (Python)](#usage-python)
     - [Let's talk about SAS](#lets-talk-about-sas)
+        - [Integer literals with inline comments](#integer-literals-with-inline-comments)
+        - [Invisible null strings in macro expressions](#invisible-null-strings-in-macro-expressions)
+        - [Statements inside string expressions and macro call arguments](#statements-inside-string-expressions-and-macro-call-arguments)
+        - [Total ambiguity of numeric formats](#total-ambiguity-of-numeric-formats)
+        - [Environment-dependent lexing: parentheses after a macro name](#environment-dependent-lexing-parentheses-after-a-macro-name)
+        - [Macro call arguments that start with an equals sign](#macro-call-arguments-that-start-with-an-equals-sign)
+        - [Context-aware comma masking and inconsistent sister functions](#context-aware-comma-masking-and-inconsistent-sister-functions)
+        - [Function-aware lexing of %sysfunc and %syscall](#function-aware-lexing-of-sysfunc-and-syscall)
+        - [String literals that are not string literals](#string-literals-that-are-not-string-literals)
+        - [Star comments that sometimes disable macro processing](#star-comments-that-sometimes-disable-macro-processing)
     - [Motivation](#motivation)
     - [License](#license)
     - [Contributing](#contributing)
@@ -123,18 +133,126 @@ Whether it is because the Dragon Book had not been published when the language w
 
 If you think I am exaggerating, read on.
 
-THIS SECTION IS WIP. PLANNED CONTENT:
+### Integer literals with inline comments
 
-* Integer literals with inline comments
-* Fun with macro mnemonics and "null" strings in expressions
-* Statements inside macro/function call arguments, string expressions and comments
-* Total ambiguity of numeric formats
-* Environment-dependent lexing: parenthesis following macro identifier
-* Macro call arguments starting with `=`
-* Context-aware masking of ',' in macro call arguments and discrepancies between sister functions
-* `%sysfunc/%syscall` function aware lexing
-* String literals that "hide" semicolon from macro but are not string literals
-* Star comments that sometimes disable macro processing and sometimes not
+SAS cuts comments out of the character stream before it reads tokens, so `1/*hi*/2` is the integer 12, in a DATA step and in macro arithmetic alike. A lexer that produces contiguous tokens can't glue the halves back together: it emits `1`, a comment and `2`, and the parser gets to play Humpty Dumpty.
+
+```sas
+/*  v the integer 12 in a DATA step... */
+x = 1/*hi*/2;
+%put %eval(1/*hi*/2 + 1);
+/*         ^^^^^^^^ ...and in macro arithmetic, so this prints 13 */
+```
+
+### Invisible null strings in macro expressions
+
+In a macro comparison either operand may be missing, and a missing operand is an empty ("null") string. The only exception is `in`, which SAS rejects with an error when an operand is null. Comparisons chain left to right, so a run of bare operators is a perfectly valid condition made of invisible operands. The lexer emits a zero-width `MacroStringEmpty` token for each of them, so the parser doesn't have to guess where they are.
+
+The fun part is what such conditions evaluate to. `%if ne ne` reads as `("" ne "") ne ""`: the inner comparison is false, giving `0`, and `0 ne ""` is true. Swap the operators and `("" eq "") eq ""` turns into `1 eq ""`, which is false. And `ne ne eq` adds one more step: `1 eq ""` is false again.
+
+```sas
+/* v  v  v three invisible empty strings: ("" ne "") ne "" is true */
+%if ne ne %then %put yes;
+%if eq eq %then %put yes;
+/* ^  ^  ^ the same three: ("" eq "") eq "" is false */
+```
+
+### Statements inside string expressions and macro call arguments
+
+Macro statements can sit inside a double-quoted string, and inside macro call arguments too. SAS executes such a statement the moment it reads it, removes it from the string, and keeps whatever is left as the string's value. I've seen this bite a real project: a program wrote macro code to a file and then included it, but every `%let` it "wrote" had already run, and the file got what was left of each string. The lexer handles this by switching to statement mode halfway through the string.
+
+The only exception is a string inside another macro statement, like `%put "%let v=1;";`. There SAS reports an open code recursion error and skips the statement. It still disappears from the string, though, so the lexer lexes it and reports the same error.
+
+```sas
+data _null_;
+  file "setup.sas";
+  put "%let env=prod;";
+/*     ^^^^^^^^^^^^^^ runs as SAS reads this line and vanishes: setup.sas gets an empty line */
+run;
+```
+
+### Total ambiguity of numeric formats
+
+A numeric format looks exactly like a number, or like a name followed by a number, and only the surrounding statement tells them apart. So the lexer doesn't try: formats come out as ordinary tokens. Character formats are the exception, because the leading `$` gives them away.
+
+```sas
+/*  v          v the same FloatLiteral: a number here, a format there */
+x = 8.2; put x 8.2;
+
+/*    v Identifier `dollar10` + FloatLiteral `.2` */
+put y dollar10.2 z $char10.;
+/*                 ^^^^^^^^ `$` formats get their own CharFormat token */
+```
+
+### Environment-dependent lexing: parentheses after a macro name
+
+Whether `(...)` after a macro name holds its arguments depends on how the macro was defined, which a static lexer can't see. If the macro has no parameters, SAS calls it and leaves the parentheses to whatever follows. Calling a macro without parentheses is a leftover from an early version of the macro language, and SAS's unbending commitment to backward compatibility means it supports both forms by tracking at runtime whether each macro was defined with parameters ;-) The lexer can't do that, so it always treats the parentheses as arguments, even across whitespace, comments and newlines.
+
+```sas
+%macro ds; sashelp.class %mend;
+data b; set %ds (keep=age); run;
+/*              ^^^^^^^^^^ SAS: a data set option; lexer: arguments of the %ds call */
+```
+
+### Macro call arguments that start with an equals sign
+
+`name=value` is a named argument, unless there is no name before the `=`. Then the `=` is just the first character of a positional value. The name part, in turn, may be built from macro variables at runtime.
+
+```sas
+/* v positional value "=x" */
+%m(=x, a==b)
+/*     ^^^^ name `a`, value "=b" */
+
+/* v a named argument whose name comes from &n */
+%m(&n=v)
+```
+
+### Context-aware comma masking and inconsistent sister functions
+
+Parentheses inside an argument usually hide (mask) a comma, and some built-ins mask every comma because they take exactly one argument. Which ones? Not the ones you'd guess: `%upcase` masks, its sister `%lowcase` doesn't. And `%sysevalf` ignores parentheses altogether, so the first comma always ends its first argument.
+
+```sas
+/*           v one argument "a,b" */
+%put %upcase(a,b) %lowcase(a,b);
+/*                          ^ two arguments, which is a SAS error */
+
+/*         v parentheses mask the comma... */
+%put %scan((a,b),1) %sysevalf((1,);
+/*                              ^^ ...except in %sysevalf: this comma ends the argument and `)` closes the call */
+```
+
+### Function-aware lexing of %sysfunc and %syscall
+
+`%eval` knows only integers, so `1.5` is plain text there. `%sysfunc` and `%syscall` evaluate the arguments of the called function like `%sysevalf`, but only when that function expects a number. The lexer doesn't keep a catalog of every SAS function signature, so it always lexes the arguments as expressions.
+
+```sas
+/*         v text              v a FloatLiteral, evaluated as in %sysevalf */
+%put %eval(1.5+1) %sysfunc(sum(1.5,1), 8.2);
+/*                                     ^^^ and an optional format at the end */
+```
+
+### String literals that are not string literals
+
+A macro comment `%* ...;` ends at the first semicolon, unless that semicolon is inside quotes. Nothing in a comment is a string literal, of course, but the quotes still count. A stray apostrophe in a comment is all it takes.
+
+```sas
+/*   v a quote opens here... */
+%* it's a trap; %put never runs; ';
+/*                               ^ ...and the comment ends only after it closes */
+```
+
+### Star comments that sometimes disable macro processing
+
+In open code a `* ...;` comment really is a comment: macro calls inside it don't run, so they can't mask a semicolon. Inside a macro definition it is just text to the macro processor, so any macro statement in it executes. The lexer predicts a comment in open code, and inside macro definitions only when no `%name` macro call or statement comes before the semicolon (a `&var` reference doesn't count).
+
+```sas
+* %mcall(doesn't mask ; semi);
+/*                    ^ open code: the comment ends here and %mcall never runs */
+
+/*        v a comment */
+%macro m; *plain; *%let a=2; %mend;
+/*                 ^^^^^^^^^ but inside a macro definition this %let executes */
+```
 
 ## Motivation
 
