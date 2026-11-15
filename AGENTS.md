@@ -17,7 +17,7 @@ Guidance for agents working in `sas-lexer`. The `justfile` is the command author
 - The binding depends on the **published** `sas-lexer` crate from crates.io (both `[dependencies]` and `[build-dependencies]`), not the workspace source. A lexer fix reaches Python only after a Rust release and a bump of both dependency entries in `crates/sas-lexer-py/Cargo.toml`.
 
 ## Tooling
-- Prerequisites: just, mise and rustup. `mise.toml` pins the dev Python (3.15), uv and the non-Python CLIs (prek, typos, cargo-hack, cargo-udeps, hyperfine); run `mise trust && mise install` once. CI's Python test matrix overrides the dev pin with `MISE_PYTHON_VERSION`.
+- Prerequisites: just, mise and rustup. `mise.toml` pins the dev Python (3.15), uv and the non-Python CLIs (prek, typos, cargo-hack, cargo-udeps, hyperfine, cargo-release); run `mise trust && mise install` once. CI's Python test matrix overrides the dev pin with `MISE_PYTHON_VERSION`.
 - Work through the just recipes (`just` lists them). Non-Python CLIs run from mise (`mise x -- ...`), including prek; ruff, ty and pytest come from the pyproject dev group via `uv run`.
 - Python only through uv (`uv run`, `uv sync`); never bare `pip`/`python`. Change dependencies in `pyproject.toml` and run `uv lock`.
 - Handoff checks: `just fmt`, `just lint`, `just clippy` and `just test`. CI runs the full `just ci` and the perf gate.
@@ -49,4 +49,4 @@ Guidance for agents working in `sas-lexer`. The `justfile` is the command author
 - Never merge PRs, push to `main`, or touch GitHub issues/PRs unless asked.
 
 ## Releases
-- Follow the project release skill in `.claude/skills/`.
+- Run the `/release <rust|py>` skill (`.agents/skills/release/SKILL.md`); never tag or publish by hand.
