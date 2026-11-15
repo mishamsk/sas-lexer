@@ -502,6 +502,18 @@ impl WorkTokenizedBuffer {
             .find(|tok_info| tok_info.channel == TokenChannel::DEFAULT)
     }
 
+    /// Index and type of the last default channel token before the token at `end`.
+    #[allow(clippy::cast_possible_truncation)]
+    pub(super) fn last_default_token_before(&self, end: u32) -> Option<(u32, TokenType)> {
+        let tokens = self.token_infos.get(..end as usize)?;
+
+        tokens
+            .iter()
+            .rposition(|tok_info| tok_info.channel == TokenChannel::DEFAULT)
+            // SAFETY: the token count fits `u32`, see `token_count`
+            .and_then(|idx| tokens.get(idx).map(|t| (idx as u32, t.token_type)))
+    }
+
     pub(super) fn last_token_info_on_default_channel_mut(&mut self) -> Option<&mut TokenInfo> {
         self.token_infos
             .iter_mut()

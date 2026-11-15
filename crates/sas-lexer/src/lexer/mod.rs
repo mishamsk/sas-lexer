@@ -48,6 +48,20 @@ const MAX_EXPECTED_STACK_DEPTH: usize = 40;
 
 const BOM: char = '\u{feff}';
 
+/// Progress of the current open code statement towards a prefix that is
+/// followed by a nested statement (where a `*` starts a comment): the THEN of
+/// an IF statement and the condition of a SELECT group WHEN statement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StatStart {
+    Other,
+    /// An IF statement before its THEN
+    If,
+    /// A WHEN statement, with the WHEN token index
+    When(u32),
+    /// Inside the WHEN condition, at this paren depth
+    WhenCond(u32),
+}
+
 #[derive(Debug)]
 struct LexerCheckpoint<'src> {
     cursor: cursor::Cursor<'src>,
@@ -99,6 +113,13 @@ struct Lexer<'src> {
     /// started but is not yet terminated by semi.
     /// This is used in start comments and datalines predictions.
     pending_stat_stack: BitVec,
+
+    /// See `StatStart`
+    stat_start: StatStart,
+
+    /// Token count at the last open code statement boundary (`;` or the end of
+    /// a nested statement prefix). Macro statement terminators do not count.
+    stat_boundary: u32,
 
     /// Stores the last state for debug assertions to check
     /// against infinite loops. It is the remaining input length
@@ -159,6 +180,8 @@ impl Lexer<'_> {
             checkpoint: None,
             macro_nesting_level,
             pending_stat_stack: BitVec::from_elem(1, false),
+            stat_start: StatStart::Other,
+            stat_boundary: 0,
         })
     }
 
@@ -328,6 +351,13 @@ impl Lexer<'_> {
             }
             i => self.pending_stat_stack.set(i - 1, value),
         }
+    }
+
+    /// Ends the open code statement: whatever follows starts a new one.
+    fn end_stat(&mut self) {
+        self.set_pending_stat(false);
+        self.stat_start = StatStart::Other;
+        self.stat_boundary = self.buffer.token_count();
     }
 
     #[inline]
@@ -790,7 +820,7 @@ impl Lexer<'_> {
             ';' => {
                 self.cursor.advance();
                 self.emit_token(TokenChannel::DEFAULT, TokenType::SEMI, Payload::None);
-                self.set_pending_stat(false);
+                self.end_stat();
             }
             '/' => {
                 if self.cursor.peek_next() == '*' {
@@ -831,19 +861,12 @@ impl Lexer<'_> {
                 self.set_pending_stat(true);
             }
             c if is_valid_unicode_sas_name_start(c) => {
-                // Set before lexing: `lex_identifier` may consume an entire
-                // datalines block, which ends the statement and resets this
-                self.set_pending_stat(true);
+                // Also updates the pending statement state
                 self.lex_identifier();
             }
             _ => {
                 // Something else must be a symbol or some unknown character
-                self.lex_symbols(next_char);
-                if self
-                    .buffer
-                    .last_token_info()
-                    .is_some_and(|t| t.token_type != TokenType::PredictedCommentStat)
-                {
+                if self.lex_symbols(next_char) {
                     self.set_pending_stat(true);
                 }
             }
@@ -3558,6 +3581,7 @@ impl Lexer<'_> {
         if !is_ascii || pending_ident_len > MAX_KEYWORDS_LEN {
             // Easy case - not ASCII or longer than any of the keywords, just emit the identifier token
             self.emit_token(TokenChannel::DEFAULT, TokenType::Identifier, Payload::None);
+            self.set_pending_stat(true);
             return;
         }
 
@@ -3574,26 +3598,126 @@ impl Lexer<'_> {
         let ident = unsafe { ::core::str::from_utf8_unchecked(&buf[..pending_ident_len]) };
 
         if let Some(kw_tok_type) = parse_keyword(ident) {
-            self.emit_token(TokenChannel::DEFAULT, kw_tok_type, Payload::None);
+            match kw_tok_type {
+                TokenType::KwIf | TokenType::KwElse | TokenType::KwWhen | TokenType::KwThen => {
+                    self.lex_nested_stat_keyword(kw_tok_type);
+                }
+                _ => {
+                    self.emit_token(TokenChannel::DEFAULT, kw_tok_type, Payload::None);
+                    self.set_pending_stat(true);
+                }
+            }
             return;
         }
 
         match ident {
+            // A datalines block ends the statement itself
             "DATALINES" | "CARDS" | "LINES" => {
-                if !self.lex_datalines(false) {
-                    self.emit_token(TokenChannel::DEFAULT, TokenType::Identifier, Payload::None);
+                if self.lex_datalines(false) {
+                    return;
                 }
             }
             "DATALINES4" | "CARDS4" | "LINES4" => {
-                if !self.lex_datalines(true) {
-                    self.emit_token(TokenChannel::DEFAULT, TokenType::Identifier, Payload::None);
+                if self.lex_datalines(true) {
+                    return;
                 }
             }
-            _ => {
-                // genuine user defined identifier
-                self.emit_token(TokenChannel::DEFAULT, TokenType::Identifier, Payload::None);
+            // Not a keyword token, as it is not reserved
+            "OTHERWISE" => {
+                self.lex_nested_stat_keyword(TokenType::Identifier);
+                return;
             }
+            _ => {}
         }
+
+        // genuine user defined identifier
+        self.emit_token(TokenChannel::DEFAULT, TokenType::Identifier, Payload::None);
+        self.set_pending_stat(true);
+    }
+
+    /// Emits IF, ELSE, WHEN, THEN or OTHERWISE (as `Identifier`) and tracks
+    /// whether a nested statement follows: after the THEN of an IF statement,
+    /// after a statement-initial ELSE or OTHERWISE, and after the condition of
+    /// a statement-initial WHEN. These words may also be variable names, so
+    /// anywhere else they are plain operands.
+    fn lex_nested_stat_keyword(&mut self, tok_type: TokenType) {
+        let is_stat_start = !self.pending_stat();
+
+        // THEN ends an IF condition only after a complete operand. Checked
+        // before emitting, while the operand is the last default channel token
+        let ends_if_cond = tok_type == TokenType::KwThen
+            && self.stat_start == StatStart::If
+            && self
+                .buffer
+                .last_token_info_on_default_channel()
+                .is_some_and(|t| is_operand_end(t.token_type));
+
+        self.emit_token(TokenChannel::DEFAULT, tok_type, Payload::None);
+        self.set_pending_stat(true);
+
+        match tok_type {
+            TokenType::KwThen if ends_if_cond => self.end_stat(),
+            TokenType::KwIf if is_stat_start => self.stat_start = StatStart::If,
+            TokenType::KwWhen if is_stat_start => {
+                self.stat_start = StatStart::When(self.buffer.token_count() - 1);
+            }
+            TokenType::KwElse | TokenType::Identifier if is_stat_start => self.end_stat(),
+            _ => {}
+        }
+    }
+
+    /// Tracks an emitted paren of a WHEN statement condition. Returns whether
+    /// the statement is pending after it: the closing paren of the condition
+    /// is followed by a nested statement.
+    fn track_when_paren(&mut self, paren: char) -> bool {
+        match (paren, self.stat_start) {
+            ('(', StatStart::When(when_idx)) => {
+                let follows_when = self
+                    .buffer
+                    .last_default_token_before(self.buffer.token_count() - 1)
+                    .is_some_and(|(idx, _)| idx == when_idx);
+
+                self.stat_start = if follows_when {
+                    StatStart::WhenCond(1)
+                } else {
+                    StatStart::Other
+                };
+            }
+            ('(', StatStart::WhenCond(depth)) => {
+                self.stat_start = StatStart::WhenCond(depth.saturating_add(1));
+            }
+            (')', StatStart::WhenCond(1)) => {
+                self.end_stat();
+                return false;
+            }
+            (')', StatStart::WhenCond(depth)) => {
+                self.stat_start = StatStart::WhenCond(depth.saturating_sub(1));
+            }
+            _ => {}
+        }
+
+        true
+    }
+
+    /// Whether the emitted `:` ends a statement label: a single name token (an
+    /// identifier, a keyword or a name literal) right after a statement
+    /// boundary. `:` also appears in ranges, format modifiers and name prefix
+    /// lists, but never in this position.
+    fn is_label_colon(&self) -> bool {
+        let Some((name_idx, name_type)) = self
+            .buffer
+            .last_default_token_before(self.buffer.token_count() - 1)
+        else {
+            return false;
+        };
+
+        // Variants from `Identifier` onwards are identifiers and keywords
+        (name_type >= TokenType::Identifier || name_type == TokenType::NameLiteral)
+            && name_idx >= self.stat_boundary
+            && self
+                .buffer
+                .last_default_token_before(name_idx)
+                .map_or(true, |(idx, _)| idx < self.stat_boundary)
     }
 
     /// A special lexer that allows strictly ascii identifiers.
@@ -3759,7 +3883,7 @@ impl Lexer<'_> {
 
         // The datalines end terminates the statement, so whatever follows
         // starts a new one (e.g. a `* comment;`)
-        self.set_pending_stat(false);
+        self.end_stat();
 
         true
     }
@@ -3999,31 +4123,43 @@ impl Lexer<'_> {
         true
     }
 
+    /// Lexes a symbol. Returns whether the statement is pending after it,
+    /// i.e. the symbol neither is nor completes a statement or its prefix.
     #[allow(clippy::too_many_lines)]
-    fn lex_symbols(&mut self, c: char) {
+    fn lex_symbols(&mut self, c: char) -> bool {
         match c {
             '*' => {
                 self.cursor.advance();
 
-                if !self.lex_predicted_comment() {
-                    match self.cursor.peek() {
-                        Some('*') => {
-                            self.cursor.advance();
-                            self.emit_token(TokenChannel::DEFAULT, TokenType::STAR2, Payload::None);
-                        }
-                        _ => {
-                            self.emit_token(TokenChannel::DEFAULT, TokenType::STAR, Payload::None);
-                        }
+                if self.lex_predicted_comment() {
+                    return false;
+                }
+
+                match self.cursor.peek() {
+                    Some('*') => {
+                        self.cursor.advance();
+                        self.emit_token(TokenChannel::DEFAULT, TokenType::STAR2, Payload::None);
+                    }
+                    _ => {
+                        self.emit_token(TokenChannel::DEFAULT, TokenType::STAR, Payload::None);
                     }
                 }
             }
             '(' => {
                 self.cursor.advance();
                 self.emit_token(TokenChannel::DEFAULT, TokenType::LPAREN, Payload::None);
+
+                if matches!(self.stat_start, StatStart::When(_) | StatStart::WhenCond(_)) {
+                    return self.track_when_paren(c);
+                }
             }
             ')' => {
                 self.cursor.advance();
                 self.emit_token(TokenChannel::DEFAULT, TokenType::RPAREN, Payload::None);
+
+                if matches!(self.stat_start, StatStart::WhenCond(_)) {
+                    return self.track_when_paren(c);
+                }
             }
             '{' => {
                 self.cursor.advance();
@@ -4154,6 +4290,12 @@ impl Lexer<'_> {
             ':' => {
                 self.cursor.advance();
                 self.emit_token(TokenChannel::DEFAULT, TokenType::COLON, Payload::None);
+
+                if self.is_label_colon() {
+                    // A nested statement follows the label
+                    self.end_stat();
+                    return false;
+                }
             }
             '=' => {
                 self.cursor.advance();
@@ -4202,6 +4344,8 @@ impl Lexer<'_> {
                 self.emit_token(TokenChannel::HIDDEN, TokenType::CatchAll, Payload::None);
             }
         }
+
+        true
     }
 
     fn lex_char_format(&mut self) -> bool {
@@ -5279,4 +5423,37 @@ impl Lexer<'_> {
 pub fn lex_program<S: AsRef<str>>(source: &S) -> Result<LexResult, ErrorKind> {
     let lexer = Lexer::new(source.as_ref(), None, None)?;
     Ok(lexer.lex())
+}
+
+/// Whether a token can end an expression operand, so that a following THEN is
+/// the keyword rather than another operand.
+fn is_operand_end(tok_type: TokenType) -> bool {
+    matches!(
+        tok_type,
+        TokenType::Identifier
+            | TokenType::IntegerLiteral
+            | TokenType::FloatLiteral
+            | TokenType::FloatExponentLiteral
+            | TokenType::StringLiteral
+            | TokenType::BitTestingLiteral
+            | TokenType::DateLiteral
+            | TokenType::DateTimeLiteral
+            | TokenType::NameLiteral
+            | TokenType::TimeLiteral
+            | TokenType::HexStringLiteral
+            | TokenType::StringExprEnd
+            | TokenType::BitTestingLiteralExprEnd
+            | TokenType::DateLiteralExprEnd
+            | TokenType::DateTimeLiteralExprEnd
+            | TokenType::NameLiteralExprEnd
+            | TokenType::TimeLiteralExprEnd
+            | TokenType::HexStringLiteralExprEnd
+            | TokenType::DOT
+            | TokenType::RPAREN
+            | TokenType::RBRACK
+            | TokenType::RCURLY
+            | TokenType::MacroString
+            | TokenType::MacroVarTerm
+            | TokenType::MacroIdentifier
+    )
 }
