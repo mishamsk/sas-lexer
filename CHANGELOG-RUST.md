@@ -12,7 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 -
 
 ### Changed
--
+- 🎉 First stable release: the public API follows Semantic Versioning, so breaking changes only ship in a new major version.
 
 ### Deprecated
 -
@@ -21,7 +21,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 -
 
 ### Fixed
-- 🐛 Fixed a `*` comment statement directly after a `datalines`/`cards`/`lines` block (including the `4` variants) being lexed as code instead of `PredictedCommentStat`, where an apostrophe in the comment started a string literal that swallowed the rest of the program.
+- 🐛 Fixed a `*` comment statement directly after a `datalines`/`cards`/`lines` block (including the `4` variants) being lexed as code instead of `PredictedCommentStat`, where an apostrophe in the comment started a string literal that swallowed the rest of the program. ([#17](https://github.com/mishamsk/sas-lexer/pull/17))
 
 ### Security
 -
