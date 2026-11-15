@@ -4279,6 +4279,147 @@ vec![
     ],
     NO_ERRORS,
 )]
+// Issue #14: an inline `**` comment followed by a `**;` comment on a later line.
+// Each comment ends at its own first semicolon and the code in between is kept.
+#[case::inline_star2_comment_then_star2_semi("x = a ** 2; ** inline ** comment;\ny = 1;\n**;",
+    vec![
+        ("x", TokenType::Identifier),
+        (" ", TokenType::WS),
+        ("=", TokenType::ASSIGN),
+        (" ", TokenType::WS),
+        ("a", TokenType::Identifier),
+        (" ", TokenType::WS),
+        ("**", TokenType::STAR2),
+        (" ", TokenType::WS),
+        ("2", TokenType::IntegerLiteral),
+        (";", TokenType::SEMI),
+        (" ", TokenType::WS),
+        ("** inline ** comment;", TokenType::PredictedCommentStat),
+        ("\n", TokenType::WS),
+        ("y", TokenType::Identifier),
+        (" ", TokenType::WS),
+        ("=", TokenType::ASSIGN),
+        (" ", TokenType::WS),
+        ("1", TokenType::IntegerLiteral),
+        (";", TokenType::SEMI),
+        ("\n", TokenType::WS),
+        ("**;", TokenType::PredictedCommentStat),
+    ],
+    NO_ERRORS,
+)]
+#[case::inline_star2_comment_then_star2_semi_in_macro("%macro m; x = 1; ** inline ** comment;\ny = 1;\n**; %mend;",
+    vec![
+        ("%macro", TokenType::KwmMacro),
+        (" ", TokenType::WS),
+        ("m", TokenType::Identifier),
+        (";", TokenType::SEMI),
+        (" ", TokenType::WS),
+        ("x", TokenType::Identifier),
+        (" ", TokenType::WS),
+        ("=", TokenType::ASSIGN),
+        (" ", TokenType::WS),
+        ("1", TokenType::IntegerLiteral),
+        (";", TokenType::SEMI),
+        (" ", TokenType::WS),
+        ("** inline ** comment;", TokenType::PredictedCommentStat),
+        ("\n", TokenType::WS),
+        ("y", TokenType::Identifier),
+        (" ", TokenType::WS),
+        ("=", TokenType::ASSIGN),
+        (" ", TokenType::WS),
+        ("1", TokenType::IntegerLiteral),
+        (";", TokenType::SEMI),
+        ("\n", TokenType::WS),
+        ("**;", TokenType::PredictedCommentStat),
+        (" ", TokenType::WS),
+        ("%mend", TokenType::KwmMend),
+        (";", TokenType::SEMI),
+    ],
+    NO_ERRORS,
+)]
+// The datalines terminator ends the statement, so a following `*` starts a
+// comment. The `'` in the comment guards against lexing it as code, where it
+// would open a string literal that swallows the rest of the program.
+#[case::after_datalines("datalines;\n1\n;\n** it's a comment;\nrun;",
+    vec![
+        ("datalines;", TokenType::DatalinesStart),
+        ("\n1\n", TokenType::DatalinesData),
+        (";", TokenType::SEMI),
+        ("\n", TokenType::WS),
+        ("** it's a comment;", TokenType::PredictedCommentStat),
+        ("\n", TokenType::WS),
+        ("run", TokenType::KwRun),
+        (";", TokenType::SEMI),
+    ],
+    NO_ERRORS,
+)]
+#[case::after_datalines4("datalines4;\n1;\n;;;;\n** it's a comment;\nrun;",
+    vec![
+        ("datalines4;", TokenType::DatalinesStart),
+        ("\n1;\n", TokenType::DatalinesData),
+        (";;;;", TokenType::SEMI),
+        ("\n", TokenType::WS),
+        ("** it's a comment;", TokenType::PredictedCommentStat),
+        ("\n", TokenType::WS),
+        ("run", TokenType::KwRun),
+        (";", TokenType::SEMI),
+    ],
+    NO_ERRORS,
+)]
+#[case::after_datalines_in_macro("%macro m; cards4;\n1;\n;;;;\n** it's a comment;\nrun; %mend;",
+    vec![
+        ("%macro", TokenType::KwmMacro),
+        (" ", TokenType::WS),
+        ("m", TokenType::Identifier),
+        (";", TokenType::SEMI),
+        (" ", TokenType::WS),
+        ("cards4;", TokenType::DatalinesStart),
+        ("\n1;\n", TokenType::DatalinesData),
+        (";;;;", TokenType::SEMI),
+        ("\n", TokenType::WS),
+        ("** it's a comment;", TokenType::PredictedCommentStat),
+        ("\n", TokenType::WS),
+        ("run", TokenType::KwRun),
+        (";", TokenType::SEMI),
+        (" ", TokenType::WS),
+        ("%mend", TokenType::KwmMend),
+        (";", TokenType::SEMI),
+    ],
+    NO_ERRORS,
+)]
+// Datalines inside a macro definition end only the macro's own statement: after
+// `%mend` the outer `a = 1` is still pending, so the trailing `*` is code
+#[cfg_attr(feature = "macro_sep", case::after_datalines_in_macro_keeps_outer_stat(
+    "a = 1 %macro m; datalines;1; ** comment; %mend; * 2;",
+    vec![
+        ("a", TokenType::Identifier),
+        (" ", TokenType::WS),
+        ("=", TokenType::ASSIGN),
+        (" ", TokenType::WS),
+        ("1", TokenType::IntegerLiteral),
+        (" ", TokenType::WS),
+        ("", TokenType::MacroSep),
+        ("%macro", TokenType::KwmMacro),
+        (" ", TokenType::WS),
+        ("m", TokenType::Identifier),
+        (";", TokenType::SEMI),
+        (" ", TokenType::WS),
+        ("datalines;", TokenType::DatalinesStart),
+        ("1", TokenType::DatalinesData),
+        (";", TokenType::SEMI),
+        (" ", TokenType::WS),
+        ("** comment;", TokenType::PredictedCommentStat),
+        (" ", TokenType::WS),
+        ("%mend", TokenType::KwmMend),
+        (";", TokenType::SEMI),
+        (" ", TokenType::WS),
+        ("*", TokenType::STAR),
+        (" ", TokenType::WS),
+        ("2", TokenType::IntegerLiteral),
+        (";", TokenType::SEMI),
+    ],
+    NO_ERRORS,
+))]
 // Cases of non-comments. Without macro sep feature
 #[cfg_attr(not(feature = "macro_sep"), case::do_end_not_comment("a %do;\n\t* /*c*/ 2 %end;",
     vec![
@@ -4601,6 +4742,51 @@ fn test_comment_prediction(
     #[case] expected_error: Vec<impl ErrorTestCase>,
 ) {
     assert_lexing(contents, expected_token, expected_error);
+}
+
+/// Issue #14 (synthetic equivalent of the reported input): an inline `** ... ;`
+/// comment ends at its first `;` even when a standalone `**;` comment follows on
+/// a later line. There is no "balanced" `** ... **;` form that spans semicolons,
+/// so the code in between must stay code.
+#[rstest]
+#[case::lf("\n")]
+#[case::crlf("\r\n")]
+fn test_inline_star2_comment_before_later_star2_semi(#[case] eol: &str) {
+    let source = [
+        "ELSE  DO;   **  NOTE: FOR 4<=score<=5;",
+        "        grp = 'AA0';  ",
+        "        IF flag = 1 THEN grp2='AA2';",
+        "        ELSE              grp2='AA1';",
+        "END;",
+        "                                                   **;",
+        "** Classification complete ;",
+        "IF grp = 'BBB' THEN res = 111;",
+    ]
+    .join(eol);
+
+    let LexResult { buffer, errors, .. } = lex_program(&source).unwrap();
+
+    assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+
+    let comments: Vec<&str> = buffer
+        .iter_tokens()
+        .filter(|t| buffer.get_token_channel(*t).expect("wrong token") == TokenChannel::COMMENT)
+        .map(|t| {
+            buffer
+                .get_token_raw_text(t, &source)
+                .expect("wrong token")
+                .unwrap()
+        })
+        .collect();
+
+    assert_eq!(
+        comments,
+        vec![
+            "**  NOTE: FOR 4<=score<=5;",
+            "**;",
+            "** Classification complete ;",
+        ]
+    );
 }
 
 // This tests that macro sep is inserted before all the expected macro statements.

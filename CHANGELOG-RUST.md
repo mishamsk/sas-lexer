@@ -21,7 +21,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 -
 
 ### Fixed
--
+- 🐛 Fixed a `*` comment statement directly after a `datalines`/`cards`/`lines` block (including the `4` variants) being lexed as code instead of `PredictedCommentStat`, where an apostrophe in the comment started a string literal that swallowed the rest of the program.
 
 ### Security
 -
