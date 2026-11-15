@@ -31,8 +31,9 @@ env:
 jobs:
   perf-check:
     name: "perf check (callgrind)"
-    # Pinned image: its apt Valgrind must match `perf_valgrind` in the justfile, and the
-    # perf Docker image (crates/sas-lexer-perf/Dockerfile) uses the same distribution.
+    # Pinned image: its apt Valgrind must match [package.metadata.perf] in
+    # crates/sas-lexer-perf/Cargo.toml, and the perf Docker image (Dockerfile there) uses the
+    # same distribution.
     runs-on: ubuntu-26.04
     timeout-minutes: 30
     steps:
@@ -83,11 +84,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Install valgrind
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends valgrind
+      # gungraun-runner must match the gungraun crate pin, so its version comes from Cargo.toml
+      # rather than mise.toml.
       - uses: taiki-e/install-action@v2
         with:
           tool: just,gungraun-runner@${{ steps.gungraun.outputs.version }}
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
+      # uv and the dev Python (for report.py) are pinned in mise.toml.
+      - uses: jdx/mise-action@v5
       # Benchmark inputs are still large and error-free, and the gate logic fails closed.
       - name: Validate the perf harness
         run: just perf-test

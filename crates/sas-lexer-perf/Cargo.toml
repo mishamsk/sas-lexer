@@ -27,3 +27,9 @@ workspace = true
 [[bench]]
 name = "lexer"
 harness = false
+
+# Tool versions the perf gate depends on (read by `just perf-check`, the CI perf job and
+# `just perf-docker-image`). Valgrind is major.minor: the apt version of the CI runner image
+# (`runs-on` in .github/workflows/perf.yml) and of the Dockerfile's base image.
+[package.metadata.perf]
+valgrind = "3.26"

@@ -102,8 +102,7 @@ test-python-ci *args:
 # All tests: Rust doc/unit/integration, then Python.
 test: test-rust test-python
 
-# Run everything CI runs, locally, with the same recipes as the CI jobs (except the
-# Linux-only `perf-check` gate; run `just perf-check` or `just perf-docker perf-check` for it).
+# Run everything CI runs, locally, with the same recipes (perf gate: `just perf-docker perf-check`).
 ci: fmt-check clippy udeps msrv ruff build doc test-rust test-python-ci perf-test
 
 # ---------------------------------------------------------------------------
@@ -178,8 +177,6 @@ clean: clean-all-caches clean-test
 
 # Fail the check when a gated metric (instructions, estimated cycles) is this much (%) worse.
 perf_threshold := env("PERF_THRESHOLD", "10")
-# Valgrind major.minor that CI (ubuntu-26.04) and the perf Docker image ship; perf-check refuses others.
-perf_valgrind := "3.26"
 perf_image := "sas-lexer-perf:local"
 
 # Run the Callgrind benchmarks for the working tree, both feature configs. Extra args go to gungraun.
@@ -208,16 +205,21 @@ perf-check $base="origin/main":
     while IFS= read -r var; do unset "$var"; done < <(compgen -e | grep '^GUNGRAUN_' || true)
     # Only the base build below may select the base API adapter (cfg(perf_base)).
     unset SAS_LEXER_PERF_BASE
-    # Tool versions: the runner must match the gungraun crate, valgrind the pinned major.minor.
+    # Tool versions (pinned in the perf crate's Cargo.toml): the runner must match the gungraun
+    # crate, valgrind the pinned major.minor.
     gungraun="$(sed -n 's/^gungraun = "=\(.*\)"$/\1/p' "$perf/Cargo.toml")"
+    want_valgrind="$(sed -n 's/^valgrind = "\(.*\)"$/\1/p' "$perf/Cargo.toml")"
     runner="$(gungraun-runner --version | awk '{print $2}')"
     valgrind="$(valgrind --version | sed 's/^valgrind-//')"
+    if [ -z "$gungraun" ] || [ -z "$want_valgrind" ]; then
+        echo "cannot read the gungraun or valgrind pin from $perf/Cargo.toml" >&2; exit 2
+    fi
     if [ "$runner" != "$gungraun" ]; then
         echo "gungraun-runner $runner does not match the gungraun crate $gungraun" >&2; exit 2
     fi
     case "$valgrind" in
-        "{{ perf_valgrind }}" | "{{ perf_valgrind }}".*) ;;
-        *) echo "valgrind $valgrind, expected {{ perf_valgrind }}.x (update perf_valgrind with the CI image)" >&2; exit 2 ;;
+        "$want_valgrind" | "$want_valgrind".*) ;;
+        *) echo "valgrind $valgrind, expected $want_valgrind.x (update [package.metadata.perf] with the CI image)" >&2; exit 2 ;;
     esac
     base_sha="$(git rev-parse --verify --end-of-options "${base}^{commit}")"
     head_desc="$(git rev-parse --short HEAD)$(git diff --quiet HEAD -- || echo '+dirty')"
@@ -261,12 +263,13 @@ perf-check $base="origin/main":
         --note "Tools: valgrind $valgrind, gungraun $gungraun, base $(cd "$src" && rustc --version), head $(rustc --version)." \
         "${report_args[@]}"
 
-# Build the Linux image used by the -docker perf recipes (pinned Rust, valgrind, gungraun-runner).
+# Build the Linux image used by the -docker perf recipes (Rust, gungraun-runner and uv at the repo pins).
 [unix]
 perf-docker-image:
     docker build -t {{ perf_image }} \
         --build-arg RUST_VERSION="$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)" \
         --build-arg GUNGRAUN_VERSION="$(sed -n 's/^gungraun = "=\(.*\)"$/\1/p' crates/sas-lexer-perf/Cargo.toml)" \
+        --build-arg UV_VERSION="$(sed -n 's/^uv = "\(.*\)"$/\1/p' mise.toml)" \
         crates/sas-lexer-perf
 
 # Run any just recipe in the Linux perf container, e.g. `just perf-docker perf-check origin/main`.
