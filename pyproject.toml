@@ -80,8 +80,12 @@ select = [
     "PLR",
     "PLW",
     "RUF",
+    "TID251", # banned APIs (see flake8-tidy-imports below)
 ]
 ignore = [
     "E501",    # line too long, handled by ruff format
     "PLC0105", # We are ok with TypeVars without variance in name
 ]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"__future__.annotations".msg = "Don't use `from __future__ import annotations`; the supported Pythons evaluate modern annotations natively."

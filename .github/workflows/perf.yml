@@ -1,0 +1,258 @@
+name: Performance regression guard
+
+# Builds the lexer at the base and at the head of a change in the same job and
+# compares Callgrind instruction counts and estimated cycles (deterministic, so
+# runner noise doesn't matter). Fails on a >= 2% regression in any benchmark
+# (`perf_threshold` in the justfile), unless a repo admin accepted it with the
+# `perf-regression-accepted` PR label. Posts the report as one sticky PR comment.
+# Same command locally: `just perf-check <base>` (or `just perf-docker perf-check <base>` on macOS),
+# then `just perf-comment` to preview the comment.
+
+on:
+  pull_request:
+    # labeled/unlabeled re-evaluate the gate when the bypass label changes. Every label event
+    # re-runs the whole check: skipping the job would record a "skipped" (passing) check run on
+    # the same commit and hide an earlier failure.
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      base:
+        description: "Base ref to compare HEAD against"
+        required: false
+        default: "HEAD~1"
+
+# Each job declares the least it needs.
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref_name }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+env:
+  CARGO_NET_RETRY: 10
+  CARGO_TERM_COLOR: always
+  RUSTUP_MAX_RETRIES: 10
+  BYPASS_LABEL: perf-regression-accepted
+
+jobs:
+  perf-check:
+    name: "perf check (callgrind)"
+    # Pinned image: its apt Valgrind must match [package.metadata.perf] in
+    # crates/sas-lexer-perf/Cargo.toml, and the perf Docker image (Dockerfile there) uses the
+    # same distribution.
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      # Read-only: the bypass check reads the PR's label events and, on pushes, the merged PR
+      # (pull-requests: read covers the issue-events endpoint for PRs).
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The base commit must be available to build it in a worktree.
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Select base commit
+        id: base
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          INPUT_BASE: ${{ inputs.base }}
+        run: |
+          case "$EVENT" in
+            # HEAD is the PR merge commit, so this measures exactly the PR's change.
+            pull_request) base="$PR_BASE" ;;
+            push) base="$PUSH_BEFORE" ;;
+            *) base="$INPUT_BASE" ;;
+          esac
+          # The only legitimate "no base": the first push of a new branch/history.
+          if [ "$EVENT" = push ] && [ "$base" = 0000000000000000000000000000000000000000 ]; then
+            echo "Push has no predecessor commit (new branch or history); nothing to compare." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "sha=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -z "$base" ]; then
+            echo "::error::No base commit for event '$EVENT'."
+            exit 1
+          fi
+          # E.g. a force-push to main can leave the old tip outside the checkout: fetch it.
+          if ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            git fetch --no-tags origin "$base" || true
+          fi
+          if ! sha="$(git rev-parse --verify --end-of-options "${base}^{commit}")"; then
+            echo "::error::Base '$base' is not available; refusing to report a pass without a comparison."
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+      - name: Read gungraun version
+        id: gungraun
+        shell: bash
+        run: echo "version=$(sed -n 's/^gungraun = "=\(.*\)"$/\1/p' crates/sas-lexer-perf/Cargo.toml)" >> "$GITHUB_OUTPUT"
+      - name: Install Rust
+        uses: ./.github/actions/setup-rust
+      - uses: Swatinem/rust-cache@v2
+      - name: Install valgrind
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends valgrind
+      # gungraun-runner must match the gungraun crate pin, so its version comes from Cargo.toml
+      # rather than mise.toml.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just,gungraun-runner@${{ steps.gungraun.outputs.version }}
+      # uv and the dev Python (for report.py) are pinned in mise.toml.
+      - uses: jdx/mise-action@v5
+      # Benchmark inputs are still large and error-free, and the gate logic fails closed.
+      - name: Validate the perf harness
+        run: just perf-test
+      # perf-check exits 0 = pass, 1 = regression, 2 = INVALID, but any operational failure can
+      # also exit 1. `just perf-gate --status` therefore classifies the run from the exit code AND
+      # this run's results.json (perf-check deletes old results first), for exactly this base:
+      # only a validated regression is `regression`, the one bypassable state. The last step
+      # enforces the gate, after the report is rendered and uploaded.
+      - name: Compare base vs head
+        id: check
+        if: steps.base.outputs.sha != ''
+        shell: bash
+        env:
+          BASE: ${{ steps.base.outputs.sha }}
+        run: |
+          set +e
+          just perf-check "$BASE"
+          rc=$?
+          set -e
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          echo "status=$(just perf-gate --rc "$rc" --base-sha "$BASE" --status)" >> "$GITHUB_OUTPUT"
+      # Only for a validated regression (never INVALID): the bypass label must currently be
+      # applied, and its latest application must be by a user with admin permission on the repo.
+      # Any API error here means no bypass.
+      - name: Check for an admin bypass
+        id: bypass
+        if: steps.check.outputs.status == 'regression'
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          PR: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.sha }}
+          BASE: ${{ steps.base.outputs.sha }}
+        run: |
+          case "$EVENT" in
+            pull_request) ;;
+            push)
+              # A push to main inherits a PR's bypass only when it is exactly that PR's merge: the
+              # pushed commit is the PR's merge commit and the compared range is that one commit
+              # (base = its first parent). Wider pushes get no bypass.
+              if [ "$(git rev-parse --verify "$SHA^1")" != "$BASE" ]; then
+                echo "The push compares more than one commit, so no bypass."
+                exit 0
+              fi
+              PR="$(gh api "repos/$REPO/commits/$SHA/pulls" \
+                --jq '[.[] | select(.merged_at != null and .merge_commit_sha == env.SHA)][0].number // empty')"
+              ;;
+            *)
+              echo "Manual runs have no bypass."
+              exit 0
+              ;;
+          esac
+          if [ -z "$PR" ]; then
+            echo "No pull request merged as $SHA, so no bypass."
+            exit 0
+          fi
+          # Events are chronological; the label's last labeled/unlabeled event is its state.
+          last="$(gh api --paginate "repos/$REPO/issues/$PR/events" \
+            --jq '.[] | select((.event == "labeled" or .event == "unlabeled") and .label.name == env.BYPASS_LABEL) | "\(.event) \(.actor.login)"' \
+            | tail -n 1)"
+          event="${last%% *}"
+          actor="${last#* }"
+          if [ "$event" != labeled ]; then
+            echo "The $BYPASS_LABEL label is not applied to #$PR, so no bypass."
+            exit 0
+          fi
+          permission="$(gh api "repos/$REPO/collaborators/$actor/permission" --jq .permission)"
+          if [ "$permission" != admin ]; then
+            echo "::warning::The $BYPASS_LABEL label on #$PR was applied by @$actor ($permission permission), not an admin; ignoring it."
+            exit 0
+          fi
+          echo "by=$actor" >> "$GITHUB_OUTPUT"
+      - name: Render the perf report
+        id: render
+        if: ${{ !cancelled() && steps.base.outputs.sha != '' }}
+        shell: bash
+        env:
+          BYPASSED_BY: ${{ steps.bypass.outputs.by }}
+        run: |
+          args=(--step-summary)
+          if [ -n "$BYPASSED_BY" ]; then args+=(--bypassed-by "$BYPASSED_BY"); fi
+          just perf-comment "${args[@]}" > /dev/null
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() && steps.render.outcome == 'success' }}
+        with:
+          name: perf-report
+          path: |
+            target/perf-check/comment.md
+            target/perf-check/results.json
+          retention-days: 14
+      # Re-classifies from results.json (same code as --status above) and fails unless the run
+      # passed, or is a validated regression accepted by an admin.
+      - name: Enforce the gate
+        if: ${{ !cancelled() && steps.base.outputs.sha != '' }}
+        shell: bash
+        env:
+          RC: ${{ steps.check.outputs.rc }}
+          BASE: ${{ steps.base.outputs.sha }}
+          BYPASSED_BY: ${{ steps.bypass.outputs.by }}
+        run: |
+          args=(--rc "$RC" --base-sha "$BASE")
+          if [ -n "$BYPASSED_BY" ]; then args+=(--bypassed-by "$BYPASSED_BY"); fi
+          just perf-gate "${args[@]}"
+
+  # Separate job so the only write permission never coexists with the PR code that perf-check
+  # builds and runs; this job only checks out the stdlib poster script. Comment API errors (e.g.
+  # the read-only token of a fork PR) don't fail the run; the gate is the perf-check job.
+  comment:
+    name: "perf report comment"
+    needs: perf-check
+    if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            crates/sas-lexer-perf
+            mise.toml
+          sparse-checkout-cone-mode: false
+      # uv and Python only (pinned in mise.toml), not the other dev tools.
+      - uses: jdx/mise-action@v5
+        with:
+          install_args: python uv
+      - uses: actions/download-artifact@v8
+        id: download
+        continue-on-error: true
+        with:
+          name: perf-report
+          path: perf-report
+      # Skips (without touching the comment) when the PR head moved on since this run's event,
+      # e.g. for a re-run of an older commit, so a stale report can't replace a newer one.
+      - name: Create or update the sticky comment
+        if: steps.download.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          uv run --no-project crates/sas-lexer-perf/sticky_comment.py perf-report/comment.md \
+            --repo "$REPO" --pr "$PR" --head-sha "$HEAD_SHA"
