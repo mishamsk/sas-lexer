@@ -10,6 +10,7 @@ typos = "1.52.2"
 hyperfine = "2.0.0"
 "github:taiki-e/cargo-hack" = "0.6.46"
 "github:est31/cargo-udeps" = "0.1.61"
+cargo-release = "1.1.7"
 
 [env]
 # Make uv use the mise-selected Python.

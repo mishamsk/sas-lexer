@@ -1,0 +1,85 @@
+name: Test, publish to crates.io & release Rust crates
+
+on:
+  push:
+    tags:
+      - "rust-v*"
+
+jobs:
+  # The tag must match the workspace version (sas-lexer inherits it).
+  validate-version:
+    name: Validate version tag
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Check Cargo.toml version matches tag
+        id: version
+        run: |
+          version=${GITHUB_REF#refs/tags/rust-v}
+          cargo_version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
+          echo "Tag: $version, Cargo.toml: $cargo_version"
+          test "$version" = "$cargo_version" || { echo "::error::tag rust-v$version does not match Cargo.toml version $cargo_version"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  test:
+    needs: validate-version
+    uses: ./.github/workflows/ci.yml
+
+  publish-crates:
+    name: Publish to crates.io
+    needs: [validate-version, test]
+    runs-on: ubuntu-latest
+    environment: crates
+    permissions:
+      # For the checkout step.
+      contents: read
+      # For crates.io trusted publishing.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Install Rust
+        uses: ./.github/actions/setup-rust
+      - name: Authenticate with crates.io
+        id: auth
+        uses: rust-lang/crates-io-auth-action@v1
+      # sas-lexer-macro is versioned separately: publish it only when its version is not on crates.io yet.
+      - name: Publish to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+        run: |
+          macro_version=$(sed -n 's/^version = "\(.*\)"$/\1/p' crates/sas-lexer-macro/Cargo.toml)
+          curl -sSf https://index.crates.io/sa/s-/sas-lexer-macro | grep -q "\"vers\":\"$macro_version\"" \
+            || cargo publish --locked -p sas-lexer-macro
+          cargo publish --locked -p sas-lexer
+
+  release:
+    name: Create Release
+    needs: [validate-version, publish-crates]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Get Changelog Entry
+        id: changelog_reader
+        uses: mindsers/changelog-reader-action@v2
+        with:
+          validation_level: error
+          version: ${{ needs.validate-version.outputs.version }}
+          path: ./CHANGELOG-RUST.md
+
+      - name: create github release
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          body: ${{ steps.changelog_reader.outputs.changes }}
+          draft: true
+          prerelease: ${{ steps.changelog_reader.outputs.status == 'prereleased' }}

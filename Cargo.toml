@@ -73,6 +73,8 @@ default.extend-ignore-words-re = ["LOWCASE"]
 default.extend-words = { "Ot" = "Ot", "Informat" = "Informat", "INFORMAT" = "INFORMAT" }
 
 [workspace.metadata.release]
+# CI publishes from the release tag (release-rust.yml, release-python.yml).
+publish = false
 sign-commit = true
 sign-tag = true
 allow-branch = ["main", "!HEAD"]
