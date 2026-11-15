@@ -20,6 +20,8 @@ jobs:
     environment:
       name: pypi
     permissions:
+      # For the checkout step.
+      contents: read
       # For PyPI's trusted publishing.
       id-token: write
       # Used to generate artifact attestation
