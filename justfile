@@ -192,7 +192,7 @@ perf-bench *args:
 perf-test:
     cargo test -p sas-lexer-perf --lib --locked
     cargo test -p sas-lexer-perf --lib --locked --features macro_sep
-    uv run --no-project --directory crates/sas-lexer-perf python -m unittest -v test_report
+    uv run --no-project --directory crates/sas-lexer-perf python -m unittest -v test_report test_sticky_comment
 
 # Regression gate: the lexer at `base` vs the working tree, same harness and inputs. Fails on >= perf_threshold% regressions.
 [unix]
@@ -272,6 +272,12 @@ perf-check $base="origin/main":
 [positional-arguments]
 perf-comment *args:
     uv run --no-project crates/sas-lexer-perf/report.py comment target/perf-check/results.json --output target/perf-check/comment.md "$@"
+
+# Arguments: `--rc RC --base-sha SHA [--bypassed-by LOGIN] [--status]`.
+# CI gate for the last perf-check: only a validated regression for that base is bypassable.
+[positional-arguments]
+perf-gate *args:
+    uv run --no-project crates/sas-lexer-perf/report.py gate target/perf-check/results.json "$@"
 
 # Build the Linux image used by the -docker perf recipes (Rust, gungraun-runner and uv at the repo pins).
 [unix]

@@ -15,7 +15,13 @@ Two commands (stdlib only):
     report.py comment RESULTS [--bypassed-by LOGIN] [--output FILE] [--step-summary]
         Renders the results JSON as the PR comment / job summary markdown. `--bypassed-by`
         marks a regression as accepted by that (already verified) admin; it never turns an
-        INVALID result into anything else.
+        INVALID result into anything else. Missing or unreadable results render as INVALID.
+
+    report.py gate RESULTS --rc RC --base-sha SHA [--bypassed-by LOGIN] [--status]
+        The CI gate decision. The comparison counts as a regression (the only bypassable state)
+        or a pass only if the `check` exit code RC and a results JSON for exactly this base agree
+        and the rows confirm the verdict; anything else is INVALID and fails, even with a
+        bypass. `--status` only prints pass/regression/invalid.
 
 Usage:
     report.py check --threshold 2 --expected benchmarks.txt --expect-configs default macro_sep \
@@ -32,6 +38,7 @@ import json
 import math
 import os
 import sys
+import traceback
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -426,6 +433,7 @@ def threshold_arg(value: str) -> float:
 def write_markdown(markdown: str, output: Path | None, *, step_summary: bool = False) -> None:
     print(markdown)
     if output:
+        output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(markdown, encoding="utf-8")
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if step_summary and summary:
@@ -465,7 +473,7 @@ def check_main(argv: list[str]) -> int:
     meta = {"base_sha": args.base_sha, "head": args.head, "tools": args.tools}
     try:
         rows = collect(args.config, read_expected(args.expected), args.expect_configs)
-    except (InvalidResultsError, json.JSONDecodeError, KeyError, TypeError, AttributeError) as e:
+    except (InvalidResultsError, OSError, ValueError, KeyError, TypeError, AttributeError) as e:
         doc = results_doc(verdict=INVALID, threshold=args.threshold, meta=meta, error=str(e))
         code = EXIT_INVALID
     else:
@@ -493,40 +501,112 @@ def comment_main(argv: list[str]) -> int:
         "--step-summary", action="store_true", help="append to $GITHUB_STEP_SUMMARY when set"
     )
     args = parser.parse_args(argv)
-    if not args.results.exists():
-        # perf-check stopped before the comparison (e.g. a build failure): still report it.
-        doc = results_doc(
-            verdict=INVALID,
-            threshold=MAX_THRESHOLD,
-            meta={},
-            error="no results: the perf check failed before the comparison (see the job log)",
-        )
-        write_markdown(render(doc), args.output, step_summary=args.step_summary)
-        return EXIT_OK
     try:
-        doc = json.loads(args.results.read_text(encoding="utf-8"))
-        if doc.get("version") != RESULTS_VERSION:
-            msg = f"unsupported results version {doc.get('version')!r}"
-            raise InvalidResultsError(msg)
-        markdown = render(doc, args.bypassed_by)
-    except (OSError, InvalidResultsError, json.JSONDecodeError, KeyError, TypeError) as e:
-        print(f"cannot render {args.results}: {e}", file=sys.stderr)
-        return EXIT_INVALID
+        markdown = render(load_results(args.results), args.bypassed_by)
+    except InvalidResultsError as e:
+        # E.g. perf-check stopped before the comparison: still report it, as INVALID.
+        doc = results_doc(verdict=INVALID, threshold=MAX_THRESHOLD, meta={}, error=str(e))
+        markdown = render(doc)
     write_markdown(markdown, args.output, step_summary=args.step_summary)
     return EXIT_OK
 
 
+def load_results(path: Path) -> dict:
+    """A results JSON written by `check`; InvalidResultsError if it's missing or unusable."""
+    if not path.is_file():
+        msg = "no results: the perf check failed before the comparison (see the job log)"
+        raise InvalidResultsError(msg)
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+        rows_from_doc(doc)
+        float(doc["threshold"])
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, IndexError) as e:
+        msg = f"unreadable results {path}: {e}"
+        raise InvalidResultsError(msg) from None
+    if doc.get("version") != RESULTS_VERSION:
+        msg = f"unsupported results version {doc.get('version')!r}"
+        raise InvalidResultsError(msg)
+    return doc
+
+
+def classify(doc: dict, rc: str, base_sha: str) -> tuple[str, str]:  # noqa: PLR0911
+    """(status, reason): `pass` or `regression` only when every signal agrees, else `invalid`."""
+    if doc.get("base_sha") != base_sha:
+        return INVALID, f"results are for base {doc.get('base_sha')!r}, not {base_sha!r}"
+    verdict = doc.get("verdict")
+    if verdict == INVALID:
+        return INVALID, f"the comparison is INVALID: {doc.get('error')}"
+    expected_rc = {PASS: str(EXIT_OK), REGRESSION: str(EXIT_REGRESSION)}.get(verdict)
+    if expected_rc is None:
+        return INVALID, f"unknown verdict {verdict!r}"
+    if rc != expected_rc:
+        return INVALID, f"exit code {rc!r} doesn't match the {verdict} verdict"
+    rows = rows_from_doc(doc)
+    if not rows:
+        return INVALID, "results have no benchmark rows"
+    try:
+        failed = failures(rows, float(doc["threshold"]))
+    except (KeyError, TypeError, ValueError, ZeroDivisionError) as e:
+        return INVALID, f"results rows are unusable: {e}"
+    if bool(failed) != (verdict == REGRESSION):
+        return INVALID, f"the rows don't support the {verdict} verdict"
+    return str(verdict), str(verdict)
+
+
+def gate_main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(prog="report.py gate", description="The CI gate decision.")
+    parser.add_argument("results", type=Path)
+    parser.add_argument("--rc", required=True, help="exit code of `report.py check` / perf-check")
+    parser.add_argument("--base-sha", required=True, help="the base commit this run compared")
+    parser.add_argument("--bypassed-by", help="admin who accepted a regression (verified by CI)")
+    parser.add_argument("--status", action="store_true", help="only print the status")
+    args = parser.parse_args(argv)
+    try:
+        status, reason = classify(load_results(args.results), args.rc, args.base_sha)
+    except InvalidResultsError as e:
+        status, reason = INVALID, str(e)
+    if args.status:
+        print(status)
+        return EXIT_OK
+    if status == PASS:
+        print("No regressions.")
+        return EXIT_OK
+    if status == REGRESSION and args.bypassed_by:
+        print(
+            f"::warning::Performance regression accepted by admin @{args.bypassed_by} "
+            f"({BYPASS_LABEL} label)."
+        )
+        return EXIT_OK
+    if status == REGRESSION:
+        print(
+            "::error::Performance regression; see the job summary. A repo admin can accept it "
+            f"with the {BYPASS_LABEL} label."
+        )
+    else:
+        print(f"::error::The perf check is INVALID (no bypass possible): {reason}")
+    return EXIT_REGRESSION
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
-    if argv[:1] == ["comment"]:
-        return comment_main(argv[1:])
-    if argv[:1] == ["check"]:
-        argv = argv[1:]
-    return check_main(argv)
+    commands = {"comment": comment_main, "gate": gate_main, "check": check_main}
+    command = commands.get(argv[0], None) if argv else None
+    if command is None:
+        return check_main(argv)
+    return command(argv[1:])
+
+
+def run() -> int:
+    """Entry point: an unexpected crash exits 2 (INVALID), never 1 (regression)."""
+    try:
+        return main()
+    except Exception:  # deliberately broad: fail closed with a distinct code
+        traceback.print_exc()
+        return EXIT_INVALID
 
 
 if __name__ == "__main__":
     # The markdown has emoji; don't crash on a console that can't encode them (e.g. cp1252).
     if isinstance(sys.stdout, io.TextIOWrapper):
         sys.stdout.reconfigure(errors="replace")
-    sys.exit(main())
+    sys.exit(run())

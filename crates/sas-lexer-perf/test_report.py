@@ -307,7 +307,7 @@ class CommentSnapshotTest(unittest.TestCase):
 
     def test_comment_without_results_reports_invalid(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            output = Path(tmp) / "comment.md"
+            output = Path(tmp) / "target" / "perf-check" / "comment.md"  # parent doesn't exist
             with contextlib.redirect_stdout(io.StringIO()):
                 argv = ["comment", str(Path(tmp) / "missing.json"), "--bypassed-by", "mishamsk"]
                 code = report.main([*argv, "--output", str(output)])
@@ -317,12 +317,136 @@ class CommentSnapshotTest(unittest.TestCase):
             self.assertIn("failed before the comparison", markdown)
             self.assertNotIn("accepted", markdown)
 
-    def test_comment_command_rejects_bad_results(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            results = Path(tmp) / "results.json"
-            results.write_text('{"version": 99}', encoding="utf-8")
-            with contextlib.redirect_stderr(io.StringIO()):
-                self.assertEqual(report.main(["comment", str(results)]), report.EXIT_INVALID)
+    def test_comment_with_unusable_results_reports_invalid(self) -> None:
+        for body in ['{"version": 99, "rows": [], "threshold": 2}', "{not json", "[]"]:
+            with self.subTest(body=body), tempfile.TemporaryDirectory() as tmp:
+                results = Path(tmp) / "results.json"
+                results.write_text(body, encoding="utf-8")
+                output = Path(tmp) / "comment.md"
+                with contextlib.redirect_stdout(io.StringIO()):
+                    argv = ["comment", str(results), "--bypassed-by", "mishamsk"]
+                    code = report.main([*argv, "--output", str(output)])
+                self.assertEqual(code, report.EXIT_OK)
+                markdown = output.read_text(encoding="utf-8")
+                self.assertIn("INVALID", markdown)
+                self.assertNotIn("accepted", markdown)
+
+
+BASE_SHA = "0123456789abcdef0123456789abcdef01234567"
+
+
+class GateTest(unittest.TestCase):
+    """The CI decision: only a validated regression for this base is bypassable."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.results = Path(self.tmp.name) / "target" / "perf-check" / "results.json"
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def write(self, doc: dict) -> None:
+        self.results.parent.mkdir(parents=True, exist_ok=True)
+        self.results.write_text(json.dumps(doc), encoding="utf-8")
+
+    def gate(self, rc: str, *extra: str, base: str = BASE_SHA) -> tuple[int, str]:
+        out = io.StringIO()
+        argv = ["gate", str(self.results), "--rc", rc, "--base-sha", base, *extra]
+        with contextlib.redirect_stdout(out):
+            code = report.main(argv)
+        return code, out.getvalue()
+
+    def status(self, rc: str, base: str = BASE_SHA) -> str:
+        code, out = self.gate(rc, "--status", base=base)
+        self.assertEqual(code, report.EXIT_OK)
+        return out.strip()
+
+    def test_pass(self) -> None:
+        self.write(fixture_doc(report.PASS))
+        self.assertEqual(self.status("0"), report.PASS)
+        self.assertEqual(self.gate("0")[0], report.EXIT_OK)
+
+    def test_regression_fails_without_bypass(self) -> None:
+        self.write(fixture_doc(report.REGRESSION))
+        self.assertEqual(self.status("1"), report.REGRESSION)
+        code, out = self.gate("1")
+        self.assertEqual(code, 1)
+        self.assertIn("::error::Performance regression", out)
+
+    def test_regression_passes_with_bypass(self) -> None:
+        self.write(fixture_doc(report.REGRESSION))
+        code, out = self.gate("1", "--bypassed-by", "mishamsk")
+        self.assertEqual(code, report.EXIT_OK)
+        self.assertIn("::warning::Performance regression accepted by admin @mishamsk", out)
+
+    def assert_not_bypassable(self, rc: str, base: str = BASE_SHA) -> None:
+        self.assertEqual(self.status(rc, base=base), report.INVALID)
+        code, out = self.gate(rc, "--bypassed-by", "mishamsk", base=base)
+        self.assertEqual(code, 1, out)
+        self.assertIn("INVALID", out)
+        self.assertNotIn("accepted", out)
+
+    # Review r5 finding 1: an operational exit 1 without a fresh regression result.
+    def test_exit_1_without_results_is_not_bypassable(self) -> None:
+        self.assert_not_bypassable("1")
+
+    def test_invalid_verdict_is_not_bypassable(self) -> None:
+        for rc in ["1", "2"]:
+            with self.subTest(rc=rc):
+                self.write(
+                    report.results_doc(
+                        verdict=report.INVALID,
+                        threshold=2.0,
+                        meta={"base_sha": BASE_SHA},
+                        error="missing benchmark",
+                    )
+                )
+                self.assert_not_bypassable(rc)
+
+    def test_results_for_another_base_are_not_bypassable(self) -> None:
+        self.write(fixture_doc(report.REGRESSION))
+        self.assert_not_bypassable("1", base="f" * 40)
+
+    def test_exit_code_must_match_the_verdict(self) -> None:
+        self.write(fixture_doc(report.REGRESSION))
+        for rc in ["0", "2", "", "137"]:
+            with self.subTest(rc=rc):
+                self.assert_not_bypassable(rc)
+        self.write(fixture_doc(report.PASS))
+        self.assert_not_bypassable("1")
+
+    def test_rows_must_support_the_verdict(self) -> None:
+        doc = fixture_doc(report.PASS)
+        doc["verdict"] = report.REGRESSION  # claims a regression the rows don't show
+        self.write(doc)
+        self.assert_not_bypassable("1")
+        doc = fixture_doc(report.REGRESSION)
+        doc["rows"] = []
+        self.write(doc)
+        self.assert_not_bypassable("1")
+
+    def test_unreadable_results_are_not_bypassable(self) -> None:
+        self.results.parent.mkdir(parents=True)
+        self.results.write_text("{truncated", encoding="utf-8")
+        self.assert_not_bypassable("1")
+
+    def test_check_operational_error_exits_invalid(self) -> None:
+        # E.g. a missing benchmarks.txt: exit 2 and an INVALID results JSON, never exit 1.
+        results = Path(self.tmp.name) / "results.json"
+        argv = ["check", "--threshold", "2", "--expected", str(Path(self.tmp.name) / "nope.txt")]
+        argv += ["--expect-configs", "default", "--config", "default", "a.jsonl", "b.jsonl"]
+        argv += ["--base-sha", BASE_SHA, "--results", str(results)]
+        with contextlib.redirect_stdout(io.StringIO()):
+            code = report.main(argv)
+        self.assertEqual(code, report.EXIT_INVALID)
+        self.assertEqual(json.loads(results.read_text(encoding="utf-8"))["verdict"], "invalid")
+
+    def test_unexpected_crash_exits_invalid(self) -> None:
+        with (
+            mock.patch.object(report, "main", side_effect=RuntimeError("boom")),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            self.assertEqual(report.run(), report.EXIT_INVALID)
 
 
 if __name__ == "__main__":
