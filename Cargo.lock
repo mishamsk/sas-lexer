@@ -2735,7 +2735,7 @@ dependencies = [
 
 [[package]]
 name = "sas-lexer-py"
-version = "1.0.0-beta.2"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "convert_case",

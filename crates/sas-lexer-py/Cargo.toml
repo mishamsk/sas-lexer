@@ -7,7 +7,7 @@ repository = { workspace = true }
 # PyO3 0.30 requires Rust 1.85. This crate is private (publish = false), so it does not
 # constrain the public crates, which keep the workspace MSRV.
 rust-version = "1.85"
-version = "1.0.0-beta.2"
+version = "1.0.0"
 license = { workspace = true }
 keywords = { workspace = true }
 categories = { workspace = true }
