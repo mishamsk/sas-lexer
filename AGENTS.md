@@ -47,4 +47,4 @@ Guidance for agents working in `sas-lexer`. The `justfile` is the command author
 - Never merge PRs, push to `main`, or touch GitHub issues/PRs unless asked.
 
 ## Releases
-- Follow the project release skill in `.claude/skills/`.
+- Follow the release skill: [.claude/skills/release/SKILL.md](.claude/skills/release/SKILL.md).

@@ -1,29 +1,67 @@
 name: Publish to Test PyPI
 
+# Release candidate check for the Python train (.claude/skills/release/SKILL.md). Every dispatch
+# uploads a new PEP 440 dev version, <release version>.dev<run id> (e.g. 1.0.0b2.dev19283746501),
+# so the same commit can be validated again without a version collision. Only these TestPyPI
+# builds carry the suffix; release-python.yml builds the committed version.
 on:
   workflow_dispatch:
 
-jobs:
-  build-wheels:
-    uses: ./.github/workflows/build-py-wheels.yml
+permissions:
+  contents: read
 
-  pypi-publish:
-    name: Upload to PyPI
-    needs: build-wheels
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  version:
+    name: Check versions
     runs-on: ubuntu-latest
-    environment:
-      name: testpypi
-    permissions:
-      # For the checkout step.
-      contents: read
-      # For PyPI's trusted publishing.
-      id-token: write
+    outputs:
+      dev: ${{ steps.version.outputs.dev }}
     steps:
-      # Needed so setup-uv can read the pinned uv version from pyproject.toml.
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - name: "Install uv"
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.3.3
+        with:
+          version-file: pyproject.toml
+      # Fails unless the binding crate, pyproject.toml and __version__ agree; prints the dev
+      # version every build job of this run sets (same run id).
+      - name: Versions agree
+        id: version
+        env:
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          out="$(uv run --no-project python -I .github/scripts/release.py dev "$RUN_ID")"
+          echo "$out" | tee -a "$GITHUB_OUTPUT"
+          echo "TestPyPI candidate \`${out#dev=}\` from \`$GITHUB_SHA\` ($GITHUB_REF_NAME)" >> "$GITHUB_STEP_SUMMARY"
+
+  build-wheels:
+    needs: version
+    uses: ./.github/workflows/build-py-wheels.yml
+    with:
+      dev-number: ${{ github.run_id }}
+
+  pypi-publish:
+    name: Upload to TestPyPI
+    needs: [version, build-wheels]
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/project/sas-lexer/${{ needs.version.outputs.dev }}/
+    permissions:
+      contents: read
+      # For trusted publishing.
+      id-token: write
+    steps:
+      # setup-uv reads the pinned uv version from pyproject.toml.
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Install uv
         uses: astral-sh/setup-uv@v10.3.3
         with:
           version-file: pyproject.toml
@@ -32,5 +70,11 @@ jobs:
           pattern: wheels-*
           path: wheels
           merge-multiple: true
-      - name: Publish to PyPi
-        run: uv publish -v --publish-url https://test.pypi.org/legacy/ wheels/*
+      - name: Artifacts are this run's sdist and wheels only
+        env:
+          DEV: ${{ needs.version.outputs.dev }}
+        run: uv run --no-project python -I .github/scripts/release.py artifacts "$DEV" wheels
+      # OIDC only (no token fallback). --check-url skips files TestPyPI already has with the same
+      # hash, so re-running failed jobs of a run is safe.
+      - name: Publish to TestPyPI
+        run: uv publish -v --trusted-publishing always --publish-url https://test.pypi.org/legacy/ --check-url https://test.pypi.org/simple/ wheels/*

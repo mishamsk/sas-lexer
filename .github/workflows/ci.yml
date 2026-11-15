@@ -176,6 +176,21 @@ jobs:
       - name: Lint and check formatting with Ruff
         run: just ruff
 
+  # Version checks that gate the Python release and TestPyPI workflows.
+  release-scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.3.3
+        with:
+          version-file: pyproject.toml
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+      - name: Release script tests
+        run: just release-scripts-test
+
   # Python tests.
   test-python:
     runs-on: ${{ matrix.runner }}

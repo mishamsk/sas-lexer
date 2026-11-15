@@ -90,12 +90,16 @@ test-python-ci:
     uv sync --no-editable --locked
     uv run pytest
 
+# Tests of the release version and changelog tooling (.github/scripts/release.py, stdlib only).
+release-scripts-test:
+    uv run --no-project --directory .github/scripts python -m unittest test_release
+
 # All tests: Rust doc/unit/integration, then Python.
 test: test-rust test-python
 
 # Run everything CI runs, locally, with the same recipes as the CI jobs (except the
 # Linux-only `perf-check` gate; run `just perf-check` or `just perf-docker perf-check` for it).
-ci: fmt-check clippy udeps msrv ruff build doc test-rust test-python-ci perf-test
+ci: fmt-check clippy udeps msrv ruff build doc test-rust test-python-ci perf-test release-scripts-test
 
 # ---------------------------------------------------------------------------
 # Python environment
@@ -307,48 +311,117 @@ perf-compare sha: build-rel
     hyperfine -w 5 "$base lex $PERF_LARGE_SAMPLE" "target/release/sas-lexer lex $PERF_LARGE_SAMPLE"
 
 # ---------------------------------------------------------------------------
-# Release (cargo-release). Plain recipes are DRY RUNS; the -execute ones really release.
+# Release: two trains. rust = crates sas-lexer and sas-lexer-macro (tags rust-v*), py = the PyPI
+# package (tags py-v*). A release PR sets the version and dates the changelog; a signed tag on the
+# merged commit makes CI publish (release-rust.yml, release-python.yml). Full flow:
+# .claude/skills/release/SKILL.md. train: rust|py; version: X.Y.Z or X.Y.Z-(alpha|beta|rc).N
 # ---------------------------------------------------------------------------
 
-# Dry run: release the main sas-lexer crate. level: major|minor|patch|release|rc|beta|alpha or an explicit semver
+# Set the train's version, turn the changelog's Unreleased section into a dated entry, update lockfiles.
 [unix]
-release-rust $level:
-    @just _release sas-lexer "$level" dry
+release-prep $train $version:
+    uv run --no-project python -I .github/scripts/release.py prep "$train" "$version"
+    cargo update --workspace --quiet
+    if [ "$train" = py ]; then uv lock --quiet; fi
 
-# EXECUTES: release the main sas-lexer crate (commit, tag, publish).
-[confirm("Really release sas-lexer (not a dry run)?")]
+# Check the train's version sources agree; with a tag, also the tag and the dated changelog entry.
 [unix]
-release-rust-execute $level:
-    @just _release sas-lexer "$level" execute
+release-check $train $tag="":
+    @uv run --no-project python -I .github/scripts/release.py check "$train" ${tag:+--tag "$tag"}
 
-# Dry run: release the python package. level: major|minor|patch|release|rc|beta|alpha or an explicit semver
+# Package and verify the crates as crates.io would (both in one run, so a new macro version is used), without uploading.
 [unix]
-release-py $level:
-    @just _release sas-lexer-py "$level" dry
+release-rust-dry-run:
+    just _release-macro-bumped >/dev/null
+    cargo publish --dry-run --locked -p sas-lexer-macro -p sas-lexer
 
-# EXECUTES: release the python package (commit, tag).
-[confirm("Really release sas-lexer-py (not a dry run)?")]
+# Safe to re-run: a version already on crates.io must match this commit.
+# CI only (release-rust.yml, needs CARGO_REGISTRY_TOKEN): publish sas-lexer-macro if this release bumps it, then sas-lexer.
 [unix]
-release-py-execute $level:
-    @just _release sas-lexer-py "$level" execute
+release-publish-crates:
+    if [ "$(just _release-macro-bumped)" = yes ]; then just _release-publish-crate sas-lexer-macro; fi
+    just _release-publish-crate sas-lexer
 
-# Shared cargo-release wrapper. Only an allow-listed level or a plain semver is accepted,
-# so flags such as --execute cannot be smuggled in; only mode=execute adds -x.
-[private]
+# Maintainer only: sign and push the release tag on the merged release commit; CI then publishes with no further approval.
+[confirm("Create and push the signed release tag? CI then publishes it without further approval.")]
 [unix]
-_release package $level mode:
+release-tag $train $sha:
     #!/usr/bin/env bash
     set -euo pipefail
-    case "$level" in
-        major|minor|patch|release|rc|beta|alpha) ;;
-        *)
-            if ! [[ "$level" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
-                echo "invalid release level: $level (expected major|minor|patch|release|rc|beta|alpha or a semver)" >&2
-                exit 1
-            fi
-            ;;
-    esac
-    if [ "{{ mode }}" = execute ]; then
-        exec cargo release -p "{{ package }}" -x "$level"
+    die() { echo "error: $*" >&2; exit 1; }
+    [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || die "pass the full 40-character SHA of the merged release commit"
+    [ -z "$(git status --porcelain)" ] || die "the working tree is not clean"
+    git fetch origin main --tags
+    [ "$(git rev-parse HEAD)" = "$sha" ] || die "HEAD is not $sha: check out the merged release commit"
+    git merge-base --is-ancestor "$sha" origin/main || die "$sha is not on origin/main"
+    for wf in ci.yml perf.yml; do
+        ok="$(gh run list --workflow "$wf" --commit "$sha" --event push --status success --json databaseId --jq length)"
+        [ "$ok" -gt 0 ] || die "no successful $wf run on main for $sha"
+    done
+    version="$(just release-check "$train" | sed -n 's/^version=//p')"
+    tag="$([ "$train" = rust ] && echo rust || echo py)-v$version"
+    just release-check "$train" "$tag" >/dev/null
+    ! git show-ref --quiet --verify "refs/tags/$tag" || die "tag $tag already exists locally"
+    ! git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null || die "tag $tag already exists on origin"
+    git tag -s -m "release $tag" "$tag" "$sha"
+    git cat-file tag "$tag" | grep -q -- '-----BEGIN .* SIGNATURE-----' || die "tag $tag is not signed"
+    git push origin "refs/tags/$tag:refs/tags/$tag"
+    echo "Pushed $tag ($sha). Watch: gh run list --event push --limit 3"
+
+# Print "yes" if this release bumps sas-lexer-macro (its version differs from the previous rust-v*
+# tag), else "no". Fails if the macro changed since that tag without a version bump.
+[private]
+[unix]
+_release-macro-bumped:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    last="$(git describe --tags --abbrev=0 --match 'rust-v*' HEAD^)"
+    version="$(just _release-version sas-lexer-macro)"
+    # The macro manifest has a literal version, so the first top-level `version =` line is it.
+    prev="$(git show "$last:crates/sas-lexer-macro/Cargo.toml" | sed -n 's/^version = "\(.*\)"$/\1/p' | head -n 1)"
+    [ -n "$prev" ] || { echo "error: no sas-lexer-macro version found at $last" >&2; exit 1; }
+    if [ "$version" != "$prev" ]; then
+        echo yes
+    elif git diff --quiet "$last" HEAD -- crates/sas-lexer-macro; then
+        echo no
+    else
+        echo "error: crates/sas-lexer-macro changed since $last but is still $version; bump its version and the [workspace.dependencies] requirement" >&2
+        exit 1
     fi
-    exec cargo release -p "{{ package }}" "$level"
+
+# Publish crate@<manifest version>. If crates.io already has that version (a re-run), require its
+# checksum to equal this commit's `cargo package` output (reproducible for the same commit and
+# toolchain), so an upload from another commit is never taken for this release.
+[private]
+[unix]
+_release-publish-crate crate:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    die() { echo "error: $*" >&2; exit 1; }
+    crate="{{ crate }}"
+    version="$(just _release-version "$crate")"
+    index="$(curl -fsS "https://index.crates.io/${crate:0:2}/${crate:2:2}/$crate")" || die "cannot read the crates.io index for $crate"
+    entry="$(grep -F "\"vers\":\"$version\"" <<<"$index" || true)"
+    if [ -z "$entry" ]; then
+        cargo publish --locked -p "$crate"
+        exit 0
+    fi
+    published="$(grep -oE '"cksum":"[0-9a-f]{64}"' <<<"$entry" | cut -d'"' -f4)"
+    [ -n "$published" ] || die "no checksum for $crate $version in the crates.io index"
+    cargo package --locked --no-verify --quiet -p "$crate"
+    target="$(cargo metadata --no-deps --format-version 1 | grep -oE '"target_directory":"[^"]+"' | cut -d'"' -f4)"
+    local_sum="$(shasum -a 256 "$target/package/$crate-$version.crate" | cut -d' ' -f1)"
+    [ "$local_sum" = "$published" ] || die "$crate $version is on crates.io (sha256 $published) but this commit packages to $local_sum"
+    echo "$crate $version is already on crates.io and matches this commit"
+
+# Print the manifest version of a workspace crate.
+[private]
+[unix]
+_release-version package:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # From the manifests (not Cargo.lock); --no-deps lists only workspace members.
+    meta="$(cargo metadata --no-deps --format-version 1)"
+    version="$(grep -oE "\"name\":\"{{ package }}\",\"version\":\"[^\"]+\"" <<<"$meta" | cut -d\" -f8 || true)"
+    [ -n "$version" ] || { echo "error: no version found for {{ package }}" >&2; exit 1; }
+    echo "$version"

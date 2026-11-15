@@ -1,0 +1,106 @@
+name: Release Rust crates (crates.io)
+
+# Triggered by a signed rust-v<version> tag on a merged release commit of main
+# (.claude/skills/release/SKILL.md). Validates the tag, runs CI, publishes sas-lexer-macro (when
+# this release bumps it) and then sas-lexer via crates.io trusted publishing, and drafts the
+# GitHub release. The `crates` environment restricts deployments to rust-v* tags and has no
+# required reviewers, so the tag is the only authorization.
+on:
+  push:
+    tags:
+      - "rust-v*"
+
+permissions:
+  contents: read
+
+# One run per tag, never cancelled.
+concurrency:
+  group: release-rust-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  validate:
+    name: Validate tag and versions
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      # Full history and tags: main ancestry and the previous rust-v* tag (macro bump check).
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.3.3
+        with:
+          version-file: pyproject.toml
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+      - name: Tag, version and changelog agree
+        id: version
+        run: just release-check rust "$GITHUB_REF_NAME" | tee -a "$GITHUB_OUTPUT"
+      - name: Tagged commit is on main
+        run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "::error::$GITHUB_SHA is not on main"; exit 1; }
+
+  test:
+    needs: validate
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    name: Publish to crates.io
+    needs: [validate, test]
+    runs-on: ubuntu-latest
+    environment:
+      name: crates
+      url: https://crates.io/crates/sas-lexer/${{ needs.validate.outputs.version }}
+    permissions:
+      contents: read
+      # For trusted publishing.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install Rust
+        uses: ./.github/actions/setup-rust
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+      # Exchanges the job's OIDC token for a short-lived crates.io token.
+      - name: Authenticate with crates.io
+        id: auth
+        uses: rust-lang/crates-io-auth-action@v1
+      - name: Publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+        run: just release-publish-crates
+
+  release:
+    name: Draft GitHub release
+    needs: [validate, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Get changelog entry
+        id: changelog_reader
+        uses: mindsers/changelog-reader-action@v2
+        with:
+          validation_level: error
+          version: ${{ needs.validate.outputs.version }}
+          path: ./CHANGELOG-RUST.md
+      - name: Create draft release
+        uses: softprops/action-gh-release@v2
+        with:
+          body: ${{ steps.changelog_reader.outputs.changes }}
+          draft: true
+          prerelease: ${{ steps.changelog_reader.outputs.status == 'prereleased' }}

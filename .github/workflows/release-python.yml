@@ -1,37 +1,81 @@
-name: Test, build, publish to PyPI & release Python package
+name: Release Python package (PyPI)
 
+# Triggered by a signed py-v<version> tag on a merged release commit of main
+# (.claude/skills/release/SKILL.md). Validates the tag, runs CI, builds and tests the wheels,
+# publishes them to PyPI via trusted publishing and drafts the GitHub release. The `pypi`
+# environment restricts deployments to py-v* tags and has no required reviewers, so the tag is
+# the only authorization.
 on:
   push:
     tags:
       - "py-v*"
 
+permissions:
+  contents: read
+
+# One run per tag, never cancelled. The group differs from build-py-wheels.yml's
+# (workflow-ref), which GitHub would otherwise cancel as a deadlock.
+concurrency:
+  group: release-python-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
 jobs:
+  validate:
+    name: Validate tag and versions
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      pep440: ${{ steps.version.outputs.pep440 }}
+    steps:
+      # Full history, so the tagged commit can be checked against main.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.3.3
+        with:
+          version-file: pyproject.toml
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+      - name: Tag, versions and changelog agree
+        id: version
+        run: just release-check py "$GITHUB_REF_NAME" | tee -a "$GITHUB_OUTPUT"
+      - name: Tagged commit is on main
+        run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "::error::$GITHUB_SHA is not on main"; exit 1; }
+
   test:
+    needs: validate
     uses: ./.github/workflows/ci.yml
 
   build-wheels:
-    needs: test
+    needs: [validate, test]
     uses: ./.github/workflows/build-py-wheels.yml
 
   pypi-publish:
     name: Upload to PyPI
-    needs: [test, build-wheels]
+    needs: [validate, test, build-wheels]
     runs-on: ubuntu-latest
     environment:
       name: pypi
+      url: https://pypi.org/project/sas-lexer/${{ needs.validate.outputs.pep440 }}/
     permissions:
-      # For the checkout step.
       contents: read
-      # For PyPI's trusted publishing.
+      # For trusted publishing.
       id-token: write
-      # Used to generate artifact attestation
+      # For the artifact attestation.
       attestations: write
     steps:
-      # Needed so setup-uv can read the pinned uv version from pyproject.toml.
+      # setup-uv reads the pinned uv version from pyproject.toml.
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - name: "Install uv"
+      - name: Install uv
         uses: astral-sh/setup-uv@v10.3.3
         with:
           version-file: pyproject.toml
@@ -40,47 +84,43 @@ jobs:
           pattern: wheels-*
           path: wheels
           merge-multiple: true
+      - name: Artifacts are this release's sdist and wheels only
+        env:
+          PEP440: ${{ needs.validate.outputs.pep440 }}
+        run: uv run --no-project python -I .github/scripts/release.py artifacts "$PEP440" wheels
       - name: Generate artifact attestation
         uses: actions/attest-build-provenance@v4
         with:
           subject-path: "wheels/*"
-      - name: Publish to PyPi
-        run: uv publish -v wheels/*
+      # OIDC only (no token fallback). --check-url skips files PyPI already has with the same
+      # hash, so re-running failed jobs after a partial upload is safe; a different file fails.
+      - name: Publish to PyPI
+        run: uv publish -v --trusted-publishing always --check-url https://pypi.org/simple/ wheels/*
 
   release:
-    name: Create Release
-    needs: [test, build-wheels, pypi-publish]
+    name: Draft GitHub release
+    needs: [validate, pypi-publish]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - name: Get version from tag
-        id: tag_name
-        run: |
-          echo "current_version=${GITHUB_REF#refs/tags/py-v}" >> $GITHUB_OUTPUT
-        shell: bash
-
       - uses: actions/checkout@v7
-
-      - name: Get Changelog Entry
+        with:
+          persist-credentials: false
+      - name: Get changelog entry
         id: changelog_reader
         uses: mindsers/changelog-reader-action@v2
         with:
           validation_level: error
-          version: ${{ steps.tag_name.outputs.current_version }}
+          version: ${{ needs.validate.outputs.version }}
           path: ./CHANGELOG-PY.md
-
       - uses: actions/download-artifact@v8
         with:
           pattern: wheels-*
           path: wheels
           merge-multiple: true
-
-      - name: create github release
-        id: create_release
+      - name: Create draft release
         uses: softprops/action-gh-release@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           body: ${{ steps.changelog_reader.outputs.changes }}
           files: wheels/*
