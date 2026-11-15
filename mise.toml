@@ -1,10 +1,16 @@
-# Non-Python CLI tools used by the justfile recipes (locally and in CI), plus uv.
-# just and mise themselves are prerequisites and are not pinned here.
+# Development tools, locally and in CI: the dev Python, uv, and non-Python CLI tools used by the
+# justfile recipes. just and mise themselves are prerequisites and are not pinned here.
 # Rust toolchain: rust-toolchain.toml. Python tools (ruff, ty, pytest): pyproject dev group / uv.lock.
 [tools]
+# Dev Python; must satisfy requires-python and PyO3. CI's test-python matrix overrides it.
+python = "3.12"
 uv = "0.9.20"
 prek = "latest"
 typos = "1.52.2"
 hyperfine = "2.0.0"
 "github:taiki-e/cargo-hack" = "0.6.46"
 "github:est31/cargo-udeps" = "0.1.61"
+
+[env]
+# Make uv use the mise-selected Python.
+UV_PYTHON = { value = "{{ tools?.python?.path or xdg_data_home ~ '/mise/shims/python' }}", tools = true }

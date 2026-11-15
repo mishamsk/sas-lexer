@@ -59,10 +59,6 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      # The runner's default Python (3.14) is newer than PyO3 0.22 supports.
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
@@ -70,7 +66,8 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: just
-      # cargo-udeps is pinned in mise.toml.
+      # cargo-udeps and the dev Python (the runner default is newer than PyO3 0.22 supports)
+      # are pinned in mise.toml.
       - uses: jdx/mise-action@v5
       - name: "Udeps release"
         run: just udeps
@@ -169,17 +166,20 @@ jobs:
           - "3.10"
           - "3.11"
           - "3.12"
+    # Test the matrix Python, not the mise.toml dev pin: mise installs this version and
+    # exports UV_PYTHON for it (see mise.toml [env]).
+    env:
+      MISE_PYTHON_VERSION: ${{ matrix.python-version }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v6
-        with:
-          python-version: ${{ matrix.python-version }}
       - name: Install Rust
         uses: ./.github/actions/setup-rust
       - uses: taiki-e/install-action@v2
         with:
           tool: just
-      # uv is pinned in mise.toml.
+      # uv is pinned in mise.toml; Python comes from MISE_PYTHON_VERSION.
       - uses: jdx/mise-action@v5
+        with:
+          cache_key: "{{default}}-py${{ matrix.python-version }}"
       - name: Sync, build project & run tests
         run: just test-python-ci

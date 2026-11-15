@@ -65,7 +65,7 @@ ipython_config.py
 # pyenv
 .python-version
 
-# mise (personal overrides, e.g. a local Python)
+# mise (personal, uncommitted overrides)
 mise.local.toml
 
 # asdf

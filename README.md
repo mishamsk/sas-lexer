@@ -152,13 +152,8 @@ Prerequisites (base tooling, install them yourself): [just](https://github.com/c
 
 - The Rust toolchain is pinned in `rust-toolchain.toml`.
 - Python tools (ruff, ty, pytest) are in the pyproject `dev` group (`uv.lock`) and run via `uv run`.
-- Non-Python CLI tools (uv, prek, typos, cargo-hack, cargo-udeps, hyperfine) are pinned in `mise.toml`. Run `mise trust && mise install` once.
-- Use a Python the project supports (see `requires-python`). uv uses `UV_PYTHON` if it is set (e.g. by a global mise `[env]`). PyO3 builds use `PYO3_PYTHON`, then the active virtualenv, then `python`/`python3` on `PATH`. If your global Python is unsupported, pin one for this checkout in a git-ignored `mise.local.toml`:
-
-  ```toml
-  [tools]
-  python = "3.12"
-  ```
+- `mise.toml` pins the development Python, uv and the non-Python CLI tools (prek, typos, cargo-hack, cargo-udeps, hyperfine). Run `mise trust && mise install` once.
+- `mise.toml` also exports `UV_PYTHON` for the mise-selected Python, so uv and PyO3 builds (which find `python` on `PATH`) use the same supported interpreter. CI's Python test matrix overrides the dev pin with `MISE_PYTHON_VERSION`.
 - Run `just` to list recipes, `just py-init` to set up the environment and `just ci` to run the CI checks locally. Extra flags are forwarded to build and test recipes, e.g. `just build -v` or `just test-python -k comment`.
 
 ## Acknowledgments
