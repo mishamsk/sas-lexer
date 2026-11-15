@@ -2,11 +2,18 @@ name: Performance regression guard
 
 # Builds the lexer at the base and at the head of a change in the same job and
 # compares Callgrind instruction counts and estimated cycles (deterministic, so
-# runner noise doesn't matter). Fails on a >= 10% regression in any benchmark.
-# Same command locally: `just perf-check <base>` (or `just perf-docker perf-check <base>` on macOS).
+# runner noise doesn't matter). Fails on a >= 2% regression in any benchmark
+# (`perf_threshold` in the justfile), unless a repo admin accepted it with the
+# `perf-regression-accepted` PR label. Posts the report as one sticky PR comment.
+# Same command locally: `just perf-check <base>` (or `just perf-docker perf-check <base>` on macOS),
+# then `just perf-comment` to preview the comment.
 
 on:
   pull_request:
+    # labeled/unlabeled re-evaluate the gate when the bypass label changes. Every label event
+    # re-runs the whole check: skipping the job would record a "skipped" (passing) check run on
+    # the same commit and hide an earlier failure.
+    types: [opened, synchronize, reopened, labeled, unlabeled]
   push:
     branches: [main]
   workflow_dispatch:
@@ -16,8 +23,8 @@ on:
         required: false
         default: "HEAD~1"
 
-permissions:
-  contents: read
+# Each job declares the least it needs.
+permissions: {}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}-${{ github.event.pull_request.number || github.sha }}
@@ -27,6 +34,7 @@ env:
   CARGO_NET_RETRY: 10
   CARGO_TERM_COLOR: always
   RUSTUP_MAX_RETRIES: 10
+  BYPASS_LABEL: perf-regression-accepted
 
 jobs:
   perf-check:
@@ -36,11 +44,17 @@ jobs:
     # same distribution.
     runs-on: ubuntu-26.04
     timeout-minutes: 30
+    permissions:
+      contents: read
+      # Read-only: the bypass check reads the label's events and, on pushes, the merged PR.
+      issues: read
+      pull-requests: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # The base commit must be available to build it in a worktree.
           fetch-depth: 0
+          persist-credentials: false
       - name: Select base commit
         id: base
         shell: bash
@@ -94,6 +108,129 @@ jobs:
       # Benchmark inputs are still large and error-free, and the gate logic fails closed.
       - name: Validate the perf harness
         run: just perf-test
+      # Exit code 0 = pass, 1 = regression, 2 = INVALID; enforced by the last step, after the
+      # report is rendered and uploaded.
       - name: Compare base vs head
+        id: check
         if: steps.base.outputs.sha != ''
-        run: just perf-check ${{ steps.base.outputs.sha }}
+        shell: bash
+        env:
+          BASE: ${{ steps.base.outputs.sha }}
+        run: |
+          set +e
+          just perf-check "$BASE"
+          echo "rc=$?" >> "$GITHUB_OUTPUT"
+      # Only for a real regression (never INVALID): the bypass label must currently be applied,
+      # and its latest application must be by a user with admin permission on the repo. Any API
+      # error here means no bypass.
+      - name: Check for an admin bypass
+        id: bypass
+        if: steps.check.outputs.rc == '1'
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.sha }}
+        run: |
+          # A push to main (the merge) uses the bypass of the PR it came from.
+          if [ -z "$PR" ]; then
+            PR="$(gh api "repos/$REPO/commits/$SHA/pulls" --jq '[.[] | select(.merged_at != null)][0].number // empty')"
+          fi
+          if [ -z "$PR" ]; then
+            echo "No pull request for this run, so no bypass."
+            exit 0
+          fi
+          # Events are chronological; the label's last labeled/unlabeled event is its state.
+          last="$(gh api --paginate "repos/$REPO/issues/$PR/events" \
+            --jq '.[] | select((.event == "labeled" or .event == "unlabeled") and .label.name == env.BYPASS_LABEL) | "\(.event) \(.actor.login)"' \
+            | tail -n 1)"
+          event="${last%% *}"
+          actor="${last#* }"
+          if [ "$event" != labeled ]; then
+            echo "The $BYPASS_LABEL label is not applied to #$PR, so no bypass."
+            exit 0
+          fi
+          permission="$(gh api "repos/$REPO/collaborators/$actor/permission" --jq .permission)"
+          if [ "$permission" != admin ]; then
+            echo "::warning::The $BYPASS_LABEL label on #$PR was applied by @$actor ($permission permission), not an admin; ignoring it."
+            exit 0
+          fi
+          echo "by=$actor" >> "$GITHUB_OUTPUT"
+      - name: Render the perf report
+        id: render
+        if: ${{ !cancelled() && steps.base.outputs.sha != '' }}
+        shell: bash
+        env:
+          BYPASSED_BY: ${{ steps.bypass.outputs.by }}
+        run: |
+          args=(--step-summary)
+          if [ -n "$BYPASSED_BY" ]; then args+=(--bypassed-by "$BYPASSED_BY"); fi
+          just perf-comment "${args[@]}" > /dev/null
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() && steps.render.outcome == 'success' }}
+        with:
+          name: perf-report
+          path: |
+            target/perf-check/comment.md
+            target/perf-check/results.json
+          retention-days: 14
+      - name: Enforce the gate
+        if: ${{ !cancelled() && steps.base.outputs.sha != '' }}
+        shell: bash
+        env:
+          RC: ${{ steps.check.outputs.rc }}
+          BYPASSED_BY: ${{ steps.bypass.outputs.by }}
+        run: |
+          case "$RC" in
+            0) echo "No regressions." ;;
+            1)
+              if [ -z "$BYPASSED_BY" ]; then
+                echo "::error::Performance regression; see the job summary. A repo admin can accept it with the $BYPASS_LABEL label."
+                exit 1
+              fi
+              echo "::warning::Performance regression accepted by admin @$BYPASSED_BY ($BYPASS_LABEL label)."
+              ;;
+            *)
+              echo "::error::The perf check is INVALID or did not complete (exit code '${RC}'); see the log."
+              exit 1
+              ;;
+          esac
+
+  # Separate job so the only write permission never coexists with PR code being built and run.
+  # Comment API errors (e.g. the read-only token of a fork PR) don't fail the run; the gate is
+  # enforced by the perf-check job.
+  comment:
+    name: "perf report comment"
+    needs: perf-check
+    if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/download-artifact@v8
+        id: download
+        continue-on-error: true
+        with:
+          name: perf-report
+      - name: Create or update the sticky comment
+        if: steps.download.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          marker='<!-- sas-lexer-perf-report -->'
+          head -n 1 comment.md | grep -qxF "$marker"
+          id="$(gh api --paginate "repos/$REPO/issues/$PR/comments" \
+            --jq '.[] | select(.user.login == "github-actions[bot]" and (.body | startswith("<!-- sas-lexer-perf-report -->"))) | .id' \
+            | head -n 1)"
+          if [ -n "$id" ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$id" -F body=@comment.md --jq .html_url
+          else
+            gh api -X POST "repos/$REPO/issues/$PR/comments" -F body=@comment.md --jq .html_url
+          fi

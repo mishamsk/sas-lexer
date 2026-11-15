@@ -176,7 +176,9 @@ clean: clean-all-caches clean-test
 # ---------------------------------------------------------------------------
 
 # Fail the check when a gated metric (instructions, estimated cycles) is this much (%) worse.
-perf_threshold := env("PERF_THRESHOLD", "10")
+# Callgrind counts are deterministic (same-source base/head offsets stay under 0.3%), so the
+# gate is tight; an admin can accept an intended regression on a PR (see the README).
+perf_threshold := env("PERF_THRESHOLD", "2")
 perf_image := "sas-lexer-perf:local"
 
 # Run the Callgrind benchmarks for the working tree, both feature configs. Extra args go to gungraun.
@@ -256,12 +258,20 @@ perf-check $base="origin/main":
         echo "::endgroup::"
         report_args+=(--config "$cfg" "$out/$cfg.base.jsonl" "$out/$cfg.head.jsonl")
     done
-    uv run --no-project "$perf/report.py" \
-        --threshold "{{ perf_threshold }}" --output "$out/summary.md" \
+    # Writes results.json (for `just perf-comment`) and prints the report; exit 1 = regression,
+    # 2 = INVALID.
+    uv run --no-project "$perf/report.py" check \
+        --threshold "{{ perf_threshold }}" --results "$out/results.json" --output "$out/comment.md" \
         --expected "$perf/benchmarks.txt" --expect-configs "${configs[@]}" \
-        --title "Performance check: base \`${base_sha:0:10}\` vs head \`$head_desc\`" \
-        --note "Tools: valgrind $valgrind, gungraun $gungraun, base $(cd "$src" && rustc --version), head $(rustc --version)." \
+        --base-sha "$base_sha" --head "$head_desc" \
+        --tools "valgrind $valgrind, gungraun $gungraun, base $(cd "$src" && rustc --version), head $(rustc --version)." \
         "${report_args[@]}"
+
+# Render the perf PR comment from the last `perf-check` (target/perf-check/results.json) to
+# target/perf-check/comment.md. Extra args go to `report.py comment`, e.g. `--bypassed-by LOGIN`.
+[positional-arguments]
+perf-comment *args:
+    uv run --no-project crates/sas-lexer-perf/report.py comment target/perf-check/results.json --output target/perf-check/comment.md "$@"
 
 # Build the Linux image used by the -docker perf recipes (Rust, gungraun-runner and uv at the repo pins).
 [unix]
