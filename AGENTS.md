@@ -20,7 +20,7 @@ Guidance for agents working in `sas-lexer`. The `justfile` is the command author
 - Prerequisites: just, mise and rustup. `mise.toml` pins the dev Python (3.15), uv and the non-Python CLIs (prek, typos, cargo-hack, cargo-udeps, hyperfine); run `mise trust && mise install` once. CI's Python test matrix overrides the dev pin with `MISE_PYTHON_VERSION`.
 - Work through the just recipes (`just` lists them). Non-Python CLIs run from mise (`mise x -- ...`), including prek; ruff, ty and pytest come from the pyproject dev group via `uv run`.
 - Python only through uv (`uv run`, `uv sync`); never bare `pip`/`python`. Change dependencies in `pyproject.toml` and run `uv lock`.
-- Before handing off run `just fmt`, `just lint`, `just clippy` and `just test` (the CI checks except MSRV).
+- Handoff checks: `just fmt`, `just lint`, `just clippy` and `just test`. CI runs the full `just ci` and the perf gate.
 - Create new worktrees with `gt`; they land in `.worktrees/<name>`, which gt keeps out of git.
 - If the sandbox blocks a command (network, keychain/TLS, tool caches such as `~/.cargo`, `~/.rustup`, the uv or mise cache), re-run it outside the sandbox. Never work around it by redirecting tool cache/home dirs (`CARGO_HOME`, `RUSTUP_HOME`, `CARGO_TARGET_DIR`, `UV_CACHE_DIR`, `XDG_CACHE_HOME`, ...) or similar hacks.
 
@@ -29,7 +29,7 @@ Guidance for agents working in `sas-lexer`. The `justfile` is the command author
 - The public crates keep the workspace `rust-version`; private crates declare their own. MSRV (the public crates over the feature powerset, plus the Python binding) is checked only in CI. Never run `just msrv` (or `just ci`, which includes it) locally.
 - Never opt a crate out of the workspace lints; allow a single lint locally, with a `reason`.
 - Avoid new dependencies unless they deliver measurable benefit.
-- Dead code is not allowed, including `pub` items that became unused (the compiler does not flag those). Never use `#[allow(dead_code)]`; delete the code.
+- Remove `pub` items that became unused, which the compiler cannot detect; never suppress dead-code warnings.
 
 ## Performance Gate
 - CI's `perf check (callgrind)` job compares the base and head lexer by Callgrind instruction counts and estimated cycles, for the default and `macro_sep` configs, and fails when either is 2% or more worse. The only bypass is the `perf-regression-accepted` label applied by a repo admin.
