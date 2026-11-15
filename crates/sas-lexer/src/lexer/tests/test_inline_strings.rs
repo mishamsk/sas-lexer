@@ -4338,8 +4338,8 @@ vec![
     NO_ERRORS,
 )]
 // The datalines terminator ends the statement, so a following `*` starts a
-// comment. Before the fix the `'` below opened a string that swallowed the
-// rest of the program.
+// comment. The `'` in the comment guards against lexing it as code, where it
+// would open a string literal that swallows the rest of the program.
 #[case::after_datalines("datalines;\n1\n;\n** it's a comment;\nrun;",
     vec![
         ("datalines;", TokenType::DatalinesStart),
