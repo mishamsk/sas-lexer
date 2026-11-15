@@ -30,7 +30,6 @@ cargo-release (pinned in `mise.toml`, run as `mise x -- cargo release ...`) bump
 1. Working tree is clean.
 2. On `main`, level with `origin/main`.
 3. The last train tag exists and CI on HEAD is green.
-4. `py` only: the `sas-lexer` dependency in `crates/sas-lexer-py/Cargo.toml` is the latest `rust-v*` release; if not, ask whether to release anyway.
 
 If any check fails, stop and report the issue.
 
@@ -79,25 +78,18 @@ just fmt-check clippy test
 `py`: TestPyPI builds from GitHub, so push the release commit (not the tag) first, then build and upload that exact commit:
 ```bash
 git push origin main
-ref=$(git branch --show-current); sha=$(git rev-parse HEAD); start=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-gh workflow run publish-test-pypi.yml --ref "$ref"
-gh run list --workflow publish-test-pypi.yml --event workflow_dispatch --branch "$ref" --commit "$sha" \
+sha=$(git rev-parse HEAD); start=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+gh workflow run publish-test-pypi.yml --ref main
+gh run list --workflow publish-test-pypi.yml --event workflow_dispatch --branch main --commit "$sha" \
   --created ">=$start" --json databaseId,url -q '.[] | "\(.databaseId) \(.url)"'
 ```
-Repeat the `gh run list` command every few seconds until it prints the run, then `gh run watch <id> --exit-status`. Continue only if the run succeeds. Then install the uploaded version (`<test version>` = X) and smoke it:
+Repeat the `gh run list` command every few seconds until it prints the run, then `gh run watch <id> --exit-status`. Continue only if the run succeeds. Then install X from TestPyPI and smoke it:
 ```bash
 uv run --isolated --no-project --refresh-package sas-lexer --index https://test.pypi.org/simple/ \
-  --with "sas-lexer==<test version>" -- python -c "import sas_lexer; tokens, errors, _ = sas_lexer.lex_program_from_str('data a; x = 1; run;'); assert sas_lexer.__version__ == 'X' and tokens and not errors; print(len(tokens), 'tokens')"
+  --with "sas-lexer==X" -- python -c "import sas_lexer; tokens, errors, _ = sas_lexer.lex_program_from_str('data a; x = 1; run;'); assert sas_lexer.__version__ == 'X' and tokens and not errors; print(len(tokens), 'tokens')"
 ```
 
-If the upload fails only because TestPyPI already has version X (`File already exists`), build a TestPyPI-only dev version of the release commit on a short-lived branch that changes only the `pyproject.toml` version. `<test version>` is the PEP 440 form of X plus the first `.devN` not listed at https://test.pypi.org/simple/sas-lexer/ (e.g. `1.0.0b3.dev1`).
-```bash
-git switch -c testpypi-<test version>
-sed -i.bak 's/^version = ".*"/version = "<test version>"/' pyproject.toml && rm pyproject.toml.bak
-git commit -am "chore: TestPyPI build <test version>"
-git push origin HEAD
-```
-Run the commands above from `ref=` on, from this branch, then the smoke with `<test version>`. Afterwards, whatever the result: `git switch main && git branch -D testpypi-<test version> && git push origin --delete testpypi-<test version>`.
+If the upload fails only because TestPyPI already has version X (a retry of the same release), skip the upload, smoke-test the existing X, and say so at Gate 2.
 
 ### Step 5: Final Confirmation (Gate 2)
 
