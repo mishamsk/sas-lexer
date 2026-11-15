@@ -28,7 +28,7 @@ The gate passes because of the `perf-regression-accepted` label. Remove the labe
 - Head: `fedcba9`
 - Gate: Instructions (`Ir`) or Est. cycles (`EstimatedCycles`) worse by ≥ 2% fails.
 - Tools: valgrind 3.26.0, gungraun 0.20.0, base rustc 1.92.0, head rustc 1.92.0.
-- Counts are deterministic (Valgrind), so any non-zero Δ is a real change in executed code.
+- Counts are deterministic for a given binary. Base and head binaries of identical source can still differ by up to ~0.3% (code layout, build paths), so smaller deltas are not meaningful on their own.
 
 | Benchmark | Features | Instructions base | Instructions head | Δ | Est. cycles base | Est. cycles head | Δ |
 |---|---|---:|---:|---:|---:|---:|---:|

@@ -355,7 +355,9 @@ def render(doc: dict, bypassed_by: str | None = None) -> str:
         f"- Head: `{head}`",
         f"- Gate: {' or '.join(f'{LABELS[m]} (`{m}`)' for m in GATED)} worse by ≥ {t} fails.",
         f"- Tools: {doc.get('tools', '?')}",
-        "- Counts are deterministic (Valgrind), so any non-zero Δ is a real change in executed code.",
+        "- Counts are deterministic for a given binary. Base and head binaries of identical source "
+        "can still differ by up to ~0.3% (code layout, build paths), so smaller deltas are not "
+        "meaningful on their own.",
         "",
     ]
     gated_header = ["Benchmark", "Features"]
