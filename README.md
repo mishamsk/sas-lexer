@@ -29,6 +29,7 @@ Let me break it down for you:
     - [Motivation](#motivation)
     - [License](#license)
     - [Contributing](#contributing)
+        - [Development](#development)
     - [Acknowledgments](#acknowledgments)
 
 ## Lexer Features
@@ -108,9 +109,7 @@ fn main() {
 ```python
 from sas_lexer import lex_program_from_str
 
-tokens, errors, str_lit_buf = lex_program_from_str(
-    "data mydata; set mydataset; run;"
-)
+tokens, errors, str_lit_buf = lex_program_from_str("data mydata; set mydataset; run;")
 
 for token in tokens:
     print(token)
@@ -146,6 +145,16 @@ This project is licensed under the [AGPL-3.0](LICENSE). If you are interested in
 ## Contributing
 
 We welcome contributions in the form of issues, feature requests, and feedback! However, due to licensing complexities, we are not currently accepting pull requests. Please feel free to open an issue for any proposals or suggestions.
+
+### Development
+
+Prerequisites (base tooling, install them yourself): [just](https://github.com/casey/just), [mise](https://mise.jdx.dev) and [rustup](https://rustup.rs).
+
+- The Rust toolchain is pinned in `rust-toolchain.toml`.
+- Python tools (ruff, ty, pytest) are in the pyproject `dev` group (`uv.lock`) and run via `uv run`.
+- `mise.toml` pins the development Python, uv and the non-Python CLI tools (prek, typos, cargo-hack, cargo-udeps, hyperfine). Run `mise trust && mise install` once.
+- `mise.toml` also exports `UV_PYTHON` for the mise-selected Python, so uv and PyO3 builds (which find `python` on `PATH`) use the same supported interpreter. CI's Python test matrix overrides the dev pin with `MISE_PYTHON_VERSION`.
+- Run `just` to list recipes, `just py-init` to set up the environment and `just ci` to run the CI checks locally. Extra flags are forwarded to build and test recipes, e.g. `just build -v` or `just test-python -k comment`.
 
 ## Acknowledgments
 

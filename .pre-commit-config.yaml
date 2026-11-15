@@ -17,29 +17,36 @@ repos:
       - id: trailing-whitespace
         args: [--markdown-linebreak-ext=md]
       - id: check-added-large-files
-  # Python hooks
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    # Ruff version.
-    rev: v0.14.10
+  # Python hooks. Ruff and ty come from the pyproject dev group (uv.lock) via `uv run`,
+  # so they use the project venv. Definitions mirror astral-sh/ruff-pre-commit.
+  - repo: local
     hooks:
       # Run the linter.
       - id: ruff-check
+        name: ruff check
+        entry: uv run --only-group dev ruff check --force-exclude
+        language: system
+        types_or: [python, pyi, jupyter]
         args: ["--fix", "--exit-non-zero-on-fix"]
+        require_serial: true
         always_run: true
         priority: 10
       # Run the formatter.
       - id: ruff-format
-  - repo: https://github.com/astral-sh/uv-pre-commit
-    # uv version.
-    rev: 0.9.19
-    hooks:
-      # Check the uv lockfile
+        name: ruff format
+        entry: uv run --only-group dev ruff format --force-exclude
+        language: system
+        types_or: [python, pyi, jupyter, markdown]
+        require_serial: true
+      # Check the uv lockfile (uv is pinned in mise.toml).
       - id: uv-lock
-        args: [--check]
+        name: uv-lock
+        entry: uv lock --check
+        language: system
+        files: ^(uv\.lock|pyproject\.toml)$
+        pass_filenames: false
         always_run: true
         priority: 10
-  - repo: local
-    hooks:
       # Run ty type checker.
       - id: ty
         name: Type check py

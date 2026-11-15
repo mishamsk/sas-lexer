@@ -2915,7 +2915,7 @@ impl Lexer<'_> {
 
         // When lexing the string, if we encounter a double quote,
         // i.e. an escaped quote, we'll need to store the
-        // unescaped string literal in the buufer, so we need
+        // unescaped string literal in the buffer, so we need
         // a number of vars to track the start, the end of the literal
         // in the buffer as well as the byte offset in the cursor as we go.
         // The common case is that we'll not need to store the literal
@@ -3450,7 +3450,7 @@ impl Lexer<'_> {
         // other end of the entire resolusion chain, we need to recognize
         // matching termination dots and distinguish them from actual dots.
         // E.g. a typical `&&prefix&counter..._` can be used to dynamically
-        // reolve into `&prefix1`, `&prefix2`, etc. macro vars in a do-loop
+        // resolve into `&prefix1`, `&prefix2`, etc. macro vars in a do-loop
         // and generate the eventual two part name `[value from prefix1]._`
         while !resolve_op_stack.is_empty() {
             // Check the follower to dispatch the next step

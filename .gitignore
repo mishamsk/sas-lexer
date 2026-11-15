@@ -2,8 +2,6 @@
 /target
 profile.json
 
-# Taskfile
-.task
 
 # Environments
 .env
@@ -66,6 +64,9 @@ ipython_config.py
 
 # pyenv
 .python-version
+
+# mise (personal, uncommitted overrides)
+mise.local.toml
 
 # asdf
 .tool-versions

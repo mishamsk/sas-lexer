@@ -71,8 +71,8 @@ codegen-units = 3
 default.extend-ignore-identifiers-re = ["(?i)KWM[a-z0-9_]+"]
 # One comment for TokenType
 default.extend-ignore-words-re = ["LOWCASE"]
-# One test with nOt in that specific case
-default.extend-words = { "Ot" = "Ot" }
+# One test with nOt in that specific case; "informat" is a SAS term
+default.extend-words = { "Ot" = "Ot", "Informat" = "Informat", "INFORMAT" = "INFORMAT" }
 
 [workspace.metadata.release]
 sign-commit = true

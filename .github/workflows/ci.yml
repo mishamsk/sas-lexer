@@ -29,7 +29,10 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install Rust
         uses: ./.github/actions/setup-rust
-      - run: cargo fmt --all --check
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+      - run: just fmt-check
 
   cargo-clippy:
     name: "cargo clippy"
@@ -44,8 +47,11 @@ jobs:
       - name: Install Rust
         uses: ./.github/actions/setup-rust
       - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
       - name: "Clippy"
-        run: cargo clippy --workspace --all-features --locked -- -D warnings
+        run: just clippy
 
   cargo-udeps:
     name: "cargo udeps"
@@ -53,20 +59,18 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      # The runner's default Python (3.14) is newer than PyO3 0.22 supports.
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: nightly-2025-12-30
-      - name: "Install cargo udeps"
-        uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@v2
         with:
-          tool: cargo-udeps
+          tool: just
+      # cargo-udeps and the dev Python (the runner default is newer than PyO3 0.22 supports)
+      # are pinned in mise.toml.
+      - uses: jdx/mise-action@v5
       - name: "Udeps release"
-        run: cargo +nightly-2025-12-30 udeps --workspace --all-features --release
+        run: just udeps
 
   msrv:
     name: "Check MSRV"
@@ -77,16 +81,13 @@ jobs:
     - name: Install Rust
       uses: ./.github/actions/setup-rust
     - uses: Swatinem/rust-cache@v2
-    - uses: taiki-e/install-action@cargo-hack
+    - uses: taiki-e/install-action@v2
+      with:
+        tool: just
+    # cargo-hack is pinned in mise.toml.
+    - uses: jdx/mise-action@v5
     - name: Default features
-      run: "cargo hack check
-        --feature-powerset
-        --locked
-        --rust-version
-        --ignore-private
-        --workspace
-        --all-targets
-        --skip opti_stats"
+      run: just msrv
 
   # Rust tests for supported platforms.
   test-rust:
@@ -108,7 +109,7 @@ jobs:
             os: windows-latest
             rust: stable
     env:
-      TEST_TARGET: ${{ matrix.build == 'stable' && '--all-targets' || '--lib' }}
+      TEST_TARGET: ${{ matrix.build == 'stable' && 'all-targets' || 'lib' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -128,31 +129,29 @@ jobs:
         if: matrix.rust == 'nightly'
         shell: bash
         run: echo "RUSTUP_TOOLCHAIN=nightly-2025-12-30" >> "$GITHUB_ENV"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
       - name: Basic build
-        run: cargo build --verbose
+        run: just build
       - name: Build docs
-        run: cargo doc --verbose
-      - name: Tests docs
-        run: cargo test -p sas-lexer --doc
-      - name: Tests with default features
-        run: cargo test -p sas-lexer $TEST_TARGET
-      - name: Tests with macro_sep, serde features
-        run: cargo test -p sas-lexer $TEST_TARGET --features macro_sep --features serde
+        run: just doc
+      # Doc tests, then tests with default features, then with macro_sep, serde.
+      - name: Tests
+        run: just test-rust ${{ env.TEST_TARGET }}
 
   # Python linting / formatting.
   ruff:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Lint with Ruff
-        uses: astral-sh/ruff-action@v3
+      - uses: taiki-e/install-action@v2
         with:
-          src: "src"
-      - name: Check formatting with Ruff
-        uses: astral-sh/ruff-action@v3
-        with:
-          args: format --check
-          src: "src"
+          tool: just
+      # uv is pinned in mise.toml; ruff comes from the pyproject dev group.
+      - uses: jdx/mise-action@v5
+      - name: Lint and check formatting with Ruff
+        run: just ruff
 
   # Python tests.
   test-python:
@@ -167,16 +166,20 @@ jobs:
           - "3.10"
           - "3.11"
           - "3.12"
+    # Test the matrix Python, not the mise.toml dev pin: mise installs this version and
+    # exports UV_PYTHON for it (see mise.toml [env]).
+    env:
+      MISE_PYTHON_VERSION: ${{ matrix.python-version }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v6
-        with:
-          python-version: ${{ matrix.python-version }}
       - name: Install Rust
         uses: ./.github/actions/setup-rust
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-      - name: Sync & build project
-        run: uv sync --no-editable --locked
-      - name: Run tests
-        run: uv run pytest
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+      # uv is pinned in mise.toml; Python comes from MISE_PYTHON_VERSION.
+      - uses: jdx/mise-action@v5
+        with:
+          cache_key: "{{default}}-py${{ matrix.python-version }}"
+      - name: Sync, build project & run tests
+        run: just test-python-ci
