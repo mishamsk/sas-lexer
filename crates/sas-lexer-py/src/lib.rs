@@ -10,7 +10,8 @@ use sas_lexer::{lex_program, LexResult};
 use serde_bytes::Bytes;
 
 #[pyfunction]
-fn _lex_program_from_str<'py>(
+#[pyo3(name = "_lex_program_from_str")]
+fn lex_program_from_str<'py>(
     py: Python<'py>,
     src: &Bound<'py, PyString>,
 ) -> PyResult<Bound<'py, PyBytes>> {
@@ -32,6 +33,7 @@ fn _lex_program_from_str<'py>(
 }
 
 #[pymodule]
-fn _sas_lexer_rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(_lex_program_from_str, m)?)
+#[pyo3(name = "_sas_lexer_rust")]
+fn sas_lexer_rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(lex_program_from_str, m)?)
 }
