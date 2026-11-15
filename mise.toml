@@ -1,0 +1,9 @@
+# CLI tools used by the justfile recipes (locally and in CI).
+# The Rust toolchain is pinned in rust-toolchain.toml; Python deps in uv.lock.
+[tools]
+ruff = "0.17.5"
+maturin = "1.16.0"
+typos = "1.52.2"
+hyperfine = "2.0.0"
+"github:taiki-e/cargo-hack" = "0.6.46"
+"github:est31/cargo-udeps" = "0.1.61"

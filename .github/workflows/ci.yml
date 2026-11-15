@@ -67,10 +67,11 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: nightly-2025-12-30
-      - name: "Install cargo udeps"
-        uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@v2
         with:
-          tool: cargo-udeps,just
+          tool: just
+      # cargo-udeps is pinned in mise.toml.
+      - uses: jdx/mise-action@v5
       - name: "Udeps release"
         run: just udeps
 
@@ -85,7 +86,9 @@ jobs:
     - uses: Swatinem/rust-cache@v2
     - uses: taiki-e/install-action@v2
       with:
-        tool: cargo-hack,just
+        tool: just
+    # cargo-hack is pinned in mise.toml.
+    - uses: jdx/mise-action@v5
     - name: Default features
       run: just msrv
 
@@ -145,11 +148,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
       - uses: taiki-e/install-action@v2
         with:
           tool: just
+      # ruff is pinned in mise.toml.
+      - uses: jdx/mise-action@v5
       - name: Lint and check formatting with Ruff
         run: just ruff
 

@@ -693,7 +693,7 @@ impl TokenizedBuffer {
     ///
     /// This is the same as the start of the next token or EOF.
     ///
-    /// Note that EOF offset is 1 more than the mximum valid index in the source string.
+    /// Note that EOF offset is 1 more than the maximum valid index in the source string.
     pub fn get_token_end_byte_offset(&self, token: TokenIdx) -> Result<ByteOffset, ErrorKind> {
         let tidx = token.0 as usize;
 
@@ -718,7 +718,7 @@ impl TokenizedBuffer {
     ///
     /// This is the same as the start of the next token or EOF.
     ///
-    /// Note that EOF offset is 1 more than the mximum valid index in the source string.
+    /// Note that EOF offset is 1 more than the maximum valid index in the source string.
     ///
     /// Char here means a Unicode code point, not graphemes. This is
     /// what Python uses to index strings, and IDEs show for cursor position.

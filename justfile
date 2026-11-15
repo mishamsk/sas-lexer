@@ -1,14 +1,18 @@
+# Personal recipes, if present (missing file is fine).
+import? '~/.justfile'
+
 set shell := ["bash", "-euo", "pipefail", "-c"]
-set windows-shell := ["pwsh", "-NoLogo", "-Command"]
+# Bare `just` lists the recipes.
+set default-list
 # Loads .env (if present) for SAS_LEX_SAMPLES, PERF_LARGE_SAMPLE, etc.
 set dotenv-load
 
+# CLI tools (ruff, maturin, typos, cargo-hack, cargo-udeps, hyperfine) are
+# pinned in mise.toml and run via `mise x --`. Python dev tools (prek, pytest) come from
+# uv.lock via `uv run`, so the cargo hooks see the project venv Python.
+
 # Dated nightly used for udeps and the nightly test job. Keep in sync with CI.
 nightly := "nightly-2025-12-30"
-
-# Show help (same as just running just)
-help:
-    @just --list
 
 # ---------------------------------------------------------------------------
 # Formatting, linting, checks (same commands as CI)
@@ -27,65 +31,73 @@ clippy:
 # Run all linters: pre-commit hooks (via prek) and typos.
 lint:
     uv run prek run --all-files
-    typos
+    mise x -- typos
 
 # Run lint auto-fixes (clippy --fix).
 lint-fix:
     cargo clippy --fix --allow-dirty --allow-staged --workspace --all-features --locked -- -D warnings
 
-# Python lint and format check (CI "ruff"). Ruff version matches uv.lock and the pre-commit hook.
+# Python lint and format check (CI "ruff").
 ruff:
-    uvx ruff@0.14.10 check src
-    uvx ruff@0.14.10 format --check src
+    mise x -- ruff check src
+    mise x -- ruff format --check src
 
 # Unused dependencies, on the pinned nightly (CI "cargo udeps").
 udeps:
-    cargo +{{ nightly }} udeps --workspace --all-features --release
+    mise x -- cargo +{{ nightly }} udeps --workspace --all-features --release
 
 # Check declared per-package MSRVs over the feature powerset (CI "Check MSRV").
 msrv:
-    cargo hack check --feature-powerset --locked --rust-version --ignore-private --workspace --all-targets --skip opti_stats
+    mise x -- cargo hack check --feature-powerset --locked --rust-version --ignore-private --workspace --all-targets --skip opti_stats
 
 # ---------------------------------------------------------------------------
-# Build
+# Build (extra args are forwarded as "$@", e.g. `just build -v`)
 # ---------------------------------------------------------------------------
 
 # Debug build of the default workspace members.
-build:
-    cargo build --verbose
+[positional-arguments]
+build *args:
+    cargo build "$@"
 
 # Build the docs.
-doc:
-    cargo doc --verbose
+[positional-arguments]
+doc *args:
+    cargo doc "$@"
 
-build-rel:
-    cargo build --release --workspace
+[positional-arguments]
+build-rel *args:
+    cargo build --release --workspace "$@"
 
-build-stats-polars:
-    cargo build -r --features polars --package sas-lexer-cli --target-dir target/with_polars
+[positional-arguments]
+build-stats-polars *args:
+    cargo build -r --features polars --package sas-lexer-cli --target-dir target/with_polars "$@"
 
 # Build and install the python extension into the current venv.
-build-dev:
-    uvx maturin develop --uv -r
+[positional-arguments]
+build-dev *args:
+    mise x -- maturin develop --uv -r "$@"
 
 # ---------------------------------------------------------------------------
-# Tests
+# Tests (extra args are forwarded to cargo test / pytest)
 # ---------------------------------------------------------------------------
 
 # Rust tests for the core crate; target is a cargo target selector, e.g. all-targets or lib.
-test-rust target="all-targets":
-    cargo test -p sas-lexer --doc
-    cargo test -p sas-lexer --{{ target }}
-    cargo test -p sas-lexer --{{ target }} --features macro_sep --features serde
+[positional-arguments]
+test-rust target="all-targets" *args:
+    cargo test -p sas-lexer --doc "${@:2}"
+    cargo test -p sas-lexer --{{ target }} "${@:2}"
+    cargo test -p sas-lexer --{{ target }} --features macro_sep --features serde "${@:2}"
 
 # Python tests in an isolated, non-editable environment (rebuilds the extension).
-test-python:
-    uv run --isolated --no-editable pytest
+[positional-arguments]
+test-python *args:
+    uv run --isolated --no-editable pytest "$@"
 
 # Python tests as run in CI: sync the project non-editable, then pytest.
-test-python-ci:
+[positional-arguments]
+test-python-ci *args:
     uv sync --no-editable --locked
-    uv run pytest
+    uv run pytest "$@"
 
 # All tests: Rust doc/unit/integration, then Python.
 test: test-rust test-python
@@ -159,7 +171,7 @@ clean: clean-all-caches clean-test
     cargo clean
 
 # ---------------------------------------------------------------------------
-# Performance (need SAS_LEX_SAMPLES / PERF_LARGE_SAMPLE, see .env.sample; hyperfine)
+# Performance (need SAS_LEX_SAMPLES / PERF_LARGE_SAMPLE, see .env.sample)
 # ---------------------------------------------------------------------------
 
 # Profile the lexer benchmark.
@@ -170,8 +182,8 @@ perf-profile:
 # Benchmark the current release build.
 [unix]
 perf-cur: build-rel
-    hyperfine -N -w 10 "target/release/sas-lexer lex ${SAS_LEX_SAMPLES:?set SAS_LEX_SAMPLES in .env}"
-    hyperfine -N -w 5 "target/release/sas-lexer lex ${PERF_LARGE_SAMPLE:?set PERF_LARGE_SAMPLE in .env}"
+    mise x -- hyperfine -N -w 10 "target/release/sas-lexer lex ${SAS_LEX_SAMPLES:?set SAS_LEX_SAMPLES in .env}"
+    mise x -- hyperfine -N -w 5 "target/release/sas-lexer lex ${PERF_LARGE_SAMPLE:?set PERF_LARGE_SAMPLE in .env}"
 
 # Compare the current release build with the given commit, built in an isolated git worktree.
 [unix]
@@ -186,52 +198,5 @@ perf-compare sha: build-rel
     # The baseline gets its own target dir (reused between runs); the current tree is untouched.
     cargo build --release --package sas-lexer-cli --manifest-path "$work/base/Cargo.toml" --target-dir "{{ justfile_directory() }}/target/perf-compare"
     base="{{ justfile_directory() }}/target/perf-compare/release/sas-lexer"
-    hyperfine -w 10 "$base lex $SAS_LEX_SAMPLES" "target/release/sas-lexer lex $SAS_LEX_SAMPLES"
-    hyperfine -w 5 "$base lex $PERF_LARGE_SAMPLE" "target/release/sas-lexer lex $PERF_LARGE_SAMPLE"
-
-# ---------------------------------------------------------------------------
-# Release (cargo-release). Plain recipes are DRY RUNS; the -execute ones really release.
-# ---------------------------------------------------------------------------
-
-# Dry run: release the main sas-lexer crate. level: major|minor|patch|release|rc|beta|alpha or an explicit semver
-[unix]
-release-rust $level:
-    @just _release sas-lexer "$level" dry
-
-# EXECUTES: release the main sas-lexer crate (commit, tag, publish).
-[confirm("Really release sas-lexer (not a dry run)?")]
-[unix]
-release-rust-execute $level:
-    @just _release sas-lexer "$level" execute
-
-# Dry run: release the python package. level: major|minor|patch|release|rc|beta|alpha or an explicit semver
-[unix]
-release-py $level:
-    @just _release sas-lexer-py "$level" dry
-
-# EXECUTES: release the python package (commit, tag).
-[confirm("Really release sas-lexer-py (not a dry run)?")]
-[unix]
-release-py-execute $level:
-    @just _release sas-lexer-py "$level" execute
-
-# Shared cargo-release wrapper. Only an allow-listed level or a plain semver is accepted,
-# so flags such as --execute cannot be smuggled in; only mode=execute adds -x.
-[private]
-[unix]
-_release package $level mode:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    case "$level" in
-        major|minor|patch|release|rc|beta|alpha) ;;
-        *)
-            if ! [[ "$level" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
-                echo "invalid release level: $level (expected major|minor|patch|release|rc|beta|alpha or a semver)" >&2
-                exit 1
-            fi
-            ;;
-    esac
-    if [ "{{ mode }}" = execute ]; then
-        exec cargo release -p "{{ package }}" -x "$level"
-    fi
-    exec cargo release -p "{{ package }}" "$level"
+    mise x -- hyperfine -w 10 "$base lex $SAS_LEX_SAMPLES" "target/release/sas-lexer lex $SAS_LEX_SAMPLES"
+    mise x -- hyperfine -w 5 "$base lex $PERF_LARGE_SAMPLE" "target/release/sas-lexer lex $PERF_LARGE_SAMPLE"
