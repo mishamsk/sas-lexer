@@ -339,7 +339,11 @@ release-rust-dry-run:
 # CI only (release-rust.yml, needs CARGO_REGISTRY_TOKEN): publish sas-lexer-macro if this release bumps it, then sas-lexer.
 [unix]
 release-publish-crates:
-    if [ "$(just _release-macro-bumped)" = yes ]; then just _release-publish-crate sas-lexer-macro; fi
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # A plain assignment, so a failed check (e.g. macro changed without a bump) aborts before any upload.
+    bumped="$(just _release-macro-bumped)"
+    if [ "$bumped" = yes ]; then just _release-publish-crate sas-lexer-macro; fi
     just _release-publish-crate sas-lexer
 
 # Maintainer only: sign and push the release tag on the merged release commit; CI then publishes with no further approval.

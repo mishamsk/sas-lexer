@@ -45,13 +45,13 @@ Launch a subagent to compare the changes since the train's last tag with the cha
 - Map each commit to its PR. Find the numbers in the commit messages, or use `gh pr list --state merged --base main`.
 - List the user-facing items that are missing from the changelog.
 
-Propose entries in the existing style, with PR links `([#N](https://github.com/mishamsk/sas-lexer/pull/N))`. Show them to the maintainer before continuing.
+Write the missing entries into the Unreleased section on the release branch (step 3), in the existing style, with PR links `([#N](https://github.com/mishamsk/sas-lexer/pull/N))`. Do not pause for approval: the release PR is where the maintainer reviews them.
 
 ## 3. Release PR
 
 ```bash
 git switch --no-track -c release/<train>-<version> origin/main
-# add any missing changelog entries to the Unreleased section first
+# write the missing changelog entries (step 2) into the Unreleased section first
 just release-prep <train> <version>
 git diff
 ```
