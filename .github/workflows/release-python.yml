@@ -6,7 +6,23 @@ on:
       - "py-v*"
 
 jobs:
+  # The tag must match the package version in pyproject.toml.
+  validate-version:
+    name: Validate version tag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Check pyproject.toml version matches tag
+        run: |
+          version=${GITHUB_REF#refs/tags/py-v}
+          pyproject_version=$(sed -n 's/^version = "\(.*\)"$/\1/p' pyproject.toml | head -1)
+          echo "Tag: $version, pyproject.toml: $pyproject_version"
+          test "$version" = "$pyproject_version" || { echo "::error::tag py-v$version does not match pyproject.toml version $pyproject_version"; exit 1; }
+
   test:
+    needs: validate-version
     uses: ./.github/workflows/ci.yml
 
   build-wheels:
@@ -86,5 +102,4 @@ jobs:
         with:
           body: ${{ steps.changelog_reader.outputs.changes }}
           files: wheels/*
-          draft: true
           prerelease: ${{ steps.changelog_reader.outputs.status == 'prereleased' }}

@@ -1,0 +1,5 @@
+interface:
+  display_name: "Release sas-lexer"
+  short_description: "Prepare and publish an approved sas-lexer release"
+policy:
+  allow_implicit_invocation: false
