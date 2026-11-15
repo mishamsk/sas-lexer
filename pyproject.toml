@@ -34,7 +34,6 @@ dev = [
     "pytest>=9.0.2,<9.1",
     "ruff>=0.17.5,<0.18",
     "ty>=0.0.8",
-    "uv>=0.9.18,<0.10",
 ]
 
 [tool.maturin]
@@ -54,7 +53,32 @@ exclude = [
 ]
 
 [tool.uv]
-cache-keys = [{ file = "crates/sas-lexer-py/Cargo.toml" }]
+# Replaces uv's defaults, so pyproject.toml is listed explicitly. Everything that goes into the
+# extension build or the installed package must be here, otherwise a non-editable `uv sync`
+# reuses a stale cached wheel. The ONLY packaged files left out are the three that build.rs
+# regenerates on every build (token_type.py, token_channel.py, error_kind.py): uv keys on
+# mtimes, so listing them would force a rebuild on every sync. They derive from the Rust
+# sources, which are listed. uv has no exclude globs, so hand-written Python files are listed
+# one by one: add new package files here.
+cache-keys = [
+    { file = "pyproject.toml" },
+    { file = "README.md" },
+    { file = "LICENSE" },
+    { file = "Cargo.toml" },
+    { file = "Cargo.lock" },
+    { file = "rust-toolchain.toml" },
+    { file = "crates/*/Cargo.toml" },
+    { file = "crates/*/build.rs" },
+    { file = "crates/sas-lexer/**/*.rs" },
+    { file = "crates/sas-lexer-macro/**/*.rs" },
+    { file = "crates/sas-lexer-py/**/*.rs" },
+    { file = "src/sas_lexer/__init__.py" },
+    { file = "src/sas_lexer/error.py" },
+    { file = "src/sas_lexer/lexer.py" },
+    { file = "src/sas_lexer/token.py" },
+    { file = "src/sas_lexer/_sas_lexer_rust.pyi" },
+    { file = "src/sas_lexer/py.typed" },
+]
 
 [tool.ruff]
 line-length = 100

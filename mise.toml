@@ -4,7 +4,7 @@
 [tools]
 # Dev Python; must satisfy requires-python and PyO3. CI's test-python matrix overrides it.
 python = "3.12"
-uv = "0.9.20"
+uv = "0.13.8"
 prek = "latest"
 typos = "1.52.2"
 hyperfine = "2.0.0"

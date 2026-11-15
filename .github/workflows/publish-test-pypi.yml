@@ -14,12 +14,22 @@ jobs:
     environment:
       name: testpypi
     permissions:
+      # For the checkout step.
+      contents: read
       # For PyPI's trusted publishing.
       id-token: write
     steps:
-      - name: "Install uv"
-        uses: astral-sh/setup-uv@v7
-      - uses: actions/download-artifact@v4
+      # Only mise.toml is needed: it pins uv.
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          sparse-checkout: mise.toml
+          sparse-checkout-cone-mode: false
+      # uv only (pinned in mise.toml), not the other dev tools.
+      - uses: jdx/mise-action@v5
+        with:
+          install_args: uv
+      - uses: actions/download-artifact@v8
         with:
           pattern: wheels-*
           path: wheels
