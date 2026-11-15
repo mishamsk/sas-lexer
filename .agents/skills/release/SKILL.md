@@ -14,7 +14,7 @@ Execute the release flow for one sas-lexer train, e.g. `/release rust`, `/releas
 | `rust` | `sas-lexer` (version from `[workspace.package]`) | `CHANGELOG-RUST.md` | `rust-vX` | `release-rust.yml` |
 | `py` | `sas-lexer-py` (PyPI name `sas-lexer`) | `CHANGELOG-PY.md` | `py-vX` | `release-python.yml` |
 
-cargo-release (pinned in `mise.toml`, run as `mise x -- cargo release ...`) bumps versions, rewrites the changelog headers and links, commits, signs and tags, and pushes. It never publishes: CI does that from the tag via trusted publishing, then publishes the GitHub release with the changelog section as notes.
+cargo-release (pinned in `mise.toml`, run as `mise x -- cargo release ...`) bumps versions, rewrites the changelog headers and links, commits, signs and tags locally. A plain `git push` of `main` and the tag starts CI, which publishes via trusted publishing and then publishes the GitHub release with the changelog section as notes.
 
 ## Context Collection
 
@@ -100,7 +100,7 @@ Report the smoke results. If all passed, ask the user: "Ready to trigger the pro
 If the user confirms:
 
 ```bash
-mise x -- cargo release push -p <package> --execute --no-confirm
+git push --atomic origin main <tag>
 ```
 
 This pushes `main` and the tag. The tag starts the train's CI workflow: tests, publishing, and the GitHub release. Find that run with `gh run list --workflow <release-rust.yml|release-python.yml> --branch <tag> --json databaseId,url`, then wait on it with `gh run watch <id> --exit-status`. After it succeeds, report the release link (`gh release view <tag> --json url -q .url`). If the rendered notes look wrong, fix only the notes with `gh release edit <tag> --notes-file <file>`; never touch the release assets.
