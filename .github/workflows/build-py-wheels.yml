@@ -77,16 +77,21 @@ jobs:
         with:
           install_args: python
           cache_key: "{{default}}-py${{ matrix.python-version }}"
+      # On macOS maturin-action puts the runner's toolcache Pythons ahead of mise's on PATH, so
+      # pass the mise interpreter explicitly (resolved before maturin-action changes PATH).
+      - name: "Locate Python"
+        id: python
+        run: echo "path=$(command -v python3)" >> "$GITHUB_OUTPUT"
       - name: "Build wheels"
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.platform.target }}
-          args: --release --locked --out dist
+          args: --release --locked --out dist -i ${{ steps.python.outputs.path }}
           sccache: "true"
       - name: "Test wheel"
         run: |
           set -e
-          python3 -m venv .venv
+          "${{ steps.python.outputs.path }}" -m venv .venv
           source .venv/bin/activate
           pip install ${{ env.PACKAGE_NAME }} --find-links dist --force-reinstall
           python -c "import ${{ env.MODULE_NAME }}; print(${{ env.MODULE_NAME }}.__version__)"
