@@ -41,29 +41,29 @@ fn write_df_to_disk(df: &LazyFrame, path: &PathBuf) -> PolarsResult<()> {
 
 fn create_error_dict_df() -> PolarsResult<LazyFrame> {
     Ok(DataFrame::new(vec![
-        Series::new(
+        Column::new(
             "error_kind".into(),
             ErrorKind::iter().map(|e| e as u32).collect::<Vec<_>>(),
         ),
-        Series::new(
+        Column::new(
             "is_code_error".into(),
             ErrorKind::iter()
                 .map(|e| e.is_code_error())
                 .collect::<Vec<_>>(),
         ),
-        Series::new(
+        Column::new(
             "is_internal".into(),
             ErrorKind::iter()
                 .map(|e| e.is_internal())
                 .collect::<Vec<_>>(),
         ),
-        Series::new(
+        Column::new(
             "is_warning".into(),
             ErrorKind::iter()
                 .map(|e| e.is_warning())
                 .collect::<Vec<_>>(),
         ),
-        Series::new(
+        Column::new(
             "error_message".into(),
             ErrorKind::iter()
                 .map(|e| e.get_message().unwrap_or("Unknown error"))
@@ -99,13 +99,13 @@ fn create_error_df(
     }
 
     let df = DataFrame::new(vec![
-        Series::new("error_kind".into(), error_kind),
-        Series::new("at_byte_offset".into(), at_byte_offset),
-        Series::new("at_char_offset".into(), at_char_offset),
-        Series::new("on_line".into(), on_line),
-        Series::new("at_column".into(), at_column),
-        Series::new("last_token".into(), last_token),
-        Series::new("context".into(), context),
+        Column::new("error_kind".into(), error_kind),
+        Column::new("at_byte_offset".into(), at_byte_offset),
+        Column::new("at_char_offset".into(), at_char_offset),
+        Column::new("on_line".into(), on_line),
+        Column::new("at_column".into(), at_column),
+        Column::new("last_token".into(), last_token),
+        Column::new("context".into(), context),
     ])?;
 
     Ok(df
@@ -175,19 +175,19 @@ fn create_token_df(
     }
 
     let df = DataFrame::new(vec![
-        Series::new("token_index".into(), token_index),
-        Series::new("token_start".into(), token_start),
-        Series::new("token_stop".into(), token_stop),
-        Series::new("token_raw_text".into(), token_raw_text),
-        Series::new("token_type".into(), token_type),
-        Series::new("start_line".into(), start_line),
-        Series::new("end_line".into(), end_line),
-        Series::new("start_column".into(), start_column),
-        Series::new("end_column".into(), end_column),
-        Series::new("token_channel".into(), token_channel),
-        Series::new("payload_int".into(), payload_int),
-        Series::new("payload_float".into(), payload_float),
-        Series::new("payload_str".into(), payload_str),
+        Column::new("token_index".into(), token_index),
+        Column::new("token_start".into(), token_start),
+        Column::new("token_stop".into(), token_stop),
+        Column::new("token_raw_text".into(), token_raw_text),
+        Column::new("token_type".into(), token_type),
+        Column::new("start_line".into(), start_line),
+        Column::new("end_line".into(), end_line),
+        Column::new("start_column".into(), start_column),
+        Column::new("end_column".into(), end_column),
+        Column::new("token_channel".into(), token_channel),
+        Column::new("payload_int".into(), payload_int),
+        Column::new("payload_float".into(), payload_float),
+        Column::new("payload_str".into(), payload_str),
     ])?;
 
     Ok(df
