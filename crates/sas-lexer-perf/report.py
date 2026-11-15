@@ -17,11 +17,12 @@ Two commands (stdlib only):
         marks a regression as accepted by that (already verified) admin; it never turns an
         INVALID result into anything else. Missing or unreadable results render as INVALID.
 
-    report.py gate RESULTS --rc RC --base-sha SHA [--bypassed-by LOGIN] [--status]
+    report.py gate RESULTS --rc RC --base-sha SHA --expected FILE --expect-configs NAME...
+            [--bypassed-by LOGIN] [--status]
         The CI gate decision. The comparison counts as a regression (the only bypassable state)
-        or a pass only if the `check` exit code RC and a results JSON for exactly this base agree
-        and the rows confirm the verdict; anything else is INVALID and fails, even with a
-        bypass. `--status` only prints pass/regression/invalid.
+        or a pass only if the `check` exit code RC and a schema-valid results JSON for exactly
+        this base and inventory agree and the rows confirm the verdict; anything else is INVALID
+        and fails, even with a bypass. `--status` only prints pass/regression/invalid.
 
 Usage:
     report.py check --threshold 2 --expected benchmarks.txt --expect-configs default macro_sep \
@@ -29,8 +30,6 @@ Usage:
         --base-sha SHA --head DESC --tools TEXT --results results.json
     report.py comment results.json --output comment.md
 """
-
-from __future__ import annotations
 
 import argparse
 import io
@@ -41,6 +40,7 @@ import sys
 import traceback
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 GATED = ("Ir", "EstimatedCycles")
 LABELS = {"Ir": "Instructions", "EstimatedCycles": "Est. cycles"}
@@ -48,7 +48,8 @@ MAX_THRESHOLD = 1000.0
 # Hidden marker that identifies the sticky PR comment.
 MARKER = "<!-- sas-lexer-perf-report -->"
 BYPASS_LABEL = "perf-regression-accepted"
-RESULTS_VERSION = 1
+# 2: adds the benchmark/config inventory (`benchmarks`, `configs`).
+RESULTS_VERSION = 2
 
 EXIT_OK = 0
 EXIT_REGRESSION = 1
@@ -214,13 +215,15 @@ def failures(rows: list[Row], threshold: float) -> list[str]:
     return out
 
 
-def results_doc(
+def results_doc(  # noqa: PLR0913 - keyword-only document builder
     *,
     verdict: str,
     threshold: float,
     meta: dict[str, str],
     rows: list[Row] | None = None,
     error: str | None = None,
+    benchmarks: list[str] | None = None,
+    configs: list[str] | None = None,
 ) -> dict:
     return {
         "version": RESULTS_VERSION,
@@ -229,6 +232,9 @@ def results_doc(
         "gated": list(GATED),
         **meta,
         "error": error,
+        # The inventory the rows must cover exactly (empty for INVALID results).
+        "benchmarks": list(benchmarks or []),
+        "configs": list(configs or []),
         "rows": [
             {
                 "config": r.config,
@@ -472,14 +478,20 @@ def check_main(argv: list[str]) -> int:
 
     meta = {"base_sha": args.base_sha, "head": args.head, "tools": args.tools}
     try:
-        rows = collect(args.config, read_expected(args.expected), args.expect_configs)
+        expected = read_expected(args.expected)
+        rows = collect(args.config, expected, args.expect_configs)
     except (InvalidResultsError, OSError, ValueError, KeyError, TypeError, AttributeError) as e:
         doc = results_doc(verdict=INVALID, threshold=args.threshold, meta=meta, error=str(e))
         code = EXIT_INVALID
     else:
         failed = failures(rows, args.threshold)
         doc = results_doc(
-            verdict=REGRESSION if failed else PASS, threshold=args.threshold, meta=meta, rows=rows
+            verdict=REGRESSION if failed else PASS,
+            threshold=args.threshold,
+            meta=meta,
+            rows=rows,
+            benchmarks=expected,
+            configs=args.expect_configs,
         )
         code = EXIT_REGRESSION if failed else EXIT_OK
     if args.results:
@@ -502,7 +514,12 @@ def comment_main(argv: list[str]) -> int:
     )
     args = parser.parse_args(argv)
     try:
-        markdown = render(load_results(args.results), args.bypassed_by)
+        doc = load_results(args.results)
+        try:
+            markdown = render(doc, args.bypassed_by)
+        except (KeyError, TypeError, ValueError, IndexError, ZeroDivisionError) as e:
+            msg = f"results {args.results} can't be rendered: {e!r}"
+            raise InvalidResultsError(msg) from None
     except InvalidResultsError as e:
         # E.g. perf-check stopped before the comparison: still report it, as INVALID.
         doc = results_doc(verdict=INVALID, threshold=MAX_THRESHOLD, meta={}, error=str(e))
@@ -518,15 +535,87 @@ def load_results(path: Path) -> dict:
         raise InvalidResultsError(msg)
     try:
         doc = json.loads(path.read_text(encoding="utf-8"))
-        rows_from_doc(doc)
-        float(doc["threshold"])
-    except (OSError, ValueError, KeyError, TypeError, AttributeError, IndexError) as e:
+    except (OSError, ValueError) as e:
         msg = f"unreadable results {path}: {e}"
         raise InvalidResultsError(msg) from None
-    if doc.get("version") != RESULTS_VERSION:
-        msg = f"unsupported results version {doc.get('version')!r}"
-        raise InvalidResultsError(msg)
+    validate_doc(doc)
     return doc
+
+
+def _invalid(msg: str) -> InvalidResultsError:
+    return InvalidResultsError(f"malformed results: {msg}")
+
+
+def _is_finite(value: Any) -> bool:
+    return is_number(value) and math.isfinite(value)
+
+
+def _str_list(doc: dict, key: str) -> list[str]:
+    value = doc.get(key)
+    if not isinstance(value, list):
+        raise _invalid(f"`{key}` must be a list")
+    if not all(isinstance(v, str) and v for v in value):
+        raise _invalid(f"`{key}` must be a list of non-empty strings")
+    if len(set(value)) != len(value):
+        raise _invalid(f"`{key}` has duplicates")
+    return value
+
+
+def validate_doc(doc: Any) -> None:  # noqa: PLR0912 - one flat list of schema rules
+    """Check everything the gate and the renderer rely on; InvalidResultsError if not."""
+    if not isinstance(doc, dict):
+        raise _invalid("not a JSON object")
+    if doc.get("version") != RESULTS_VERSION:
+        raise _invalid(f"unsupported results version {doc.get('version')!r}")
+    if doc.get("verdict") not in {PASS, REGRESSION, INVALID}:
+        raise _invalid(f"unknown verdict {doc.get('verdict')!r}")
+    threshold = doc.get("threshold")
+    if not _is_finite(threshold) or not 0 < threshold <= MAX_THRESHOLD:
+        raise _invalid(f"threshold must be finite and in (0, {MAX_THRESHOLD:g}], got {threshold!r}")
+    if doc.get("gated") != list(GATED):
+        raise _invalid(f"gated metrics {doc.get('gated')!r} != {list(GATED)}")
+    for key in ("base_sha", "head", "tools"):
+        if not isinstance(doc.get(key, ""), str):
+            raise _invalid(f"`{key}` must be a string")
+    if not isinstance(doc.get("rows"), list):
+        raise _invalid("`rows` must be a list")
+    benchmarks, configs = _str_list(doc, "benchmarks"), _str_list(doc, "configs")
+    if doc["verdict"] == INVALID:
+        return  # no measurements to validate; the renderer only shows the error.
+    if not benchmarks or not configs:
+        raise _invalid("a pass/regression result needs a non-empty benchmark and config inventory")
+    seen: set[tuple[str, str]] = set()
+    for row in doc["rows"]:
+        if not isinstance(row, dict) or not isinstance(row.get("metrics"), dict):
+            raise _invalid(f"row {row!r} must be an object with `metrics`")
+        key = (row.get("config"), row.get("name"))
+        if not all(isinstance(k, str) for k in key):
+            raise _invalid(f"row {key!r}: `config` and `name` must be strings")
+        if key in seen:
+            raise _invalid(f"duplicate row {key}")
+        seen.add(key)
+        for metric, values in row["metrics"].items():
+            if (
+                not isinstance(values, list)
+                or len(values) != 2  # noqa: PLR2004 - (base, head)
+                or not all(_is_finite(v) for v in values)
+            ):
+                raise _invalid(
+                    f"{key} {metric}: expected [base, head] finite numbers, got {values!r}"
+                )
+        for metric in GATED:
+            values = row["metrics"].get(metric)
+            if values is None or not all(
+                isinstance(v, int) and not isinstance(v, bool) and v > 0 for v in values
+            ):
+                raise _invalid(
+                    f"{key} {metric}: gated counts must be positive integers, got {values!r}"
+                )
+    expected = {(c, b) for c in configs for b in benchmarks}
+    if seen != expected:
+        missing = sorted(expected - seen)
+        extra = sorted(seen - expected, key=str)
+        raise _invalid(f"rows don't match the inventory (missing: {missing}, unexpected: {extra})")
 
 
 def classify(doc: dict, rc: str, base_sha: str) -> tuple[str, str]:  # noqa: PLR0911
@@ -558,12 +647,24 @@ def gate_main(argv: list[str]) -> int:
     parser.add_argument("results", type=Path)
     parser.add_argument("--rc", required=True, help="exit code of `report.py check` / perf-check")
     parser.add_argument("--base-sha", required=True, help="the base commit this run compared")
+    parser.add_argument(
+        "--expected", type=Path, required=True, help="file listing the gated `function/id` names"
+    )
+    parser.add_argument(
+        "--expect-configs", nargs="+", required=True, help="feature configs that must be present"
+    )
     parser.add_argument("--bypassed-by", help="admin who accepted a regression (verified by CI)")
     parser.add_argument("--status", action="store_true", help="only print the status")
     args = parser.parse_args(argv)
     try:
-        status, reason = classify(load_results(args.results), args.rc, args.base_sha)
-    except InvalidResultsError as e:
+        doc = load_results(args.results)
+        status, reason = classify(doc, args.rc, args.base_sha)
+        if status != INVALID:
+            inventory = (sorted(doc["benchmarks"]), sorted(doc["configs"]))
+            wanted = (sorted(read_expected(args.expected)), sorted(args.expect_configs))
+            if inventory != wanted:
+                status, reason = INVALID, f"results inventory {inventory} != expected {wanted}"
+    except (InvalidResultsError, OSError) as e:
         status, reason = INVALID, str(e)
     if args.status:
         print(status)

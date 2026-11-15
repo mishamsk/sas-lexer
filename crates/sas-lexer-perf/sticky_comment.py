@@ -10,8 +10,6 @@ commit) doesn't touch the comment, so it can't replace a newer report with a sta
 Exit codes: 0 posted, updated or skipped as stale; 1 on API or input errors.
 """
 
-from __future__ import annotations
-
 import argparse
 import json
 import os

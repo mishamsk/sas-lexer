@@ -1,7 +1,5 @@
 """Tests for sticky_comment.py with a fake GitHub API (stdlib only)."""
 
-from __future__ import annotations
-
 import contextlib
 import io
 import tempfile

@@ -39,8 +39,8 @@ lint-fix:
 
 # Python lint and format check (CI "ruff"). Only the dev group is synced, so no extension build.
 ruff:
-    uv run --only-group dev ruff check src
-    uv run --only-group dev ruff format --check src
+    uv run --only-group dev ruff check src crates/sas-lexer-perf
+    uv run --only-group dev ruff format --check src crates/sas-lexer-perf
 
 # Unused dependencies, on the pinned nightly (CI "cargo udeps").
 udeps:
@@ -180,6 +180,8 @@ clean: clean-all-caches clean-test
 # gate is tight; an admin can accept an intended regression on a PR (see the README).
 perf_threshold := env("PERF_THRESHOLD", "2")
 perf_image := "sas-lexer-perf:local"
+# Feature configs measured by perf-check and required by perf-gate.
+perf_configs := "default macro_sep"
 
 # Run the Callgrind benchmarks for the working tree, both feature configs. Extra args go to gungraun.
 [positional-arguments]
@@ -202,7 +204,7 @@ perf-check $base="origin/main":
     root="{{ justfile_directory() }}"
     perf="$root/crates/sas-lexer-perf"
     out="$root/target/perf-check"
-    configs=(default macro_sep)
+    configs=({{ perf_configs }})
     # Nothing from the environment (or .env) may filter or reconfigure the gated runs.
     while IFS= read -r var; do unset "$var"; done < <(compgen -e | grep '^GUNGRAUN_' || true)
     # Only the base build below may select the base API adapter (cfg(perf_base)).
@@ -277,7 +279,8 @@ perf-comment *args:
 # CI gate for the last perf-check: only a validated regression for that base is bypassable.
 [positional-arguments]
 perf-gate *args:
-    uv run --no-project crates/sas-lexer-perf/report.py gate target/perf-check/results.json "$@"
+    uv run --no-project crates/sas-lexer-perf/report.py gate target/perf-check/results.json \
+        --expected crates/sas-lexer-perf/benchmarks.txt --expect-configs {{ perf_configs }} "$@"
 
 # Build the Linux image used by the -docker perf recipes (Rust, gungraun-runner and uv at the repo pins).
 [unix]
