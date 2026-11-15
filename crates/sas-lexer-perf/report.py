@@ -542,80 +542,34 @@ def load_results(path: Path) -> dict:
     return doc
 
 
-def _invalid(msg: str) -> InvalidResultsError:
-    return InvalidResultsError(f"malformed results: {msg}")
+def require(ok: object, what: str) -> None:
+    if not ok:
+        raise InvalidResultsError(f"malformed results: {what}")
 
 
-def _is_finite(value: Any) -> bool:
-    return is_number(value) and math.isfinite(value)
-
-
-def _str_list(doc: dict, key: str) -> list[str]:
-    value = doc.get(key)
-    if not isinstance(value, list):
-        raise _invalid(f"`{key}` must be a list")
-    if not all(isinstance(v, str) and v for v in value):
-        raise _invalid(f"`{key}` must be a list of non-empty strings")
-    if len(set(value)) != len(value):
-        raise _invalid(f"`{key}` has duplicates")
-    return value
-
-
-def validate_doc(doc: Any) -> None:  # noqa: PLR0912 - one flat list of schema rules
-    """Check everything the gate and the renderer rely on; InvalidResultsError if not."""
-    if not isinstance(doc, dict):
-        raise _invalid("not a JSON object")
-    if doc.get("version") != RESULTS_VERSION:
-        raise _invalid(f"unsupported results version {doc.get('version')!r}")
-    if doc.get("verdict") not in {PASS, REGRESSION, INVALID}:
-        raise _invalid(f"unknown verdict {doc.get('verdict')!r}")
-    threshold = doc.get("threshold")
-    if not _is_finite(threshold) or not 0 < threshold <= MAX_THRESHOLD:
-        raise _invalid(f"threshold must be finite and in (0, {MAX_THRESHOLD:g}], got {threshold!r}")
-    if doc.get("gated") != list(GATED):
-        raise _invalid(f"gated metrics {doc.get('gated')!r} != {list(GATED)}")
-    for key in ("base_sha", "head", "tools"):
-        if not isinstance(doc.get(key, ""), str):
-            raise _invalid(f"`{key}` must be a string")
-    if not isinstance(doc.get("rows"), list):
-        raise _invalid("`rows` must be a list")
-    benchmarks, configs = _str_list(doc, "benchmarks"), _str_list(doc, "configs")
-    if doc["verdict"] == INVALID:
-        return  # no measurements to validate; the renderer only shows the error.
-    if not benchmarks or not configs:
-        raise _invalid("a pass/regression result needs a non-empty benchmark and config inventory")
-    seen: set[tuple[str, str]] = set()
-    for row in doc["rows"]:
-        if not isinstance(row, dict) or not isinstance(row.get("metrics"), dict):
-            raise _invalid(f"row {row!r} must be an object with `metrics`")
-        key = (row.get("config"), row.get("name"))
-        if not all(isinstance(k, str) for k in key):
-            raise _invalid(f"row {key!r}: `config` and `name` must be strings")
-        if key in seen:
-            raise _invalid(f"duplicate row {key}")
-        seen.add(key)
-        for metric, values in row["metrics"].items():
-            if (
-                not isinstance(values, list)
-                or len(values) != 2  # noqa: PLR2004 - (base, head)
-                or not all(_is_finite(v) for v in values)
-            ):
-                raise _invalid(
-                    f"{key} {metric}: expected [base, head] finite numbers, got {values!r}"
-                )
-        for metric in GATED:
-            values = row["metrics"].get(metric)
-            if values is None or not all(
-                isinstance(v, int) and not isinstance(v, bool) and v > 0 for v in values
-            ):
-                raise _invalid(
-                    f"{key} {metric}: gated counts must be positive integers, got {values!r}"
-                )
-    expected = {(c, b) for c in configs for b in benchmarks}
-    if seen != expected:
-        missing = sorted(expected - seen)
-        extra = sorted(seen - expected, key=str)
-        raise _invalid(f"rows don't match the inventory (missing: {missing}, unexpected: {extra})")
+def validate_doc(doc: Any) -> None:
+    """Raise InvalidResultsError unless the gate and the renderer can rely on `doc`."""
+    try:
+        require(doc["version"] == RESULTS_VERSION, f"unsupported version {doc['version']!r}")
+        require(doc["verdict"] in {PASS, REGRESSION, INVALID}, f"verdict {doc['verdict']!r}")
+        threshold = doc["threshold"]
+        require(is_number(threshold) and 0 < threshold <= MAX_THRESHOLD, "threshold")
+        require(doc["gated"] == list(GATED), "gated metrics")
+        if doc["verdict"] == INVALID:
+            return  # nothing measured; only the error is shown
+        # The rows cover exactly the declared benchmark x config inventory...
+        inventory = sorted((c, b) for c in doc["configs"] for b in doc["benchmarks"])
+        require(inventory, "empty inventory")
+        rows = doc["rows"]
+        require(sorted((r["config"], r["name"]) for r in rows) == inventory, "rows vs inventory")
+        # ...and every gated metric is a pair of positive integer counts.
+        for row in rows:
+            for m in GATED:
+                values = row["metrics"][m]
+                require(len(values) == 2, f"{m} pair")  # noqa: PLR2004 - (base, head)
+                require(all(type(v) is int and v > 0 for v in values), f"{m} counts")
+    except (KeyError, TypeError, AttributeError) as e:
+        raise InvalidResultsError(f"malformed results: {e!r}") from None
 
 
 def classify(doc: dict, rc: str, base_sha: str) -> tuple[str, str]:  # noqa: PLR0911
