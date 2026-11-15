@@ -1,0 +1,4 @@
+# Dated nightly for cargo-udeps and the nightly CI test job; read by the justfile and CI, not applied by rustup.
+[toolchain]
+channel = "nightly-2026-11-04"
+profile = "minimal"
