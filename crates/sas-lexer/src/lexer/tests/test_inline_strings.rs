@@ -4387,6 +4387,39 @@ vec![
     ],
     NO_ERRORS,
 )]
+// Datalines inside a macro definition end only the macro's own statement: after
+// `%mend` the outer `a = 1` is still pending, so the trailing `*` is code
+#[cfg_attr(feature = "macro_sep", case::after_datalines_in_macro_keeps_outer_stat(
+    "a = 1 %macro m; datalines;1; ** comment; %mend; * 2;",
+    vec![
+        ("a", TokenType::Identifier),
+        (" ", TokenType::WS),
+        ("=", TokenType::ASSIGN),
+        (" ", TokenType::WS),
+        ("1", TokenType::IntegerLiteral),
+        (" ", TokenType::WS),
+        ("", TokenType::MacroSep),
+        ("%macro", TokenType::KwmMacro),
+        (" ", TokenType::WS),
+        ("m", TokenType::Identifier),
+        (";", TokenType::SEMI),
+        (" ", TokenType::WS),
+        ("datalines;", TokenType::DatalinesStart),
+        ("1", TokenType::DatalinesData),
+        (";", TokenType::SEMI),
+        (" ", TokenType::WS),
+        ("** comment;", TokenType::PredictedCommentStat),
+        (" ", TokenType::WS),
+        ("%mend", TokenType::KwmMend),
+        (";", TokenType::SEMI),
+        (" ", TokenType::WS),
+        ("*", TokenType::STAR),
+        (" ", TokenType::WS),
+        ("2", TokenType::IntegerLiteral),
+        (";", TokenType::SEMI),
+    ],
+    NO_ERRORS,
+))]
 // Cases of non-comments. Without macro sep feature
 #[cfg_attr(not(feature = "macro_sep"), case::do_end_not_comment("a %do;\n\t* /*c*/ 2 %end;",
     vec![
@@ -4709,47 +4742,6 @@ fn test_comment_prediction(
     #[case] expected_error: Vec<impl ErrorTestCase>,
 ) {
     assert_lexing(contents, expected_token, expected_error);
-}
-
-/// Resetting the pending statement after datalines inside a macro definition must
-/// only affect the macro's own frame: after `%mend` the outer `a = 1` statement is
-/// still pending, so the trailing `*` is multiplication, not a comment.
-#[test]
-fn test_datalines_in_macro_keeps_outer_pending_stat() {
-    let source = "a = 1 %macro m; datalines;1; ** comment; %mend; * 2;";
-
-    let LexResult { buffer, errors, .. } = lex_program(&source).unwrap();
-
-    assert!(errors.is_empty(), "unexpected errors: {errors:?}");
-
-    let tokens: Vec<(&str, TokenType)> = buffer
-        .iter_tokens()
-        .filter(|t| buffer.get_token_channel(*t).expect("wrong token") != TokenChannel::HIDDEN)
-        .map(|t| {
-            (
-                buffer
-                    .get_token_raw_text(t, &source)
-                    .expect("wrong token")
-                    .unwrap_or(""),
-                buffer.get_token_type(t).expect("wrong token"),
-            )
-        })
-        .filter(|(_, tt)| !matches!(tt, TokenType::EOF | TokenType::MacroSep))
-        .collect();
-
-    assert_eq!(
-        tokens.get(tokens.len() - 6..),
-        Some(
-            &[
-                ("** comment;", TokenType::PredictedCommentStat),
-                ("%mend", TokenType::KwmMend),
-                (";", TokenType::SEMI),
-                ("*", TokenType::STAR),
-                ("2", TokenType::IntegerLiteral),
-                (";", TokenType::SEMI),
-            ][..]
-        )
-    );
 }
 
 /// Issue #14 (synthetic equivalent of the reported input): an inline `** ... ;`
