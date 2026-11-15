@@ -11,6 +11,10 @@ license = { workspace = true }
 publish = false
 
 [dependencies]
+# Seeded generator for the synthetic inputs. Pinned exactly so the generated stream (and with
+# it every benchmark input) only changes with a deliberate version bump.
+rand_core = "=0.10.1"
+rand_pcg = "=0.10.2"
 sas-lexer = { workspace = true }
 zip = { workspace = true }
 

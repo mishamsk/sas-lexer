@@ -16,6 +16,8 @@ use std::fs::File;
 use std::io::{self, Read};
 use std::path::Path;
 
+use rand_core::Rng as _;
+use rand_pcg::Pcg64Mcg;
 use zip::ZipArchive;
 
 /// The lexer under test. The `macro_sep` feature of this crate enables the same lexer feature.
@@ -115,27 +117,21 @@ pub fn real_corpus() -> String {
     read_sas_files_from_zip(ENLIGHTEN_ZIP).expect("failed to read the enlighten corpus zip")
 }
 
-/// Small deterministic PRNG (xorshift64*), so inputs never depend on external crates.
-struct Rng(u64);
+/// Fixed-seed generator for the synthetic inputs: PCG `pcg64_fast` from `rand_pcg`, whose
+/// output is documented as deterministic and portable. `rand_pcg` and `rand_core` are pinned
+/// exactly in Cargo.toml, so the stream can't change without a visible version bump (and the
+/// base and head builds always resolve the same versions).
+struct Rng(Pcg64Mcg);
 
 impl Rng {
     fn new(seed: u64) -> Self {
-        Self(seed | 1)
+        Self(Pcg64Mcg::new(u128::from(seed)))
     }
 
-    fn next(&mut self) -> u64 {
-        let mut x = self.0;
-        x ^= x >> 12;
-        x ^= x << 25;
-        x ^= x >> 27;
-        self.0 = x;
-        x.wrapping_mul(0x2545_F491_4F6C_DD1D)
-    }
-
-    /// Uniform-ish value in `0..n`.
+    /// A value in `0..n` (`n` is tiny, so the modulo bias doesn't matter).
     fn below(&mut self, n: usize) -> usize {
-        // n is tiny, modulo bias is irrelevant here.
-        usize::try_from(self.next() % (n as u64)).unwrap_or_default()
+        let n = u64::try_from(n).unwrap_or(u64::MAX);
+        usize::try_from(self.0.next_u64() % n).unwrap_or_default()
     }
 
     fn pick<'a>(&mut self, items: &[&'a str]) -> &'a str {
@@ -319,7 +315,7 @@ pub fn synthetic_numerics() -> String {
             d3 = r.below(100_000),
             m = r.below(9) + 1,
             e = r.below(30),
-            big = 1_000_000_000_u64 + r.next() % 1_000_000_000,
+            big = 1_000_000_000 + r.below(1_000_000_000),
             h = r.below(0xFFFF) + 0xA000,
             n = r.below(20) + 5,
             step = r.below(3) + 1,
@@ -353,6 +349,24 @@ mod tests {
     fn inputs_are_deterministic() {
         assert_eq!(synthetic_macro(), synthetic_macro());
         assert_eq!(synthetic_numerics(), synthetic_numerics());
+    }
+
+    // Pins the generator stream: a rand_pcg/rand_core bump or a generator edit that changes
+    // the inputs fails here, so it is a deliberate, reviewed change (the gate itself still
+    // compares like with like, since base and head both use HEAD's inputs).
+    #[test]
+    fn generator_stream_is_pinned() {
+        let mut rng = Rng::new(0x00C0_FFEE);
+        let first: Vec<usize> = (0..6).map(|_| rng.below(1000)).collect();
+        assert_eq!(first, [206, 632, 165, 188, 64, 206]);
+        let lens = [
+            synthetic_macro().len(),
+            synthetic_strings().len(),
+            synthetic_comments().len(),
+            synthetic_datalines().len(),
+            synthetic_numerics().len(),
+        ];
+        assert_eq!(lens, [131_423, 131_226, 131_463, 131_400, 131_376]);
     }
 
     #[test]
