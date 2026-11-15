@@ -47,7 +47,9 @@ class ReportTest(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
         self.dir = Path(self.tmp.name)
-        (self.dir / "expected.txt").write_text("# comment\n" + "\n".join(EXPECTED) + "\n")
+        (self.dir / "expected.txt").write_text(
+            "# comment\n" + "\n".join(EXPECTED) + "\n", encoding="utf-8"
+        )
         self.base = {c: [base_bench(n) for n in EXPECTED] for c in CONFIGS}
         self.head = {c: [head_bench(n) for n in EXPECTED] for c in CONFIGS}
 
@@ -56,7 +58,7 @@ class ReportTest(unittest.TestCase):
 
     def write(self, name: str, rows: list[dict]) -> Path:
         path = self.dir / name
-        path.write_text("".join(json.dumps(r) + "\n" for r in rows))
+        path.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
         return path
 
     def run_report(
@@ -78,7 +80,7 @@ class ReportTest(unittest.TestCase):
         return code, out.getvalue()
 
     def results(self) -> dict:
-        return json.loads((self.dir / "results.json").read_text())
+        return json.loads((self.dir / "results.json").read_text(encoding="utf-8"))
 
     def assert_invalid(self, configs: list[str] | None = None) -> str:
         code, out = self.run_report(configs=configs)
@@ -291,7 +293,7 @@ class CommentSnapshotTest(unittest.TestCase):
             output = Path(tmp) / "comment.md"
             summary = Path(tmp) / "summary.md"
             doc = fixture_doc(report.REGRESSION)
-            results.write_text(json.dumps(doc))
+            results.write_text(json.dumps(doc), encoding="utf-8")
             with (
                 mock.patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": str(summary)}),
                 contextlib.redirect_stdout(io.StringIO()),
@@ -300,8 +302,8 @@ class CommentSnapshotTest(unittest.TestCase):
                 code = report.main([*argv, "--output", str(output), "--step-summary"])
             self.assertEqual(code, report.EXIT_OK)
             expected = report.render(doc, bypassed_by="mishamsk")
-            self.assertEqual(output.read_text(), expected)
-            self.assertEqual(summary.read_text(), expected)
+            self.assertEqual(output.read_text(encoding="utf-8"), expected)
+            self.assertEqual(summary.read_text(encoding="utf-8"), expected)
 
     def test_comment_without_results_reports_invalid(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -310,7 +312,7 @@ class CommentSnapshotTest(unittest.TestCase):
                 argv = ["comment", str(Path(tmp) / "missing.json"), "--bypassed-by", "mishamsk"]
                 code = report.main([*argv, "--output", str(output)])
             self.assertEqual(code, report.EXIT_OK)
-            markdown = output.read_text()
+            markdown = output.read_text(encoding="utf-8")
             self.assertIn("INVALID", markdown)
             self.assertIn("failed before the comparison", markdown)
             self.assertNotIn("accepted", markdown)
@@ -318,7 +320,7 @@ class CommentSnapshotTest(unittest.TestCase):
     def test_comment_command_rejects_bad_results(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             results = Path(tmp) / "results.json"
-            results.write_text('{"version": 99}')
+            results.write_text('{"version": 99}', encoding="utf-8")
             with contextlib.redirect_stderr(io.StringIO()):
                 self.assertEqual(report.main(["comment", str(results)]), report.EXIT_INVALID)
 

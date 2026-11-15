@@ -27,6 +27,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import math
 import os
@@ -523,4 +524,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    # The markdown has emoji; don't crash on a console that can't encode them (e.g. cp1252).
+    if isinstance(sys.stdout, io.TextIOWrapper):
+        sys.stdout.reconfigure(errors="replace")
     sys.exit(main())
