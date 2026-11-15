@@ -34,7 +34,7 @@ Guidance for agents working in `sas-lexer`. The `justfile` is the command author
 ## Performance Gate
 - CI's `perf check (callgrind)` job compares the base and head lexer by Callgrind instruction counts and estimated cycles, for the default and `macro_sep` configs, and fails when either is 2% or more worse. The only bypass is the `perf-regression-accepted` label applied by a repo admin.
 - Hot-path changes must keep the gate green: fix a regression rather than ask for the label.
-- Locally: `just perf-check <base>` on Linux (needs valgrind and `gungraun-runner`, see the README), or `just perf-docker perf-check <base>` on macOS. Read `target/perf-check/summary.md` for per-benchmark deltas.
+- Locally: `just perf-check <base>` on Linux (needs valgrind and `gungraun-runner`, see the README), or `just perf-docker perf-check <base>` on macOS. Read `target/perf-check/comment.md` for per-benchmark deltas. With `perf-docker`, `target/` is the `sas-lexer-perf-target` Docker volume, so read it there: `docker run --rm -v sas-lexer-perf-target:/t sas-lexer-perf:local cat /t/perf-check/comment.md`.
 - If you change the lexer API used by the benchmarks, adapt only `sas_lexer_perf::api` in `crates/sas-lexer-perf/src/lib.rs`, following its module docs (`#[cfg(perf_base)]` keeps the old call, `#[cfg(not(perf_base))]` the new one; drop the old branch in a follow-up PR).
 
 ## Testing
