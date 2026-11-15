@@ -46,9 +46,11 @@ ruff:
 udeps:
     mise x -- cargo +{{ nightly }} udeps --workspace --all-features --release
 
-# Check declared per-package MSRVs over the feature powerset (CI "Check MSRV").
+# Check declared per-package MSRVs (CI "Check MSRV"): the public crates over the feature
+# powerset, then the private Python binding crate, whose floor PyO3 sets (needs a Python 3.11+).
 msrv:
     mise x -- cargo hack check --feature-powerset --locked --rust-version --ignore-private --workspace --all-targets --skip opti_stats
+    mise x -- cargo hack check --locked --rust-version --package sas-lexer-py --all-targets
 
 # ---------------------------------------------------------------------------
 # Build (extra args are forwarded, e.g. `just build -v`)
@@ -93,11 +95,12 @@ test-rust target="all-targets" *args:
 test-python *args:
     uv run --isolated --no-editable pytest "$@"
 
-# Python tests as run in CI: sync the project non-editable, then pytest.
+# Python tests as run in CI: sync the project non-editable, then pytest against that install
+# (--no-sync, so uv run does not re-sync it as editable).
 [positional-arguments]
 test-python-ci *args:
     uv sync --no-editable --locked
-    uv run pytest "$@"
+    uv run --no-sync pytest "$@"
 
 # All tests: Rust doc/unit/integration, then Python.
 test: test-rust test-python

@@ -3,7 +3,7 @@
 # Rust toolchain: rust-toolchain.toml. Python tools (ruff, ty, pytest): pyproject dev group / uv.lock.
 [tools]
 # Dev Python; must satisfy requires-python and PyO3. CI's test-python matrix overrides it.
-python = "3.12"
+python = "3.15"
 uv = "0.13.8"
 prek = "latest"
 typos = "1.52.2"
