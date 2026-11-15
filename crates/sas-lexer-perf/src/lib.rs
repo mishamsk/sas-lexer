@@ -293,12 +293,19 @@ pub fn synthetic_datalines() -> String {
     })
 }
 
-/// Numeric literals in expressions: integers, decimals, exponents, hex and missing values.
+/// Numeric literals in expressions: integers, decimals, exponents, hex and missing values,
+/// plus nested parenthesized products, which catch work that grows with nesting depth.
 #[must_use]
 pub fn synthetic_numerics() -> String {
     generate(0x5EED_0005, |r, s| {
         let a = r.ident();
         let b = r.ident();
+        let depth = r.below(30) + 10;
+        let mut nested = "(".repeat(depth);
+        nested.push_str(&a);
+        for i in 0..depth {
+            let _ = write!(nested, ") * {}", i + 2);
+        }
         let _ = write!(
             s,
             "data _null_;\n\
@@ -307,6 +314,7 @@ pub fn synthetic_numerics() -> String {
              \x20 if {a} > {d2}.5 and {b} ne . then {a} = ._ ; else {b} = .A;\n\
              \x20 array arr{{{n}}} _temporary_ ({i1} {i2} {d1}.{d3} {m}e{e} -{i2});\n\
              \x20 do k = 1 to {n} by {step}; arr{{k}} = arr{{k}} * {d1}.{d3}; end;\n\
+             \x20 {b} = {nested};\n\
              run;\n",
             i1 = r.below(1_000_000),
             i2 = r.below(10_000),
@@ -366,7 +374,7 @@ mod tests {
             synthetic_datalines().len(),
             synthetic_numerics().len(),
         ];
-        assert_eq!(lens, [131_423, 131_226, 131_463, 131_400, 131_376]);
+        assert_eq!(lens, [131_423, 131_226, 131_463, 131_400, 131_412]);
     }
 
     #[test]
