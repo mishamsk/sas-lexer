@@ -176,7 +176,7 @@ jobs:
       - name: Lint and check formatting with Ruff
         run: just ruff
 
-  # Version checks that gate the Python release and TestPyPI workflows.
+  # Version and changelog tooling used by the release and TestPyPI workflows.
   release-scripts:
     runs-on: ubuntu-latest
     steps:
