@@ -22,6 +22,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - 💥 Python 3.10 support (end of life since 2026-10-01). The minimum supported version is Python 3.11. Breaking change: Python 3.10 environments do not install this or later releases.
 
 ### Fixed
+- 🐛 Fixed a `*` comment statement directly after a `datalines`/`cards`/`lines` block (including the `4` variants) being lexed as code instead of `PredictedCommentStat`, where an apostrophe in the comment started a string literal that swallowed the rest of the program. The bindings build on the `sas-lexer` 1.0.0 crate, which contains the fix. ([#17](https://github.com/mishamsk/sas-lexer/pull/17))
 - 🛠️ The source distribution includes the Python binding crate's `Cargo.toml` and the `Cargo.lock`, so it builds and installs from source.
 
 ### Security
