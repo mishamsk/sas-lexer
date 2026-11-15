@@ -89,7 +89,11 @@ pub fn read_sas_files_from_zip<P: AsRef<Path>>(path: P) -> io::Result<String> {
 
     for i in 0..archive.len() {
         let mut file = archive.by_index(i)?;
-        if Path::new(file.name())
+        // `just perf-check` builds this crate against the base's zip too, and `name()`
+        // changed its signature across zip majors; `name_raw()` did not. The extension
+        // test only looks at ASCII bytes, so lossy decoding selects the same files.
+        let name = String::from_utf8_lossy(file.name_raw());
+        if Path::new(name.as_ref())
             .extension()
             .is_some_and(|ext| ext.eq_ignore_ascii_case("sas"))
         {

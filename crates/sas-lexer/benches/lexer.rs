@@ -13,7 +13,7 @@ fn read_sas_files_from_zip<P: AsRef<Path>>(path: P) -> io::Result<String> {
 
     for i in 0..archive.len() {
         let mut file = archive.by_index(i)?;
-        if file.name().ends_with(".sas") {
+        if file.name()?.ends_with(".sas") {
             let mut contents = Vec::new();
             file.read_to_end(&mut contents)?;
             if let Ok(contents) = String::from_utf8(contents) {

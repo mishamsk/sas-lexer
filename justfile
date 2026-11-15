@@ -48,8 +48,10 @@ udeps:
 
 # Check declared per-package MSRVs (CI "Check MSRV"): the public crates over the feature
 # powerset, then the private Python binding crate, whose floor PyO3 sets (needs a Python 3.11+).
+# The public crates' MSRV covers what consumers build (lib + build script), not their tests and
+# benches: dev-dependencies such as zip need a newer Rust than the published floor.
 msrv:
-    mise x -- cargo hack check --feature-powerset --locked --rust-version --ignore-private --workspace --all-targets --skip opti_stats
+    mise x -- cargo hack check --feature-powerset --locked --rust-version --ignore-private --workspace --skip opti_stats
     mise x -- cargo hack check --locked --rust-version --package sas-lexer-py --all-targets
 
 # ---------------------------------------------------------------------------
