@@ -30,9 +30,9 @@ dependencies = ["msgspec>=0.18.0"]
 
 [dependency-groups]
 dev = [
-    "prek>=0.2.25,<0.3",
     "py-anycase>=0.1.0,<0.2",
     "pytest>=9.0.2,<9.1",
+    "ruff>=0.17.5,<0.18",
     "ty>=0.0.8",
     "uv>=0.9.18,<0.10",
 ]

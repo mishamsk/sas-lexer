@@ -7,9 +7,9 @@ set default-list
 # Loads .env (if present) for SAS_LEX_SAMPLES, PERF_LARGE_SAMPLE, etc.
 set dotenv-load
 
-# CLI tools (ruff, maturin, typos, cargo-hack, cargo-udeps, hyperfine) are
-# pinned in mise.toml and run via `mise x --`. Python dev tools (prek, pytest) come from
-# uv.lock via `uv run`, so the cargo hooks see the project venv Python.
+# Non-Python CLI tools (prek, typos, cargo-hack, cargo-udeps, hyperfine) and uv are pinned in
+# mise.toml and run via `mise x --`. Python tools (ruff, ty, pytest) come from the pyproject dev
+# group / uv.lock and run via `uv run`.
 
 # Dated nightly used for udeps and the nightly test job. Keep in sync with CI.
 nightly := "nightly-2025-12-30"
@@ -30,17 +30,17 @@ clippy:
 
 # Run all linters: pre-commit hooks (via prek) and typos.
 lint:
-    uv run prek run --all-files
+    mise x -- prek run --all-files
     mise x -- typos
 
 # Run lint auto-fixes (clippy --fix).
 lint-fix:
     cargo clippy --fix --allow-dirty --allow-staged --workspace --all-features --locked -- -D warnings
 
-# Python lint and format check (CI "ruff").
+# Python lint and format check (CI "ruff"). Only the dev group is synced, so no extension build.
 ruff:
-    mise x -- ruff check src
-    mise x -- ruff format --check src
+    uv run --only-group dev ruff check src
+    uv run --only-group dev ruff format --check src
 
 # Unused dependencies, on the pinned nightly (CI "cargo udeps").
 udeps:
@@ -51,7 +51,7 @@ msrv:
     mise x -- cargo hack check --feature-powerset --locked --rust-version --ignore-private --workspace --all-targets --skip opti_stats
 
 # ---------------------------------------------------------------------------
-# Build (extra args are forwarded as "$@", e.g. `just build -v`)
+# Build (extra args are forwarded, e.g. `just build -v`)
 # ---------------------------------------------------------------------------
 
 # Debug build of the default workspace members.
@@ -72,10 +72,10 @@ build-rel *args:
 build-stats-polars *args:
     cargo build -r --features polars --package sas-lexer-cli --target-dir target/with_polars "$@"
 
-# Build and install the python extension into the current venv.
+# Rebuild and install the python extension into the project venv (release profile, see [tool.maturin]).
 [positional-arguments]
 build-dev *args:
-    mise x -- maturin develop --uv -r "$@"
+    uv sync --locked --reinstall-package sas-lexer "$@"
 
 # ---------------------------------------------------------------------------
 # Tests (extra args are forwarded to cargo test / pytest)
@@ -126,7 +126,7 @@ py-init:
     uv venv --python python
     test -f .env || cp .env.sample .env
     just py-sync
-    uv run prek install
+    mise x -- prek install
     echo Done
 
 # DESTRUCTIVE: remove caches and .venv, then recreate the environment (asks for confirmation).

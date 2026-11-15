@@ -151,7 +151,7 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: just
-      # ruff is pinned in mise.toml.
+      # uv is pinned in mise.toml; ruff comes from the pyproject dev group.
       - uses: jdx/mise-action@v5
       - name: Lint and check formatting with Ruff
         run: just ruff
@@ -176,10 +176,10 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Install Rust
         uses: ./.github/actions/setup-rust
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
       - uses: taiki-e/install-action@v2
         with:
           tool: just
+      # uv is pinned in mise.toml.
+      - uses: jdx/mise-action@v5
       - name: Sync, build project & run tests
         run: just test-python-ci

@@ -1,8 +1,9 @@
-# CLI tools used by the justfile recipes (locally and in CI).
-# The Rust toolchain is pinned in rust-toolchain.toml; Python deps in uv.lock.
+# Non-Python CLI tools used by the justfile recipes (locally and in CI), plus uv.
+# just and mise themselves are prerequisites and are not pinned here.
+# Rust toolchain: rust-toolchain.toml. Python tools (ruff, ty, pytest): pyproject dev group / uv.lock.
 [tools]
-ruff = "0.17.5"
-maturin = "1.16.0"
+uv = "0.9.20"
+prek = "latest"
 typos = "1.52.2"
 hyperfine = "2.0.0"
 "github:taiki-e/cargo-hack" = "0.6.46"

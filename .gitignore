@@ -65,6 +65,9 @@ ipython_config.py
 # pyenv
 .python-version
 
+# mise (personal overrides, e.g. a local Python)
+mise.local.toml
+
 # asdf
 .tool-versions
 
