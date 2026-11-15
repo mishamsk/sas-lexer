@@ -102,5 +102,4 @@ jobs:
         with:
           body: ${{ steps.changelog_reader.outputs.changes }}
           files: wheels/*
-          draft: true
           prerelease: ${{ steps.changelog_reader.outputs.status == 'prereleased' }}

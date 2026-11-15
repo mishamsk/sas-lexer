@@ -82,5 +82,4 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           body: ${{ steps.changelog_reader.outputs.changes }}
-          draft: true
           prerelease: ${{ steps.changelog_reader.outputs.status == 'prereleased' }}
