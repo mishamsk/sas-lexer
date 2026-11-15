@@ -53,9 +53,6 @@ exclude = [
 ]
 
 [tool.uv]
-# mise.toml pins the exact uv. This floor only stops an older uv (e.g. one outside mise) from
-# working on the project.
-required-version = ">=0.13.8"
 # Replaces uv's defaults, so pyproject.toml is listed explicitly. Everything that goes into the
 # extension build or the installed package must be here, otherwise a non-editable `uv sync`
 # reuses a stale cached wheel. The ONLY packaged files left out are the three that build.rs

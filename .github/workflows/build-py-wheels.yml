@@ -33,11 +33,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      # The sdist does not link against Python, so the mise.toml dev Python is fine.
+      - uses: jdx/mise-action@v5
         with:
-          # Use Python static 3.11 to build the sdist, since
-          # we are not linking against Python.
-          python-version: "3.11"
+          install_args: python
       - name: "Build sdist"
         uses: PyO3/maturin-action@v1
         with:
@@ -67,12 +66,17 @@ jobs:
           - runner: macos-15
             target: aarch64
         python-version: ${{ fromJSON(needs.define-py-matrix.outputs.py-matrix) }}
+    # Build and test with the matrix Python, not the mise.toml dev pin.
+    env:
+      MISE_PYTHON_VERSION: ${{ matrix.python-version }}
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      # The matrix Python (MISE_PYTHON_VERSION overrides the mise.toml pin) for the build and
+      # the wheel smoke test.
+      - uses: jdx/mise-action@v5
         with:
-          python-version: ${{ matrix.python-version }}
-          architecture: ${{ matrix.platform.target == 'x86_64' && 'x64' || 'arm64' }}
+          install_args: python
+          cache_key: "{{default}}-py${{ matrix.python-version }}"
       - name: "Build wheels"
         uses: PyO3/maturin-action@v1
         with:
@@ -103,12 +107,17 @@ jobs:
           # - target: i686-pc-windows-msvc
           #   arch: x86
         python-version: ${{ fromJSON(needs.define-py-matrix.outputs.py-matrix) }}
+    # Build and test with the matrix Python, not the mise.toml dev pin.
+    env:
+      MISE_PYTHON_VERSION: ${{ matrix.python-version }}
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      # The matrix Python (MISE_PYTHON_VERSION overrides the mise.toml pin) for the build and
+      # the wheel smoke test.
+      - uses: jdx/mise-action@v5
         with:
-          python-version: ${{ matrix.python-version }}
-          architecture: ${{ matrix.platform.arch }}
+          install_args: python
+          cache_key: "{{default}}-py${{ matrix.python-version }}"
       - name: "Build wheels"
         uses: PyO3/maturin-action@v1
         with:
@@ -119,7 +128,7 @@ jobs:
         shell: bash
         run: |
           set -e
-          python3 -m venv .venv
+          python -m venv .venv
           source .venv/Scripts/activate
           pip install ${{ env.PACKAGE_NAME }} --find-links dist --force-reinstall
           python -c "import ${{ env.MODULE_NAME }}; print(${{ env.MODULE_NAME }}.__version__)"
@@ -138,12 +147,17 @@ jobs:
         python-version: ${{ fromJSON(needs.define-py-matrix.outputs.py-matrix) }}
         target:
           - x86_64-unknown-linux-gnu
+    # Build and test with the matrix Python, not the mise.toml dev pin.
+    env:
+      MISE_PYTHON_VERSION: ${{ matrix.python-version }}
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      # The matrix Python (MISE_PYTHON_VERSION overrides the mise.toml pin) for the build and
+      # the wheel smoke test.
+      - uses: jdx/mise-action@v5
         with:
-          python-version: ${{ matrix.python-version }}
-          architecture: x64
+          install_args: python
+          cache_key: "{{default}}-py${{ matrix.python-version }}"
       - name: "Build wheels"
         uses: PyO3/maturin-action@v1
         with:
@@ -180,11 +194,9 @@ jobs:
         target:
           - x86_64-unknown-linux-musl
     steps:
+      # No host Python: the build runs in maturin-action's musllinux container and the smoke
+      # test in Alpine.
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: ${{ matrix.python.version }}
-          architecture: x64
       - name: "Build wheels"
         uses: PyO3/maturin-action@v1
         with:

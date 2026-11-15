@@ -40,16 +40,15 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
-      # The runner's default Python (3.14) is newer than PyO3 0.22 supports.
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
       - name: Install Rust
         uses: ./.github/actions/setup-rust
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@v2
         with:
           tool: just
+      # The dev Python (the runner default is newer than PyO3 0.22 supports) is pinned in
+      # mise.toml.
+      - uses: jdx/mise-action@v5
       - name: "Clippy"
         run: just clippy
 
