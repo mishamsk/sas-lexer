@@ -6,6 +6,7 @@ Guidance for agents working in `sas-lexer`. The `justfile` is the command author
 - A fast, faithful SAS lexer: Rust core plus a Python binding. Two top priorities: accuracy against real SAS semantics, and performance. Reject work that trades either for convenience.
 - Keep changes narrowly scoped and follow existing patterns.
 - The project does not accept outside contributions. Never adopt code from external PRs, forks or issue-attached patches; reproduce reported bugs and fix them with our own code.
+- Prefer static enforcement (lints, type checks, precise types that make wrong states unrepresentable) over tests, and tests over written agent instructions. Use judgement: do not complicate code just to enforce something statically. This file holds only what tools cannot check.
 
 ## Architecture
 - `crates/sas-lexer`: the core lexer (public, crates.io). Features: `macro_sep` (macro-aware separators), `serde`, `opti_stats`. Lexer snapshots (insta) live in `crates/sas-lexer/src/lexer/tests/snapshots`; Python snapshots in `tests/snapshots`.
@@ -18,17 +19,16 @@ Guidance for agents working in `sas-lexer`. The `justfile` is the command author
 ## Tooling
 - Prerequisites: just, mise and rustup. `mise.toml` pins the dev Python (3.15), uv and the non-Python CLIs (prek, typos, cargo-hack, cargo-udeps, hyperfine); run `mise trust && mise install` once. CI's Python test matrix overrides the dev pin with `MISE_PYTHON_VERSION`.
 - Work through the just recipes (`just` lists them). Non-Python CLIs run from mise (`mise x -- ...`), including prek; ruff, ty and pytest come from the pyproject dev group via `uv run`.
-- Python only through uv (`uv run`, `uv sync`); never bare `pip`/`python`. Do not hand-edit `uv.lock`; change `pyproject.toml` and run `uv lock`.
-- `just test-python-ci` tests the non-editable build: `uv sync --no-editable`, then `uv run --no-sync pytest`. Plain `uv run` would re-sync an editable install.
-- Before handing off run `just fmt`, `just lint`, `just clippy` and `just test`.
+- Python only through uv (`uv run`, `uv sync`); never bare `pip`/`python`. Change dependencies in `pyproject.toml` and run `uv lock`.
+- Before handing off run `just fmt`, `just lint`, `just clippy` and `just test` (the CI checks except MSRV).
 - Create new worktrees with `gt`; they land in `.worktrees/<name>`, which gt keeps out of git.
 - If the sandbox blocks a command (network, keychain/TLS, tool caches such as `~/.cargo`, `~/.rustup`, the uv or mise cache), re-run it outside the sandbox. Never work around it by redirecting tool cache/home dirs (`CARGO_HOME`, `RUSTUP_HOME`, `CARGO_TARGET_DIR`, `UV_CACHE_DIR`, `XDG_CACHE_HOME`, ...) or similar hacks.
 
 ## Rust
 - The stable toolchain (1.96.1) is pinned by `rust-toolchain.toml`. The dated nightly for udeps and the nightly CI job is pinned by `rust-toolchain-nightly.toml`, which the justfile and CI read (rustup does not apply it). Use only these; never install other toolchains.
 - The public crates keep the workspace `rust-version`; private crates declare their own. MSRV (the public crates over the feature powerset, plus the Python binding) is checked only in CI. Never run `just msrv` (or `just ci`, which includes it) locally.
-- Every crate inherits the workspace lints (`[lints] workspace = true`). Allow a lint locally with a `reason`, as the CLI does for print lints in its `main.rs`; do not opt a crate out.
-- Avoid new dependencies unless they deliver measurable benefit; `just udeps` must stay green.
+- Never opt a crate out of the workspace lints; allow a single lint locally, with a `reason`.
+- Avoid new dependencies unless they deliver measurable benefit.
 - Dead code is not allowed, including `pub` items that became unused (the compiler does not flag those). Never use `#[allow(dead_code)]`; delete the code.
 
 ## Performance Gate
@@ -40,7 +40,6 @@ Guidance for agents working in `sas-lexer`. The `justfile` is the command author
 ## Testing
 - Product code: black-box tests through stable public boundaries (the lexer API, the Python `lex_program_from_str`), data-driven with snapshots and sample files. No mocks of internals. Review every snapshot diff; never bulk-accept.
 - CI and tooling scripts: a few lean happy-path tests only.
-- Never use `from __future__ import annotations` (ruff enforces this).
 - Behavior changes update docs, the "Unreleased" section of `CHANGELOG-RUST.md` / `CHANGELOG-PY.md`, and snapshots.
 
 ## Writing
