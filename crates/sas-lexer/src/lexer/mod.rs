@@ -277,15 +277,22 @@ impl Lexer<'_> {
         }
     }
 
+    // Hot path: called for nearly every token. The empty-stack recovery lives in the
+    // out-of-line `#[cold]` `recover_empty_mode_stack`.
     fn mode(&mut self) -> LexerMode {
         match self.mode_stack.last() {
             Some(mode) => mode.clone(),
-            None => {
-                self.emit_error(ErrorKind::InternalErrorEmptyModeStack);
-                self.push_mode(LexerMode::default());
-                LexerMode::default()
-            }
+            None => self.recover_empty_mode_stack(),
         }
+    }
+
+    /// Never expected: the mode stack always holds at least the initial mode.
+    #[cold]
+    #[inline(never)]
+    fn recover_empty_mode_stack(&mut self) -> LexerMode {
+        self.emit_error(ErrorKind::InternalErrorEmptyModeStack);
+        self.push_mode(LexerMode::default());
+        LexerMode::default()
     }
 
     // Pending stat stack manipulation
