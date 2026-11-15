@@ -95,11 +95,12 @@ test-rust target="all-targets" *args:
 test-python *args:
     uv run --isolated --no-editable pytest "$@"
 
-# Python tests as run in CI: sync the project non-editable, then pytest.
+# Python tests as run in CI: sync the project non-editable, then pytest against that install
+# (--no-sync, so uv run does not re-sync it as editable).
 [positional-arguments]
 test-python-ci *args:
     uv sync --no-editable --locked
-    uv run pytest "$@"
+    uv run --no-sync pytest "$@"
 
 # All tests: Rust doc/unit/integration, then Python.
 test: test-rust test-python
