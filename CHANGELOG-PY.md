@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - 🛠️ Support for Python 3.13, 3.14 and 3.15. Wheels are built for CPython 3.11–3.15 on all supported platforms.
 
 ### Changed
+- 🎉 First stable release: the public API follows Semantic Versioning, so breaking changes only ship in a new major version.
 - 🛠️ Python bindings upgraded to PyO3 0.30 and maturin 1.16.
 - 🛠️ The minimum msgspec version depends on the Python version (0.18.0 on 3.11, 0.18.3 on 3.12, 0.19.0 on 3.13, 0.20.0 on 3.14, 0.22.0 on 3.15): the first release with wheels for that Python.
 
